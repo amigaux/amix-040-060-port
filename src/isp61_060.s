@@ -14,6 +14,23 @@
 | PC advance is computed rather than constant.  Everything outside the set declines exactly as
 | before.
 |
+| 2026-08-29.  A third census, over the wider guest corpus (globals, indexed arrays, and
+| -fomit-frame-pointer stack locals -- the m68k-cbm-sysv4-gcc -O2 -m68040 disassembly is
+| recorded in docs/ISP-VECTOR61-LANDED-260806.md), closes the remaining reachable source modes:
+|     (xxx).L        4c39 ...           every global/static operand in non-PIC code
+|     (d8,An,Xn)     4c30 ... <brief>   every variable-index array element (brief format only)
+|     (d16,A7)       4c2f 2401 000c     a frame local when A6 is not the frame pointer
+| The compiler emits the first two directly.  (d16,A7) is the (d16,An) mode naming A7 as base;
+| A7 is the user stack pointer, which is NOT in the 60-byte save block, so its value is read
+| from the USP register -- still live because the trap came from user mode and this unit has not
+| touched USP -- with a single `move %usp,An`.  That read cannot fault and pushes nothing, so
+| the transactional rule holds WITHOUT a helper call (an earlier draft used a bsr into a
+| subroutine, which would push a return address onto the supervisor stack inside the scratch
+| window -- avoided here).  64-bit DIVIDE stays declined: the compiler routes long-long division
+| through __udivdi3/__divdi3 and never emits the hardware form (the cross libgcc.a scans clean),
+| so there is nothing to emulate.  Full-format index words and address-register indices are
+| outside the measured set and decline, counted.
+|
 | WHY THIS EXISTS, AND WHY IT IS THIS SMALL.  On real 68060 hardware the guest's gcc dies
 | instantly and the console names the mechanism itself:
 |     SIGKILL sent to pid 263 (.../2.7.2.3/cpp ...) because of vector 0xF4, pc=0x80006ED6
@@ -139,9 +156,13 @@ isp61_vec:
 |     wolf3d    98 x #imm32,  20 x (d16,An),  1 x Dn,  0 divides, no other mode
 |     cpp/cc1  103 x #imm32   (F2's census, 2026-08-06)
 | (An) is accepted as well because it is (d16,An) with the displacement left out -- literally
-| the same path, no new failure mode.  Everything else still declines, counted: modes 3 and 4
-| would have to write An back (a second commit, breaking the transactional rule), and mode 6
-| and 7/0..7/3 need the brief/full extension-word decoder.  Zero measured sites for any.
+| the same path, no new failure mode.  Modes 3 and 4 ((An)+, -(An)) still decline, counted:
+| they would have to write An back, a second commit that breaks the transactional rule.  The
+| 2026-08-29 pass then added (xxx).L (7/1), (d8,An,Xn) brief-indexed (6/n) and (d16,A7): the
+| brief decoder reads the index register and scale straight from the saved block and needs no
+| writeback, and A7 as a base is taken from the live USP.  Still declined, counted: full-format
+| index words (bit 8 set), an address-register index, (d16,PC)/(d8,PC,Xn) (7/2, 7/3), (xxx).W
+| (7/0) and the entire divide group.
 |
 | The length of the encoding now VARIES, so the PC advance can no longer be a constant.  d2
 | carries it to the commit and must stay a CALLEE-SAVED register: the memory path calls copyin
@@ -158,6 +179,8 @@ isp61_vec:
 	andil	&0x3f,%d0		| d0 = mode<<3 | reg
 	cmpil	&0x3c,%d0
 	beqw	Lisp_ea_imm		| 7/4  #imm32
+	cmpil	&0x39,%d0
+	beqw	Lisp_ea_abs		| 7/1  (xxx).L absolute
 	cmpil	&0x08,%d0
 	bltw	Lisp_ea_dn		| 0/n  Dn
 	cmpil	&0x10,%d0
@@ -167,8 +190,10 @@ isp61_vec:
 	cmpil	&0x28,%d0
 	bltw	Lisp_unsup		| 3/n (An)+ and 4/n -(An) mutate An
 	cmpil	&0x30,%d0
-	bltw	Lisp_ea_d16an		| 5/n  (d16,An)
-	braw	Lisp_unsup		| 6/n and 7/0..7/3
+	bltw	Lisp_ea_d16an		| 5/n  (d16,An), including (d16,A7)
+	cmpil	&0x38,%d0
+	bltw	Lisp_ea_brief		| 6/n  (d8,An,Xn) brief format
+	braw	Lisp_unsup		| 7/0 (xxx).W, 7/2 (d16,PC), 7/3 (d8,PC,Xn), 7/5..7
 
 Lisp_ea_dn:				| source is a data register: no memory access at all
 	lsll	&2,%d0			| mode 0, so d0 is already just the register number
@@ -180,27 +205,87 @@ Lisp_ea_dn:				| source is a data register: no memory access at all
 Lisp_ea_an:				| (An)
 	andil	&7,%d0
 	cmpil	&7,%d0
-	beqw	Lisp_unsup		| A7 on a user-origin trap is the USP, and the USP is
-					| NOT in the 60-byte block -- a6+60 is the stacked SR,
-					| so indexing it would read the wrong long and commit
-					| a product computed from the SR.  Zero measured sites;
-					| decline rather than approximate.
+	beqw	Lisp_unsup		| bare (A7): the (d16,A7) path below reads the USP, so
+					| A7 is no longer unreadable -- but a plain (A7) source
+					| has zero measured sites and is structurally implausible
+					| (top-of-stack as a multiplicand), so it stays declined
+					| and counted rather than widening past the corpus.
 	lsll	&2,%d0
 	movel	%a6@(32,%d0:l),%d1	| d1 = user An  (block: D0-D7 at +0, A0-A6 at +32)
 	moveq	&4,%d2
 	braw	Lisp_ea_mem
 
-Lisp_ea_d16an:				| (d16,An) -- the form wolf3d dies on
+Lisp_ea_d16an:				| (d16,An) -- the form wolf3d dies on, now incl (d16,A7)
 	andil	&7,%d0
 	cmpil	&7,%d0
-	beqw	Lisp_unsup		| (d16,A7): same reason as (A7)
+	bnew	Lisp_d16_base		| An, n != 7: read the base from the saved A-reg block
+	movel	%usp,%a1		| (d16,A7): A7 is the user SP -- NOT in the 60-byte block,
+	movel	%a1,%d1			| but the USP register still holds it (the trap came from
+	addql	&1,isp61_a7_n		| user mode and this unit has not touched USP).  A single
+	braw	Lisp_d16_disp		| `move %usp,An`: it cannot fault and pushes nothing, so
+Lisp_d16_base:				| the transactional rule holds without a helper call.
 	lsll	&2,%d0
 	movel	%a6@(32,%d0:l),%d1	| d1 = user An
+Lisp_d16_disp:
 	movew	%a5@(4),%d0		| the displacement is SIGNED and must be sign-
 	extl	%d0			| extended -- unlike every register index above,
 	addl	%d0,%d1			| which must be zero-extended.  Both appear in this
 	moveq	&6,%d2			| routine and they are not interchangeable.
-					| fall through
+	braw	Lisp_ea_mem
+
+| ---- 7/1  (xxx).L: the source is at a 32-bit absolute address, itself the two extension
+| words that follow the multiply's own extension word.  Non-PIC globals and statics land here;
+| under -fpic the same operand becomes a GOT load and arrives as (An)/(d16,An) instead.  The
+| 8-byte instruction fetch already holds the whole address (opword+ext = 4 bytes, address = 4),
+| so no second instruction-word fetch is needed.
+Lisp_ea_abs:
+	movel	%a5@(4),%d1		| d1 = the 32-bit absolute effective address
+	moveq	&8,%d2			| opword(2) + ext(2) + address(4)
+	addql	&1,isp61_abs_n
+	braw	Lisp_ea_mem
+
+| ---- 6/n  (d8,An,Xn) brief format: variable-index array elements.  The brief extension word
+| at %a5@(4) is  D/A(15) reg(14-12) W/L(11) scale(10-9) 0(8) disp8(7-0).  The base An and the
+| index register both come from the saved block (or the USP for A7), so nothing is written back.
+| FULL format (bit 8 set: base/index suppression, memory indirection, 16/32-bit displacement)
+| and an address-register index are outside the measured set and decline, counted.
+Lisp_ea_brief:
+	andil	&7,%d0			| base An number
+	cmpil	&7,%d0
+	bnew	Lisp_brief_base		| base An, n != 7
+	movel	%usp,%a1		| base A7: the USP, read inline as in (d16,A7)
+	movel	%a1,%d1
+	addql	&1,isp61_a7_n
+	braw	Lisp_brief_ext
+Lisp_brief_base:
+	lsll	&2,%d0
+	movel	%a6@(32,%d0:l),%d1	| d1 = base An
+Lisp_brief_ext:
+	movew	%a5@(4),%d3		| d3 = brief extension word (upper half of d3 is 0 here)
+	btst	&8,%d3
+	bnew	Lisp_unsup		| bit 8 set = FULL format -- not decoded, decline
+	btst	&15,%d3
+	bnew	Lisp_unsup		| D/A = 1 = address-register index -- outside the set
+	movew	%d3,%d0
+	rolw	&4,%d0			| bits 15-12 -> bits 3-0 (shift immediates are 1..8)
+	andil	&7,%d0			| d0 = index Dn number (D/A known 0)
+	lsll	&2,%d0
+	movel	%a6@(0,%d0:l),%d4	| d4 = index Dn value (full 32 bits)
+	btst	&11,%d3			| W/L: 1 = long index, 0 = sign-extended word index
+	bnew	Lisp_brief_scaled
+	extl	%d4			| word index: sign-extend the low 16 bits
+Lisp_brief_scaled:
+	movew	%d3,%d0
+	rolw	&7,%d0			| scale bits 10-9 -> bits 1-0 (bit9->bit0, bit10->bit1)
+	andil	&3,%d0			| d0 = scale exponent (0..3 for *1,*2,*4,*8)
+	lsll	%d0,%d4			| d4 = index << scale exponent
+	addl	%d4,%d1			| EA += scaled index
+	movew	%d3,%d0
+	extbl	%d0			| the 8-bit displacement is SIGNED
+	addl	%d0,%d1			| EA += disp8
+	moveq	&6,%d2			| opword(2) + ext(2) + brief(2)
+	addql	&1,isp61_index_n
+	braw	Lisp_ea_mem
 
 Lisp_ea_mem:				| read the 4-byte source operand from USER space
 	pea	4			| count
@@ -376,4 +461,17 @@ isp61_mem_n:
 	.globl	isp61_opfetch_fail_n
 isp61_opfetch_fail_n:
 	.long	0			| the 4-byte source-operand copyin failed
+| Appended 2026-08-29 with the (xxx).L / (d8,An,Xn) / (d16,A7) decode.  Same rule: new longs at
+| the END so every published offset for the block above is preserved.  Each names a mode so a
+| passing wolf3d/ea test proves the NEW path RAN and did not fall back to an older one.
+	.globl	isp61_abs_n
+isp61_abs_n:
+	.long	0			| source was (xxx).L absolute (7/1)
+	.globl	isp61_index_n
+isp61_index_n:
+	.long	0			| source was (d8,An,Xn) brief-format indexed (6/n)
+	.globl	isp61_a7_n
+isp61_a7_n:
+	.long	0			| an A7 base was resolved through the live USP register,
+					| i.e. (d16,A7) or (d8,A7,Xn) -- the saved-USP path ran
 	.balign	4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

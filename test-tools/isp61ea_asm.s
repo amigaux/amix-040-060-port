@@ -102,6 +102,70 @@ ea_postinc:
 	.word	0x4c18,0x0c01			| mulsl %a0@+,%d1:%d0   <- expected: SIGKILL
 	braw	Lea_store
 
+| ================= 2026-08-29: the three remaining reachable source modes =================
+| (xxx).L absolute (7/1), (d8,An,Xn) brief-indexed (6/n) and (d16,A7).  Same discipline as
+| above: every operand sits at the EXACT effective address, and the slots a wrong EA would hit
+| instead are poisoned with 0xdeadbeef -- so a mis-decoded index, scale, displacement or base
+| comes back as a WRONG PRODUCT, never as a plausible one and never as a bare fault.
+
+	.data
+	.balign	4
+ea_abs_lo:	.long	0xdeadbeef		| the longs bracketing the (xxx).L slot: an
+ea_abs_slot:	.long	0			| absolute address off by one long reads poison
+ea_abs_hi:	.long	0xdeadbeef
+
+	.text
+| ---- 7/1  (xxx).L absolute, opword 0x4c39, 8 bytes.  gcc emits this for every non-PIC global
+| or static operand.  The 32-bit address is the two words after the multiply's extension word.
+	.globl	ea_abs
+ea_abs:
+	link	%a6,#0
+	movel	%a6@(12),%d0			| b
+	movel	%d0,ea_abs_slot			| store b into the absolute slot
+	movel	%a6@(8),%d0			| Dl = a
+	.word	0x4c39,0x0401			| mulul ea_abs_slot,%d1:%d0  (unsigned)
+	.long	ea_abs_slot			| the absolute effective address
+	braw	Lea_store
+
+| ---- 6/n  (d8,An,Xn) brief format, opword 0x4c30 for A0, 6 bytes.  gcc emits this for every
+| variable-index array element.  b is placed at exactly A0 + d2.l*4 + 4; the rest of the buffer
+| is poison, so a wrong index register, scale or displacement returns 0xdeadbeef-derived garbage.
+	.globl	ea_index
+ea_index:
+	link	%a6,#-32
+	movel	%d2,%sp@-			| d2 is callee-saved and is the index register here
+	leal	%a6@(-32),%a0			| a0 = base of the poisoned buffer
+	movel	#0xdeadbeef,%d0
+	movel	%d0,%a0@(0)
+	movel	%d0,%a0@(4)
+	movel	%d0,%a0@(8)
+	movel	%d0,%a0@(12)
+	movel	%d0,%a0@(16)
+	movel	%d0,%a0@(20)
+	movel	%a6@(12),%d0			| b
+	movel	%d0,%a0@(12)			| EA = A0 + (2 * 4) + 4 = A0 + 12
+	moveq	#2,%d2				| index register d2 = 2
+	movel	%a6@(8),%d0			| Dl = a
+	.word	0x4c30,0x0c01,0x2c04		| mulsl (4,%a0,%d2.l*4),%d1:%d0  (signed)
+	movel	%sp@+,%d2
+	braw	Lea_store
+
+| ---- 5/7  (d16,A7), opword 0x4c2f, 6 bytes.  A7 is the user stack pointer, which the kernel
+| does NOT save in its 60-byte register block, so the unit must read it from the live USP.  b is
+| pushed so it lands at (0,%sp); out is captured through the shifted arg offsets.  No frame is
+| used -- a link register would move A7 and defeat the point.
+	.globl	ea_d16a7
+ea_d16a7:
+	movel	%sp@(8),%d0			| b (arg1), sp-relative, before the push
+	movel	%d0,%sp@-			| push b: it now sits at (0,%sp)
+	movel	%sp@(8),%d0			| Dl = a (arg0, at sp@(8) after the 4-byte push)
+	.word	0x4c2f,0x0401,0x0000		| mulul (0,%a7),%d1:%d0  (unsigned)
+	moveal	%sp@(16),%a1			| out (arg2, at sp@(16) after the push)
+	movel	%d1,%a1@			| out[0] = Dh
+	movel	%d0,%a1@(4)			| out[1] = Dl
+	addql	#4,%sp				| pop b
+	rts
+
 Lea_store:
 	moveal	%a6@(16),%a1
 	movel	%d1,%a1@			| out[0] = Dh = product bits 63-32

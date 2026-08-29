@@ -3,9 +3,12 @@
  *
  * WHY.  F2's vector-61 unit accepted one encoding, mulsl/mulul #imm32,Dh:Dl.  wolf3d died on
  * real hardware at a muls.l whose source is (12,%a6) -- the kernel named it itself through
- * isp61_last_insn.  isp61_060.s now accepts #imm32, (d16,An), (An) and Dn.  This checks all
- * four against products computed independently, and checks that a mode OUTSIDE the set still
- * declines rather than inventing an answer.
+ * isp61_last_insn.  isp61_060.s now accepts #imm32, (d16,An), (An), Dn and (2026-08-29) the
+ * (xxx).L absolute, (d8,An,Xn) brief-indexed and (d16,A7) forms.  This checks all seven against
+ * products computed independently, and checks that a mode OUTSIDE the set still declines rather
+ * than inventing an answer.  The three 2026-08-29 cases place the operand at the exact effective
+ * address and poison the neighbouring slots, so a mis-decoded index/scale/displacement/base is a
+ * wrong product, not a lucky one.
  *
  * SURVIVAL IS NOT CORRECTNESS.  Each expected product was computed on the host in exact
  * 64-bit arithmetic and is compared as two unsigned longs -- the guest has no long long, and
@@ -16,9 +19,11 @@
  * CONTAINMENT: one child per case, no handler, so a death is a result and never takes the
  * parent with it (protfault's shape).  ea_postinc is EXPECTED to die.
  *
- * The counters say whether the new path ran at all -- read isp61_mem_n and isp61_reg_n around
- * this program.  A pass with isp61_mem_n unmoved would mean the 68040 retired the instructions
- * in hardware and nothing here was tested (the fputest060 lesson, 2026-08-08).
+ * The counters say whether the new path ran at all -- read isp61_mem_n and isp61_reg_n, and the
+ * three new isp61_abs_n / isp61_index_n / isp61_a7_n, around this program.  A pass with those
+ * unmoved would mean the 68040 retired the instructions in hardware and nothing here was tested
+ * (the fputest060 lesson, 2026-08-08): abs bumps isp61_abs_n, index bumps isp61_index_n, and
+ * d16a7 bumps isp61_a7_n -- each proves its specific new decode path executed on the 68060.
  *
  * usage: isp61ea
  */
@@ -35,6 +40,9 @@ extern void ea_d16neg();
 extern void ea_d16u();
 extern void ea_an();
 extern void ea_dn();
+extern void ea_abs();
+extern void ea_index();
+extern void ea_d16a7();
 extern void ea_postinc();
 
 struct tcase {
@@ -55,6 +63,9 @@ static struct tcase cases[] = {
   { "d16u   mulu.l (12,a6)",ea_d16u,    0xffffffff, 0xffffffff, 0xfffffffe, 0x00000001, 0 },
   { "an     muls.l (a0)",   ea_an,      0x80000000, 0xffffffff, 0x00000000, 0x80000000, 0 },
   { "dn     muls.l d3",     ea_dn,      0x00000007, 0xfffffff7, 0xffffffff, 0xffffffc1, 0 },
+  { "abs    mulu.l (xxx).L", ea_abs,    0x12345678, 0x9abcdef0, 0x0b00ea4e, 0x242d2080, 0 },
+  { "index  muls.l (d8,a0,d2*4)",ea_index,0x00000007,0xfffffff7,0xffffffff, 0xffffffc1, 0 },
+  { "d16a7  mulu.l (0,a7)",  ea_d16a7,  0xffffffff, 0xffffffff, 0xfffffffe, 0x00000001, 0 },
   { "postinc muls.l (a0)+", ea_postinc, 0x00000003, 0x00000005, 0, 0, 1 },
   { (char *)0, 0, 0, 0, 0, 0, 0 }
 };
