@@ -40,4 +40,4 @@ PATH="$AMIX_CROSS/bin:${M68K_GNU_BIN:-/usr/bin}:$PATH"
 # use them held a hard-coded path under one developer's home directory, so the variables were
 # checked by check-env.sh and then ignored by the build.
 export PATH AMIX_ROOT AMIX_CROSS NETBSD_SYSSRC
-export XSVGA_EXP VA2000_SRC Z3660_SCSI_SRC Z3660_NET_SRC
+export XSVGA_EXP VA2000_SRC Z3660_SCSI_SRC Z3660_NET_SRC ZZ9000_SRC
