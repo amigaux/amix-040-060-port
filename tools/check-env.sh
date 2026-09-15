@@ -129,6 +129,7 @@ want_file "$XSVGA_EXP" "Xsvga object" "needed only by relink-040-xsvga.sh / reli
 want_file "$VA2000_SRC" "VA2000 driver source" "needed only by relink-040-va2000.sh / relink-040-rtg.sh (repo: va2000-amix)"
 want_file "$Z3660_SCSI_SRC" "Z3660 SCSI source" "needed only by relink-040-z3660.sh (repo: amix-z3660scsi)"
 want_file "$Z3660_NET_SRC" "Z3660 net source"   "needed only by relink-040-z3660.sh (repo: amix-z3660net)"
+want_file "$ZZ9000_SRC" "Z3660 RTG driver source" "needed only by relink-040-zz9000.sh (repo: amix-z3660rtg)"
 
 echo
 echo "OPTIONAL: analysis and hardware testing"

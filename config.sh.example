@@ -84,6 +84,11 @@ VA2000_SRC="/path/to/va2000-amix/src/va2000.c"
 Z3660_SCSI_SRC="/path/to/amix-z3660scsi/src/z3660.c"
 Z3660_NET_SRC="/path/to/amix-z3660net/src"
 
+# Z3660 RTG driver source (the zz9000 driver's Z3660 target), needed only by
+# relink-040-zz9000.sh.  Its own repository: amix-z3660rtg.  Point at the driver DIRECTORY;
+# zz9000.c and zz9000.h are read from it.
+ZZ9000_SRC="/path/to/amix-z3660rtg/overlay/usr/sys/amiga/driver/zz9000"
+
 # ---------------------------------------------------------------- OPTIONAL: analysis
 
 # Ghidra, for the decompilation helper in tools/.  Not needed to build anything.
