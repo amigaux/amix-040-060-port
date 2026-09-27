@@ -138,6 +138,33 @@ for f in "$FPESRC"/*.c; do
 done
 N=$(echo $FPEOBJS | wc -w)
 [ "$N" = 20 ] || { echo "[FAIL] $N objects, expected 20 (files.fpe lists 20)"; exit 1; }
+# T-9, second half: with -Dconst=__const__ a `const` table stops being plain initialised data
+# and gcc puts it in .rodata (fpu_cordic.c: atan_table and fpu_cordic_inv_gain1, 0x31c bytes,
+# which were in .data until 2026-09-28).  The kernel image has .text and .data and nothing
+# between them, so a .rodata makes the link's text/data non-contiguous.  Fold it back into
+# .data -- the same bytes where they were before the flag -- and refuse any .rodata left over.
+fold_rodata() {
+	R=$(m68k-linux-gnu-readelf -SW "$1" | awk '{gsub(/[][]/,"")} $2 ~ /^\.rodata/ {print $2}')
+	for s in $R; do
+		m68k-linux-gnu-objcopy --rename-section "$s=.data,alloc,load,data,contents" "$1" "$1" \
+			|| { echo "[FAIL] cannot fold $s of $1 into .data"; exit 1; }
+		echo "      $(basename "$1"): $s folded into .data"
+	done
+	! m68k-linux-gnu-readelf -SW "$1" | grep -q '\.rodata' \
+		|| { echo "[FAIL] $1 still carries .rodata"; exit 1; }
+}
+for o in $FPEOBJS; do fold_rodata "$o"; done
+# T-9 (2026-09-28): -traditional makes the stock <sys/types.h> define `volatile` away, and gcc
+# then deletes every spl()/splx() whose output is unused and every MMIO `volatile`.  The toolchain
+# passes -Dvolatile=__volatile__ now; tools/spl-gate.py proves it for this object: G1 = the macro
+# dump keeps `volatile`, G2 = every function that calls spl writes %sr (per function).
+# The emulator calls no spl, so G2 has nothing to require here; G1 still has to pass for every unit.
+echo "[*] T-9 gates G1/G2 over the 20 emulator units"
+for f in "$FPESRC"/*.c; do
+	b=$(basename "$f" .c)
+	run_step all python3 "$HERE/tools/spl-gate.py" --cc "$CC" --object "$OBJDIR/$b.o" \
+		--source "$f" --cflags "$CF" -- $INC $DEFS
+done
 echo "      20/20 objects, $(m68k-linux-gnu-size $FPEOBJS | awk 'NR>1{t+=$1;d+=$2;b+=$3}
 	END{printf ".text %d  .data %d  .bss %d", t, d, b}')"
 
@@ -156,6 +183,9 @@ BSS=$(m68k-linux-gnu-size $FPEOBJS | awk 'NR>1{b+=$3} END{print b}')
 # ---------------------------------------------------------------- 4. the glue
 echo "[*] compiling the glue"
 "$CC" $CF $INC -c "$HERE/src/fpe_glue.c" -o "$OBJDIR/fpe_glue.o"
+fold_rodata "$OBJDIR/fpe_glue.o"
+run_step all python3 "$HERE/tools/spl-gate.py" --cc "$CC" --object "$OBJDIR/fpe_glue.o" \
+	--source "$HERE/src/fpe_glue.c" --cflags "$CF" -- $INC
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/fpe040.s" -o "$OBJDIR/fpe040.o"
 m68k-linux-gnu-size "$OBJDIR/fpe_glue.o" "$OBJDIR/fpe040.o" | sed 's/^/      /'
 
