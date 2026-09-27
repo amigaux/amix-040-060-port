@@ -111,6 +111,13 @@ VA2000_CFLAGS=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 m68k-cbm-sysv4-gcc $VA2000_CFLAGS -Dvolatile=__volatile__ -DVA2000_KVA -I"$HERE/build" \
 	-c "$HERE/build/va2000_040.c" -o "$HERE/build/va2000_040.o"
 sh "$HERE/src/check_page_geometry.sh" "$HERE/build/va2000_040.o" | sed 's/^/      /'
+# T-9 (2026-09-28): -traditional makes the stock <sys/types.h> define `volatile` away, and gcc
+# then deletes every spl()/splx() whose output is unused and every MMIO `volatile`.  The toolchain
+# passes -Dvolatile=__volatile__ now; tools/spl-gate.py proves it for this object: G1 = the macro
+# dump keeps `volatile`, G2 = every function that calls spl writes %sr (per function).
+echo "[*] T-9 gates G1/G2 (spl masks and MMIO volatile survived -traditional)"
+run_step all python3 "$HERE/tools/spl-gate.py" --object "$HERE/build/va2000_040.o" \
+	--source "$HERE/build/va2000_040.c" --cflags "$VA2000_CFLAGS" -- -DVA2000_KVA -I"$HERE/build"
 
 echo "[*] VA2000: assemble dev_kvmap (MMIO window with an explicit cache class)"
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/devkvmap040.s" -o "$HERE/build/devkvmap040.o"

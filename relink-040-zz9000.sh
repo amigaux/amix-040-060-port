@@ -153,6 +153,16 @@ CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 	-I../../.. -I../../inc -c zz9000.c -o "$HERE/build/zz9000_040.o")
 m68k-linux-gnu-size "$HERE/build/zz9000_040.o" | sed 's/^/      /'
 run_step indent sh "$HERE/src/check_page_geometry.sh" "$HERE/build/zz9000_040.o"
+# T-9 (2026-09-28): -traditional makes the stock <sys/types.h> define `volatile` away, and gcc
+# then deletes every spl()/splx() whose output is unused and every MMIO `volatile`.  The toolchain
+# passes -Dvolatile=__volatile__ now; tools/spl-gate.py proves it for this object: G1 = the macro
+# dump keeps `volatile`, G2 = every function that calls spl writes %sr (per function).
+# The driver's own ZZ9K_SPLTTY/ZZ9K_SPLX expand to asm (or to nothing), so they are counted in the
+# raw source; the gate preprocesses from the driver's directory with the compile's own flags.
+echo "[*] T-9 gates G1/G2 (spl masks and MMIO volatile survived -traditional)"
+run_step all python3 "$HERE/tools/spl-gate.py" --object "$HERE/build/zz9000_040.o" \
+	--source zz9000.c --cwd "$DRV" --cflags "$CF" --macro ZZ9K_SPLTTY --macro ZZ9K_SPLX \
+	-- -DZZ9K_TARGET_Z3660 -DZZ9K_NO_BUILTINFONT $ZZ9000_OPTS -I../../.. -I../../inc
 LC_ALL=C m68k-linux-gnu-objdump -d "$HERE/build/zz9000_040.o" | grep -A1 "moveq #12," | grep -q "lsrl" \
 	|| { echo "[FAIL] zz9000_040.o has no 4 KiB page shift at all -- phystopfn not from the Model-B headers?"; exit 1; }
 
