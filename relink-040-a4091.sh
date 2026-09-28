@@ -30,7 +30,8 @@
 #
 # usage: sh relink-040-a4091.sh [base-kernel] [output]
 #   A4091_REPO=<dir>   the amix-a4091 checkout (default: ../amix-a4091 beside this repository)
-#   A4091_REV=<rev>    take the driver from that revision, not the working tree (the log says which)
+#   A4091_REV=<rev>    take the driver from that revision (the log says which).  Default: the pin
+#                      below; A4091_REV= (empty) takes the checkout's working tree instead
 #   A4091_BASE_SHA256=<hex>  refuse any base but that one
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -77,6 +78,10 @@ ALIEN="$AMIX_SYSROOT/usr/sys/amiga/alien"
 SRCDIR="$HERE/build/a4091-src"
 rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"
 FILES="src/a4091-wr.c src/a4091_dma040.h tools/a4091-widths.py"
+# Pinned (PO-14, 2026-09-28): amix-a4091 96496aa, A4-11's 040/060 arm, a4091_040.o c869795f.
+# 4df8332 renamed the header and the knob for Antti's D42 contract; this pass follows it when his
+# dma_cache040.s lands, and not before.
+A4091_REV="${A4091_REV-96496aa}"
 if [ -n "$A4091_REV" ]; then
 	for f in $FILES; do
 		git -C "$REPO" cat-file -e "$A4091_REV:$f" || { echo "ERROR: $f does not exist at $A4091_REV in $REPO"; exit 1; }
@@ -84,6 +89,7 @@ if [ -n "$A4091_REV" ]; then
 	done
 	SRCID="$(git -C "$REPO" rev-parse "$A4091_REV") ($A4091_REV, from the repository)"
 else
+	echo "[*] A4091_REV empty: taking the working tree of $REPO (not pinned)"
 	for f in $FILES; do cp "$REPO/$f" "$SRCDIR/"; done
 	SRCID="working tree $REPO"
 	HEADREV=$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)
