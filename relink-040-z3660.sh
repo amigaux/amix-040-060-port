@@ -19,6 +19,9 @@
 # offset arithmetic and the evidence for it are in src/z3660_glue040.s.
 #
 # NOT the standard kernel.  usage: sh relink-040-z3660.sh [base-kernel] [output]
+#   Z3660_SCSI_REV=<rev>   the amix-z3660scsi revision z3660.c is taken from (git show, so the
+#                          checkout's working tree does not matter).  Default: the pin below.
+#                          Z3660_SCSI_REV= (empty) takes $Z3660_SCSI_SRC as it stands instead.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$(cd "$(dirname "$0")" && pwd)/tools/config-load.sh"
@@ -39,6 +42,25 @@ echo "[*] Model-B header set (mirror sysroot + geometry probe)"
 sh "$HERE/src/mk_modelb_sysroot.sh" | sed 's/^/      /'
 AMIX_SYSROOT="$HERE/build/sysroot-modelb"
 export AMIX_SYSROOT
+
+# The SCSI driver's revision is pinned (PO-11, 2026-09-28): 53f43bd is ZS-03, whose machine gate
+# reads the Agnus id's low nibble, so an NTSC ECS machine is no longer taken for AGA.  Built through
+# this pass it gives z3660_040.o sha256 277a5b53... (was 6c347e25 at 16ca1a8).
+Z3660_SCSI_REV="${Z3660_SCSI_REV-53f43bd}"
+if [ -n "$Z3660_SCSI_REV" ]; then
+	REPO=$(git -C "$(dirname "$Z3660_SCSI_SRC")" rev-parse --show-toplevel)
+	REL=$(git -C "$(dirname "$Z3660_SCSI_SRC")" rev-parse --show-prefix)$(basename "$Z3660_SCSI_SRC")
+	git -C "$REPO" cat-file -e "$Z3660_SCSI_REV:$REL" \
+		|| { echo "ERROR: $REL does not exist at $Z3660_SCSI_REV in $REPO"; exit 1; }
+	mkdir -p "$HERE/build/z3660scsi-rev"
+	git -C "$REPO" show "$Z3660_SCSI_REV:$REL" > "$HERE/build/z3660scsi-rev/z3660.c"
+	echo "[*] z3660scsi source: $(git -C "$REPO" rev-parse "$Z3660_SCSI_REV") ($Z3660_SCSI_REV, from the repository)"
+	Z3660_SCSI_SRC="$HERE/build/z3660scsi-rev/z3660.c"
+	export Z3660_SCSI_SRC
+else
+	echo "[*] z3660scsi source: working tree $Z3660_SCSI_SRC (Z3660_SCSI_REV empty: not pinned)"
+fi
+sha256sum "$Z3660_SCSI_SRC" | sed 's/^/      /'
 
 echo "[*] Model-B source copies (phystopfn 2 KiB -> 4 KiB; page counts halved, bytes unchanged)"
 python3 "$HERE/src/z3660_modelb.py"

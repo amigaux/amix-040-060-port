@@ -359,6 +359,8 @@ survives as history but its conclusion has been replaced.
 
 **The monitor switch on `driver-line` is `/dev/monsw`, char major 52** (`relink-040-monsw.sh`; `mknod /dev/monsw c 52 0`). It was 50 until PO-09, but that row is the SAD STREAMS driver's, so user opens never reached monsw. The zz9000 driver built with `-DZZ9K_MONSW` (amix-z3660rtg 7b449cd onward) switches through it and drives no CIA line itself. Its pass accepts that build only on a base that has monsw. Built and gated only; not yet run in EMU or on HW.
 
+**The z3660 pass pins its SCSI driver** to amix-z3660scsi `53f43bd` (ZS-03, PO-11: the machine gate reads the Agnus id's low nibble, so NTSC ECS is no longer taken for AGA). It sets `Z3660_SCSI_REV`, and `z3660_040.o` is `277a5b53`. Built and gated only.
+
 ---
 
 ## 5. Release blockers
