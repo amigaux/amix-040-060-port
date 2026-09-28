@@ -365,6 +365,8 @@ survives as history but its conclusion has been replaced.
 
 **The zz9000 pass can build the RTG framebuffer NC** (`ZZ9000_OPTS` adds `-DZZ9K_FB_NC`, amix-z3660rtg 26ff2d0, RT-05). The driver then registers its window through `hat_cm_fb_add`, and the pass refuses a base that does not export it. The A/B pair (A: monsw only; B: + FB_NC) is built for the metal comparison, and nothing is pinned until that verdict.
 
+**The zz9000 pass defaults to amix-z3660rtg `e23712d`** (PO-13, RT-07: the card blitter for FILLRECT/COPYRECT). `zz9000_040.o` is `40eebe2d` with `-DZZ9K_MONSW` and `0b670dbe` without; the imports are unchanged. The knobs `zz9k_blit_on` and `zz9k_blit_maxarea` are in `.data`; read their addresses from nm, because they move with every build. Built and gated only.
+
 ---
 
 ## 5. Release blockers

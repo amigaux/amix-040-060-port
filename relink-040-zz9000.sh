@@ -47,7 +47,8 @@
 #
 # usage: sh relink-040-zz9000.sh [base-kernel] [output]
 #   ZZ9000_REV=<git rev>    take zz9000.c/.h from that revision of the driver repository
-#                           instead of its working tree (the pass log records which)
+#                           (the pass log records which).  Default: the pin below; ZZ9000_REV=
+#                           (empty) takes the checkout's working tree instead
 #   ZZ9000_OPTS="..."       extra single-token driver options, e.g. -DZZ9K_Z3660_CON_1280x800
 #                           -DZZ9K_MONSW (RT-04): switch through the base's /dev/monsw; needs relink-040-monsw.sh first
 #                           -DZZ9K_FB_NC (RT-05): register the framebuffer NC via hat_cm_fb_add
@@ -119,6 +120,10 @@ ln -s "$AMIX_SYSROOT/usr/sys/amiga/inc"     "$TREE/amiga/inc"
 ln -s "$AMIX_SYSROOT/usr/include/sys"       "$TREE/sys"
 [ -f "$TREE/amiga/console/screen.h" ] && [ -f "$TREE/amiga/inc/amiga.h" ] \
 	|| { echo "ERROR: the sysroot has no usr/sys/amiga/console or usr/sys/amiga/inc"; exit 1; }
+# Pinned (PO-13, 2026-09-28): amix-z3660rtg e23712d, the card-blitter path (RT-07; b7e576c has
+# the same driver bytes).  zz9000_040.o: -DZZ9K_MONSW 40eebe2d..., plain 0b670dbe...  Imports
+# unchanged; the knobs zz9k_blit_on / zz9k_blit_maxarea sit in .data for image patching.
+ZZ9000_REV="${ZZ9000_REV-e23712d}"
 if [ -n "$ZZ9000_REV" ]; then
 	REPO=$(git -C "$ZZ9000_SRC" rev-parse --show-toplevel)
 	REL=$(git -C "$ZZ9000_SRC" rev-parse --show-prefix)
