@@ -60,6 +60,15 @@ for h in immu param; do
 	echo "      sys/$h.h  = Model B   (stock kept as sys/${h}_stock.h)"
 done
 
+# This line's own headers, which the stock sysroot does not have.  sys/monsw.h (P-8) is the
+# /dev/monsw interface: src/monsw.c, the card drivers and the X servers all include it.
+for h in monsw; do
+	[ ! -e "$OUT/usr/include/sys/$h.h" ] \
+		|| { echo "ERROR: the real sysroot already has sys/$h.h -- reconcile before shadowing it"; exit 1; }
+	cp "$HERE/src/sys/$h.h" "$OUT/usr/include/sys/$h.h"
+	echo "      sys/$h.h = this line's (src/sys/$h.h)"
+done
+
 # ---------------------------------------------------------------- the probe
 # A build that silently missed the override must FAIL HERE, not months later in
 # a driver.  Every constant is asserted by a negative array size, which this gcc
