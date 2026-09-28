@@ -7,8 +7,10 @@
 #                        the switch value means and where it comes from
 #   src/parinit_monsw.s  monswinit() from the parallel-port init hook
 #
-# Registration: cdevsw[MONSW_MAJOR] (default 50, asserted free) d_open/d_close/d_ioctl ->
-# monswopen/close/ioctl (src/patch_monsw_cdevsw.py).  The node is `mknod /dev/monsw c 50 0`.
+# Registration: cdevsw[MONSW_MAJOR] (default 52, asserted free on the WHOLE row) d_open/d_close/d_ioctl ->
+# monswopen/close/ioctl (src/patch_monsw_cdevsw.py).  The node is `mknod /dev/monsw c 52 0`.
+# Not 50: that row is the SAD STREAMS driver's (d_str = sadinfo, /dev/sad/*), which a test of the
+# ten function records alone took for free (PO-09).
 #
 # The init hook chains to whatever strong parinit the base carries, read from nm of the base
 # and exposed as parinit_monsw_orig -- the zz9000 pass's way, so the order is free relative to
@@ -21,7 +23,7 @@
 # monsw_update each raise to IPL 4 (`movew #9216,%sr`) and restore.
 #
 # usage: sh relink-040-monsw.sh [base-kernel] [output]
-#   MONSW_MAJOR=<n>          the cdevsw row (default 50)
+#   MONSW_MAJOR=<n>          the cdevsw row (default 52)
 #   MONSW_BASE_SHA256=<hex>  refuse any base but that one
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -30,7 +32,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 
 IN="${1:-$HERE/build/unix-040}"
 OUT="${2:-$HERE/build/unix-040-monsw}"
-MAJOR="${MONSW_MAJOR:-50}"
+MAJOR="${MONSW_MAJOR:-52}"
 [ -f "$IN" ] || { echo "ERROR: base kernel missing: $IN"; exit 1; }
 m68k-linux-gnu-readelf -h "$IN" >/dev/null 2>&1 || { echo "ERROR: $IN is not an ELF object"; exit 1; }
 BASESHA=$(sha256sum "$IN" | cut -d' ' -f1)

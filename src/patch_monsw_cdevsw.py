@@ -6,18 +6,25 @@
 # R_68K_32 relocations to `nodev`, and registration retargets some of them.  monsw has no
 # read/write/mmap, so only d_open, d_close and d_ioctl move; the rest stay `nodev`.
 #
-# The row must be FREE: the first ten records of the row all name `nodev`.  A row that is not
-# the filler is somebody else's driver (49 zz9000, 51 zen0 through d_str, 67 xsvga, 68 va2000,
-# 44-46 and 48 named by the stock source), and the answer to that is to stop.  The slot offset
-# is derived from the cdevsw symbol and checked against cdevcnt.
+# The row must be FREE, judged on the WHOLE record: d_open..d_mmap and the rest of the first ten
+# name `nodev`, d_ttys (+0x28) and d_str (+0x2c) are NULL words with no relocation, and d_flag
+# (+0x30) is `nullflag`.  The first version looked at the ten function records only and took
+# row 50 -- which is the SAD STREAMS driver's: ten `nodev` and d_str = sadinfo, so every open went
+# to stropen and monswopen never ran (PO-09, found by kerntools on DL-08).  A STREAMS driver
+# lives in d_str alone, so a test that skips it cannot see one.  A row that is not the filler is
+# somebody else's driver (49 zz9000, 50 sad, 51 zen0 -- d_str stored at boot by the z3660 glue,
+# so statically empty and still taken -- 67 xsvga, 68 va2000, 44-46 and 48 named by the stock
+# source), and the answer to that is to stop.  The slot offset is derived from the cdevsw symbol;
+# cdevcnt must equal the table's own size (cdevsw .. cdevcnt / 52) and bound the row.
 #
-# usage: patch_monsw_cdevsw.py KERNEL [MAJOR]      (MAJOR defaults to 50)
+# usage: patch_monsw_cdevsw.py KERNEL [MAJOR]      (MAJOR defaults to 52)
 # Idempotent; fails closed on any mismatch; the three retargets are one atomic group.
 
 import struct, sys
 
 KERNEL = sys.argv[1]
-MAJOR = int(sys.argv[2]) if len(sys.argv) > 2 else 50
+MAJOR = int(sys.argv[2]) if len(sys.argv) > 2 else 52
+TAKEN = {49, 50, 51, 67, 68}     # rows known to belong to a driver although parts read as filler
 R_68K_32 = 1
 ENTSIZE = 52                     # sizeof(struct cdevsw) on this kernel
 NFREE = 10                       # records that must read `nodev` in a free row
@@ -63,8 +70,15 @@ def main():
 
     data = byname[".data"]["offset"]
     cdevcnt = u32(b, data + sym_value("cdevcnt"))
+    span = sym_value("cdevcnt") - sym_value("cdevsw")
+    if span != cdevcnt * ENTSIZE:
+        raise SystemExit("ABORT: cdevcnt %d but the table spans %d bytes (%d rows of %d)"
+                         % (cdevcnt, span, span // ENTSIZE, ENTSIZE))
     if not 0 < MAJOR < cdevcnt:
         raise SystemExit("ABORT: major %d outside cdevsw[0..%d)" % (MAJOR, cdevcnt))
+    if MAJOR in TAKEN:
+        raise SystemExit("ABORT: cdevsw[%d] belongs to another driver (%s)" % (MAJOR, sorted(TAKEN)))
+    print("  cdevcnt %d (the table's own size); row %d below it" % (cdevcnt, MAJOR))
     slot = sym_value("cdevsw") + MAJOR * ENTSIZE
 
     rela = byname[".rela.data"]
@@ -84,19 +98,33 @@ def main():
             raise SystemExit("ABORT @0x%x: reloc type %d != R_68K_32" % (off, rinfo & 0xff))
         return at[off], rinfo >> 8
 
+    def tail_free():
+        """d_ttys and d_str: NULL words with no relocation; d_flag: nullflag."""
+        bad = []
+        for f, what in ((10, "d_ttys"), (11, "d_str")):
+            off = slot + f * 4
+            if off in at:
+                bad.append("%s -> %s" % (what, symname(u32(b, at[off] + 4) >> 8)))
+            elif u32(b, data + off) != 0:
+                bad.append("%s = 0x%x" % (what, u32(b, data + off)))
+        if symname(target(12)[1]) != "nullflag":
+            bad.append("d_flag -> %s" % symname(target(12)[1]))
+        return bad
+
     ours = all(symname(target(f)[1]) == n for f, n in FIELDS.items())
     if ours:
         rest = [f for f in range(NFREE) if f not in FIELDS]
         bad = [(f, symname(target(f)[1])) for f in rest if symname(target(f)[1]) != "nodev"]
-        if bad:
-            raise SystemExit("ABORT: cdevsw[%d] is ours but also names %s" % (MAJOR, bad))
+        if bad or tail_free():
+            raise SystemExit("ABORT: cdevsw[%d] is ours but also names %s %s" % (MAJOR, bad, tail_free()))
         for f, n in sorted(FIELDS.items()):
             print("  [skip] cdevsw[%d] field %d already -> %s" % (MAJOR, f, n))
         print("monsw already registered (cdevsw[%d]) in %s" % (MAJOR, KERNEL))
         return
     names = [symname(target(f)[1]) for f in range(NFREE)]
-    if any(n != "nodev" for n in names):
-        raise SystemExit("ABORT: cdevsw[%d] is not free: %s" % (MAJOR, names))
+    if any(n != "nodev" for n in names) or tail_free():
+        raise SystemExit("ABORT: cdevsw[%d] is not free: %s %s" % (MAJOR, names, tail_free()))
+    print("  cdevsw[%d] free: ten nodev, d_ttys/d_str NULL, d_flag nullflag" % MAJOR)
     for f, n in sorted(FIELDS.items()):
         o, cur = target(f)
         struct.pack_into(">I", b, o + 4, (sym_index(n) << 8) | R_68K_32)

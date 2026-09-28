@@ -357,7 +357,7 @@ survives as history but its conclusion has been replaced.
 
 **ISSUE-69 (stock 2.1c `setuid(-123456)` test panic) differs between the two lines.** Upstream keeps it. `driver-line` removes it in the FPE pass (`src/patch_setuid_hook.py`, one byte); EMU acceptance is pending (DL-14).
 
-**The monitor switch on `driver-line` is `/dev/monsw`** (`relink-040-monsw.sh`). The zz9000 driver built with `-DZZ9K_MONSW` (amix-z3660rtg 7b449cd onward) switches through it and drives no CIA line itself. Its pass accepts that build only on a base that has monsw. Built and gated only; not yet run in EMU or on HW.
+**The monitor switch on `driver-line` is `/dev/monsw`, char major 52** (`relink-040-monsw.sh`; `mknod /dev/monsw c 52 0`). It was 50 until PO-09, but that row is the SAD STREAMS driver's, so user opens never reached monsw. The zz9000 driver built with `-DZZ9K_MONSW` (amix-z3660rtg 7b449cd onward) switches through it and drives no CIA line itself. Its pass accepts that build only on a base that has monsw. Built and gated only; not yet run in EMU or on HW.
 
 ---
 
