@@ -361,6 +361,8 @@ survives as history but its conclusion has been replaced.
 
 **The z3660 pass pins its SCSI driver** to amix-z3660scsi `53f43bd` (ZS-03, PO-11: the machine gate reads the Agnus id's low nibble, so NTSC ECS is no longer taken for AGA). It sets `Z3660_SCSI_REV`, and `z3660_040.o` is `277a5b53`. Built and gated only.
 
+**The z3660 pass pins its ethernet driver** to amix-z3660net `8449d53` (PO-12; the source of 586ba6f). A failed MAC probe now frees both sptalloc windows, which 47092ee leaked on an `eth_none` rig. It sets `Z3660_NET_REV`, and `z3660eth_040.o` is `a1f49c54`. Built and gated only.
+
 **The zz9000 pass can build the RTG framebuffer NC** (`ZZ9000_OPTS` adds `-DZZ9K_FB_NC`, amix-z3660rtg 26ff2d0, RT-05). The driver then registers its window through `hat_cm_fb_add`, and the pass refuses a base that does not export it. The A/B pair (A: monsw only; B: + FB_NC) is built for the metal comparison, and nothing is pinned until that verdict.
 
 ---

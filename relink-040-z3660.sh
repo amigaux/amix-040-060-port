@@ -22,6 +22,7 @@
 #   Z3660_SCSI_REV=<rev>   the amix-z3660scsi revision z3660.c is taken from (git show, so the
 #                          checkout's working tree does not matter).  Default: the pin below.
 #                          Z3660_SCSI_REV= (empty) takes $Z3660_SCSI_SRC as it stands instead.
+#   Z3660_NET_REV=<rev>    the same for amix-z3660net's src/ (z3660eth.c and its headers).
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$(cd "$(dirname "$0")" && pwd)/tools/config-load.sh"
@@ -61,6 +62,25 @@ else
 	echo "[*] z3660scsi source: working tree $Z3660_SCSI_SRC (Z3660_SCSI_REV empty: not pinned)"
 fi
 sha256sum "$Z3660_SCSI_SRC" | sed 's/^/      /'
+
+# The ethernet driver's revision is pinned the same way (PO-12): 8449d53 is the source of 586ba6f
+# (real spl masks, and a failed MAC probe frees both sptalloc windows -- 47092ee leaked them), plus
+# notes.  Through this pass it gives z3660eth_040.o sha256 a1f49c54... (was b93ce42d at 47092ee).
+Z3660_NET_REV="${Z3660_NET_REV-8449d53}"
+if [ -n "$Z3660_NET_REV" ]; then
+	REPO=$(git -C "$Z3660_NET_SRC" rev-parse --show-toplevel)
+	REL=$(git -C "$Z3660_NET_SRC" rev-parse --show-prefix)
+	git -C "$REPO" cat-file -e "$Z3660_NET_REV:${REL}z3660eth.c" \
+		|| { echo "ERROR: ${REL}z3660eth.c does not exist at $Z3660_NET_REV in $REPO"; exit 1; }
+	rm -rf "$HERE/build/z3660net-rev"; mkdir -p "$HERE/build/z3660net-rev"
+	git -C "$REPO" archive "$Z3660_NET_REV" "${REL%/}" | tar -x -C "$HERE/build/z3660net-rev"
+	echo "[*] z3660net source: $(git -C "$REPO" rev-parse "$Z3660_NET_REV") ($Z3660_NET_REV, from the repository)"
+	Z3660_NET_SRC="$HERE/build/z3660net-rev/${REL%/}"
+	export Z3660_NET_SRC
+else
+	echo "[*] z3660net source: working tree $Z3660_NET_SRC (Z3660_NET_REV empty: not pinned)"
+fi
+sha256sum "$Z3660_NET_SRC"/z3660eth.c "$Z3660_NET_SRC"/z3660eth.h | sed 's/^/      /'
 
 echo "[*] Model-B source copies (phystopfn 2 KiB -> 4 KiB; page counts halved, bytes unchanged)"
 python3 "$HERE/src/z3660_modelb.py"
