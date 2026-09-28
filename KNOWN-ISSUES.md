@@ -9814,3 +9814,27 @@ that makes this hazard hard to reason about. Not applied here, because the A3091
 hardware-proven as it stands and the fix wants its own acceptance run — and because the generalized
 service already names this class in `edge_shared`, which is where the A3091 would be measured if it
 ever moves onto `dma_prepare`.
+
+## ⚠ DRIVER-LINE-1 (2026-09-28, RECORDED — owner decision pending): dd's REQUEST SENSE buffer shares a cache line with the next unit
+
+Numbered outside the `ISSUE-NN` series on purpose. That series is upstream's, and a number
+taken here could collide with the next one assigned there.
+
+`dd.c` keeps one record per unit in `ddtab`, with a stride of `0x44` bytes. The REQUEST SENSE
+buffer, `dp->sense`, is at `+0x34`, and a sense read fills 16 bytes. The stride is ≡ 4 mod 16,
+so the unit records drift across 16-byte cache lines. **On three units in four, the buffer's last
+line is shared with the next unit's state word and its `bhead`/`btail` queue pointers.**
+
+That matters only to a bus master that DMAs the sense data into the buffer (a FROM_DEVICE
+transfer): today the A3091 pilot and the A4091. Such a range has a partial line at its tail, and
+coherence cannot handle a partial line cleanly:
+- invalidating the line would discard a live CPU store to the neighbour's fields;
+- writing the whole line back after the transfer would overwrite the device's bytes.
+
+Antti's D42 service (`dma_prepare`/`dma_complete`) does neither for edge lines. It counts them
+in `edge_shared`, whose acceptance value is 0, so every sense read on these controllers will show
+up there. The counter names the problem; it does not solve it.
+
+**Resolution options (owner decision pending):** a driver-owned, line-aligned bounce buffer for
+sense data, or a line-aligned sense buffer in place of `dp->sense`. Until then, a nonzero
+`edge_shared` on a sense-heavy run is this entry, not a new defect.
