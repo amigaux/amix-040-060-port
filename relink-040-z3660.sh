@@ -87,14 +87,13 @@ echo "[OK] both driver objects shift by 12 (4 KiB PFN), none by 11"
 # then deletes every spl()/splx() whose output is unused and every MMIO `volatile`.  The toolchain
 # passes -Dvolatile=__volatile__ now; tools/spl-gate.py proves it for this object: G1 = the macro
 # dump keeps `volatile`, G2 = every function that calls spl writes %sr (per function).
-# z3660eth's allowance: z3660eth.h defines its spl macros as no-ops, so it has nothing to keep.
+# Both units are held to G2 with no allowance: z3660eth's spl macros expand to the real spl6/splx
+# since amix-z3660net 47092ee.  No --macro either -- the preprocessed call is already counted.
 echo "[*] T-9 gates G1/G2 (spl masks and MMIO volatile survived -traditional)"
 run_step all python3 "$HERE/tools/spl-gate.py" --object "$HERE/build/z3660_040.o" \
 	--source "$HERE/build/z3660_040.c" --cflags "$CF" -- -I"$ALIEN" -I"$HERE/build"
 run_step all python3 "$HERE/tools/spl-gate.py" --object "$HERE/build/z3660eth_040.o" \
-	--source "$HERE/build/z3660eth_040.c" --cflags "$CF" --macro splz3660eth --macro splx \
-	--allow "z3660eth.h defines splz3660eth()/splx() as no-ops (T-9 section 2); expires when amix-z3660net adopts real ring masking" \
-	-- -I"$ALIEN" -I"$HERE/build"
+	--source "$HERE/build/z3660eth_040.c" --cflags "$CF" -- -I"$ALIEN" -I"$HERE/build"
 
 echo "[*] assembling the registration glue"
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/z3660_glue040.s" -o "$HERE/build/z3660_glue040.o"
