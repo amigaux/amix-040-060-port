@@ -355,6 +355,8 @@ survives as history but its conclusion has been replaced.
 | 105 | `xpanic` decided whether to `sync()` from uninitialised bits | FIXED, **not yet exercised on hardware** | — | second line |
 | 106 | PID 1 dies at exec with a kernel-shaped user stack pointer | CLOSED — symptom record | Z3660 | a defect of the card's emulation, not of this port |
 
+**ISSUE-69 (stock 2.1c `setuid(-123456)` test panic) differs between the two lines.** Upstream keeps it. `driver-line` removes it in the FPE pass (`src/patch_setuid_hook.py`, one byte); EMU acceptance is pending (DL-14).
+
 ---
 
 ## 5. Release blockers
