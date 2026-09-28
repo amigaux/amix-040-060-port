@@ -49,6 +49,7 @@
 #   ZZ9000_REV=<git rev>    take zz9000.c/.h from that revision of the driver repository
 #                           instead of its working tree (the pass log records which)
 #   ZZ9000_OPTS="..."       extra single-token driver options, e.g. -DZZ9K_Z3660_CON_1280x800
+#                           -DZZ9K_MONSW (RT-04): switch through the base's /dev/monsw; needs relink-040-monsw.sh first
 #   ZZ9000_BASE_SHA256=<hex> refuse any base but that one (the pinned f7vs is
 #                           d43a59ccb7df2ebcdf611a7fa322dd84a4c2166fa9d491078025ef4f9e0fa889)
 set -e
@@ -94,7 +95,7 @@ PARINIT_STOCK=$(m68k-linux-gnu-nm "$IN" | awk '$3=="parinit_orig" && $2=="T"{pri
 [ -n "$PARINIT_STOCK" ] || { echo "ERROR: no parinit_orig in $IN -- the base's parinit is not the z3660 wrapper"; exit 1; }
 [ "$PARINIT_CUR" != "$PARINIT_STOCK" ] || { echo "ERROR: parinit == parinit_orig in $IN"; exit 1; }
 [ "$(echo "$PARINIT_CUR" | wc -w)" = 1 ] || { echo "ERROR: more than one strong parinit in $IN"; exit 1; }
-echo "      parinit (z3660 wrapper) @0x$PARINIT_CUR, stock body parinit_orig @0x$PARINIT_STOCK"
+echo "      parinit (the base's current wrapper: z3660, or monsw over it) @0x$PARINIT_CUR, stock body parinit_orig @0x$PARINIT_STOCK"
 
 # ---------------------------------------------------------------- 1. the header set
 echo "[*] Model-B header set (mirror sysroot + geometry probe)"
@@ -186,8 +187,18 @@ fi
 	|| { echo "[FAIL] scan060 decoded ${SCANLINES:-0} lines of zz9000_040.lst -- not a listing it understood"; exit 1; }
 [ "$SCANHITS" = 0 ] || { echo "[FAIL] scan060: ${SCANHITS:-an unrecognised report,} 060-unimplemented candidate(s) in zz9000_040.o"; exit 1; }
 
-echo "[*] the driver's kernel imports must be exactly the seven it is known to need:"
+echo "[*] the driver's kernel imports must be exactly the seven it is known to need"
+# ... plus exactly monsw_lastclose/monsw_register/monsw_set when built with -DZZ9K_MONSW (RT-04,
+# amix-z3660rtg 7b449cd): the monitor switch then belongs to /dev/monsw, which the base must
+# already carry -- relink-040-monsw.sh runs before this pass (dd -> z3660 -> monsw -> zz9000 -> fpe).
 WANT="autocon bootinfo conputc copyin copyout printf uiomove"
+case " $ZZ9000_OPTS " in
+*" -DZZ9K_MONSW "*)
+	WANT="autocon bootinfo conputc copyin copyout monsw_lastclose monsw_register monsw_set printf uiomove"
+	m68k-linux-gnu-nm "$IN" | grep -qE " T monswinit\$" \
+		|| { echo "[FAIL] -DZZ9K_MONSW needs a base with /dev/monsw -- run relink-040-monsw.sh first"; exit 1; }
+	echo "      (-DZZ9K_MONSW: the monitor switch goes through the base's monsw)" ;;
+esac
 GOT=$(m68k-linux-gnu-nm "$HERE/build/zz9000_040.o" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 [ "$GOT" = "$WANT" ] || { echo "[FAIL] unresolved set is: $GOT"; echo "       expected:          $WANT"; exit 1; }
 echo "      $GOT"
@@ -245,10 +256,10 @@ echo "      parinit overridden (0x$PARINIT_NEW, past the base's .text end 0x$(pr
 # ... and the chain below it is intact: the alias names the z3660 wrapper, the stock body is
 # still exposed where it was.
 A=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="parinit_zz9000_orig"{print $1}')
-[ "$A" = "$PARINIT_CUR" ] || { echo "[FAIL] parinit_zz9000_orig @0x$A != z3660 wrapper @0x$PARINIT_CUR"; exit 1; }
+[ "$A" = "$PARINIT_CUR" ] || { echo "[FAIL] parinit_zz9000_orig @0x$A != the base's wrapper @0x$PARINIT_CUR"; exit 1; }
 A=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="parinit_orig"{print $1}')
 [ "$A" = "$PARINIT_STOCK" ] || { echo "[FAIL] parinit_orig moved: 0x$A != 0x$PARINIT_STOCK"; exit 1; }
-echo "      chain: parinit -> parinit_zz9000_orig (z3660 wrapper @0x$PARINIT_CUR) -> parinit_orig (stock @0x$PARINIT_STOCK)"
+echo "      chain: parinit -> parinit_zz9000_orig (the base's wrapper @0x$PARINIT_CUR) -> parinit_orig (stock @0x$PARINIT_STOCK)"
 
 LEAK=$(m68k-linux-gnu-nm "$OUT" | awk '$1=="U" && $2!="edata" && $2!="end" && $2!="etext" {print $2}')
 [ -z "$LEAK" ] || { echo "[FAIL] unresolved symbols:"; echo "$LEAK"; exit 1; }
