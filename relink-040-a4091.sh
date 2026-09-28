@@ -32,6 +32,10 @@
 #   A4091_REPO=<dir>   the amix-a4091 checkout (default: ../amix-a4091 beside this repository)
 #   A4091_REV=<rev>    take the driver from that revision (the log says which).  Default: the pin
 #                      below; A4091_REV= (empty) takes the checkout's working tree instead
+#   A4091_OPTS="..."   extra driver options.  -DA4091_D42 links the port's D42 DMA-coherence
+#                      service (dma_prepare/dma_complete, src/dma_cache040.s, contract
+#                      docs/contracts/DMA040-SERVICE-RECORD.md) instead of the driver's local
+#                      stubs, and needs a base that exports both
 #   A4091_BASE_SHA256=<hex>  refuse any base but that one
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -77,11 +81,12 @@ ALIEN="$AMIX_SYSROOT/usr/sys/amiga/alien"
 # ---------------------------------------------------------------- 2. the driver source
 SRCDIR="$HERE/build/a4091-src"
 rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"
-FILES="src/a4091-wr.c src/a4091_dma040.h tools/a4091-widths.py"
-# Pinned (PO-14, 2026-09-28): amix-a4091 96496aa, A4-11's 040/060 arm, a4091_040.o c869795f.
-# 4df8332 renamed the header and the knob for Antti's D42 contract; this pass follows it when his
-# dma_cache040.s lands, and not before.
-A4091_REV="${A4091_REV-96496aa}"
+FILES="src/a4091-wr.c src/a4091_dmarec.h tools/a4091-widths.py"
+# Pinned (PO-15, 2026-09-29): amix-a4091 4df8332, the D42 contract's names -- the record header
+# src/a4091_dmarec.h and the knob a4091_dma_off.  a4091_040.o 402f4bc8 with the stub arm, c7e16481
+# with -DA4091_D42.  (96496aa, the pre-D42 arm, was the pin from PO-14 until the service landed.)
+A4091_REV="${A4091_REV-4df8332}"
+DEFS="-DA4091_KVA $A4091_OPTS"
 if [ -n "$A4091_REV" ]; then
 	for f in $FILES; do
 		git -C "$REPO" cat-file -e "$A4091_REV:$f" || { echo "ERROR: $f does not exist at $A4091_REV in $REPO"; exit 1; }
@@ -100,13 +105,13 @@ else
 	fi
 fi
 echo "[*] driver source: $SRCID"
-sha256sum "$SRCDIR/a4091-wr.c" "$SRCDIR/a4091_dma040.h" | sed 's/^/      /'
+sha256sum "$SRCDIR/a4091-wr.c" "$SRCDIR/a4091_dmarec.h" | sed 's/^/      /'
 
 # ---------------------------------------------------------------- 3. the compile and its gates
-echo "[*] cross-compiling a4091-wr.c -DA4091_KVA (-m68040 dialect, Model-B headers)"
+echo "[*] cross-compiling a4091-wr.c $DEFS (-m68040 dialect, Model-B headers)"
 CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 OBJ="$HERE/build/a4091_040.o"
-m68k-cbm-sysv4-gcc $CF -DA4091_KVA -I"$ALIEN" -I"$SRCDIR" -c "$SRCDIR/a4091-wr.c" -o "$OBJ"
+m68k-cbm-sysv4-gcc $CF $DEFS -I"$ALIEN" -I"$SRCDIR" -c "$SRCDIR/a4091-wr.c" -o "$OBJ"
 m68k-linux-gnu-size "$OBJ" | sed 's/^/      /'
 sha256sum "$OBJ" | sed 's/^/      /'
 M=$(m68k-linux-gnu-readelf -SW "$OBJ" | awk '{gsub(/[][]/,"")} $2 ~ /^\.rodata/ {print $2}')
@@ -120,7 +125,7 @@ run_step indent sh "$HERE/src/check_page_geometry.sh" "$OBJ"
 STOCKOBJ="$HERE/build/a4091_040-stockhdr.o"
 REAL=$(. "$GCC_CROSS_ENV"; echo "${AMIX_REAL_SYSROOT:-$AMIX_CROSS/m68k-cbm-sysv4/sysroot}")
 [ -f "$REAL/usr/sys/amiga/alien/sd.h" ] || { echo "ERROR: no stock sysroot with alien headers at $REAL"; exit 1; }
-AMIX_SYSROOT="$REAL" m68k-cbm-sysv4-gcc $CF -DA4091_KVA -I"$REAL/usr/sys/amiga/alien" -I"$SRCDIR" \
+AMIX_SYSROOT="$REAL" m68k-cbm-sysv4-gcc $CF $DEFS -I"$REAL/usr/sys/amiga/alien" -I"$SRCDIR" \
 	-c "$SRCDIR/a4091-wr.c" -o "$STOCKOBJ"
 NDIFF=$(LC_ALL=C m68k-linux-gnu-objdump -dr "$OBJ" | tail -n +4 > "$HERE/build/a4091_040.dis"; \
 	LC_ALL=C m68k-linux-gnu-objdump -dr "$STOCKOBJ" | tail -n +4 | diff - "$HERE/build/a4091_040.dis" | grep -c '^[<>]' || true)
@@ -132,7 +137,7 @@ fi
 
 echo "[*] T-9 gates G1/G2"
 run_step all python3 "$HERE/tools/spl-gate.py" --object "$OBJ" --source "$SRCDIR/a4091-wr.c" \
-	--cflags "$CF" -- -DA4091_KVA -I"$ALIEN" -I"$SRCDIR"
+	--cflags "$CF" -- $DEFS -I"$ALIEN" -I"$SRCDIR"
 echo "[*] 53C710 register access widths (the a4091 lane's gate, from the same revision)"
 run_step indent python3 "$SRCDIR/a4091-widths.py" "$OBJ"
 
@@ -146,15 +151,24 @@ SCANLINES=$(echo "$SCAN" | sed -n 's/.*(\([0-9][0-9]*\) decoded lines).*/\1/p')
 echo "$SCAN" | grep -q 'CLEAN -- no candidate found' \
 	|| { echo "[FAIL] scan060: a4091_040.o is not CLEAN"; exit 1; }
 
-echo "[*] the driver's imports must be exactly these (the D42 seam is not in any kernel yet):"
+echo "[*] the driver's imports must be exactly these (with -DA4091_D42, plus the D42 service):"
 WANT="bprobe dev_kvmap dev_kvunmap printf sdcardbase"
+case " $A4091_OPTS " in
+*" -DA4091_D42 "*)
+	for s in dma_prepare dma_complete; do
+		echo "$NM_IN" | grep -qE " T $s\$" \
+			|| { echo "[FAIL] -DA4091_D42 needs a base that exports $s (src/dma_cache040.s)"; exit 1; }
+	done
+	WANT="bprobe dev_kvmap dev_kvunmap dma_complete dma_prepare printf sdcardbase"
+	echo "      (-DA4091_D42: the base's dma_prepare/dma_complete replace the driver's stubs)" ;;
+esac
 GOT=$(m68k-linux-gnu-nm "$OBJ" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 [ "$GOT" = "$WANT" ] || { echo "[FAIL] unresolved set is: $GOT"; echo "       expected:          $WANT"; exit 1; }
 echo "      $GOT"
-for s in a4091queue a4091_bytewrite_probe a4091_dma040_off a4091_kstat; do
+for s in a4091queue a4091_bytewrite_probe a4091_dma_off a4091_kstat; do
 	m68k-linux-gnu-nm "$OBJ" | grep -qE " [TD] $s\$" || { echo "[FAIL] $s not defined by a4091_040.o"; exit 1; }
 done
-echo "      defines a4091queue, and a4091_bytewrite_probe / a4091_dma040_off / a4091_kstat in .data"
+echo "      defines a4091queue, and a4091_bytewrite_probe / a4091_dma_off / a4091_kstat in .data"
 # COMMON symbols are merged silently with a same-named kernel object by ld -r, so every name the
 # driver defines or leaves COMMON must be new to the base.
 m68k-linux-gnu-nm "$OBJ" | awk '$2 ~ /^[TDBC]$/{print $3}' | LC_ALL=C sort > "$HERE/build/a4091_040.defs"
