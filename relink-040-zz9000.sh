@@ -50,6 +50,7 @@
 #                           instead of its working tree (the pass log records which)
 #   ZZ9000_OPTS="..."       extra single-token driver options, e.g. -DZZ9K_Z3660_CON_1280x800
 #                           -DZZ9K_MONSW (RT-04): switch through the base's /dev/monsw; needs relink-040-monsw.sh first
+#                           -DZZ9K_FB_NC (RT-05): register the framebuffer NC via hat_cm_fb_add
 #   ZZ9000_BASE_SHA256=<hex> refuse any base but that one (the pinned f7vs is
 #                           d43a59ccb7df2ebcdf611a7fa322dd84a4c2166fa9d491078025ef4f9e0fa889)
 set -e
@@ -191,14 +192,26 @@ echo "[*] the driver's kernel imports must be exactly the seven it is known to n
 # ... plus exactly monsw_lastclose/monsw_register/monsw_set when built with -DZZ9K_MONSW (RT-04,
 # amix-z3660rtg 7b449cd): the monitor switch then belongs to /dev/monsw, which the base must
 # already carry -- relink-040-monsw.sh runs before this pass (dd -> z3660 -> monsw -> zz9000 -> fpe).
+# ... and hat_cm_fb_add on top when built with -DZZ9K_FB_NC (RT-05, amix-z3660rtg 26ff2d0): the
+# driver registers its framebuffer window in the base's hat_cm_fb table, so user mappings of it
+# take the NC cache class instead of NCS.  That table is this line's hat040.s; a base without it
+# is refused.
 WANT="autocon bootinfo conputc copyin copyout printf uiomove"
 case " $ZZ9000_OPTS " in
 *" -DZZ9K_MONSW "*)
-	WANT="autocon bootinfo conputc copyin copyout monsw_lastclose monsw_register monsw_set printf uiomove"
+	WANT="$WANT monsw_lastclose monsw_register monsw_set"
 	m68k-linux-gnu-nm "$IN" | grep -qE " T monswinit\$" \
 		|| { echo "[FAIL] -DZZ9K_MONSW needs a base with /dev/monsw -- run relink-040-monsw.sh first"; exit 1; }
 	echo "      (-DZZ9K_MONSW: the monitor switch goes through the base's monsw)" ;;
 esac
+case " $ZZ9000_OPTS " in
+*" -DZZ9K_FB_NC "*)
+	WANT="$WANT hat_cm_fb_add"
+	m68k-linux-gnu-nm "$IN" | grep -qE " T hat_cm_fb_add\$" \
+		|| { echo "[FAIL] -DZZ9K_FB_NC needs a base that exports hat_cm_fb_add (this line's hat040.s)"; exit 1; }
+	echo "      (-DZZ9K_FB_NC: the framebuffer registers as NC through the base's hat_cm_fb_add)" ;;
+esac
+WANT=$(echo $WANT | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 GOT=$(m68k-linux-gnu-nm "$HERE/build/zz9000_040.o" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 [ "$GOT" = "$WANT" ] || { echo "[FAIL] unresolved set is: $GOT"; echo "       expected:          $WANT"; exit 1; }
 echo "      $GOT"
@@ -264,6 +277,14 @@ echo "      chain: parinit -> parinit_zz9000_orig (the base's wrapper @0x$PARINI
 LEAK=$(m68k-linux-gnu-nm "$OUT" | awk '$1=="U" && $2!="edata" && $2!="end" && $2!="etext" {print $2}')
 [ -z "$LEAK" ] || { echo "[FAIL] unresolved symbols:"; echo "$LEAK"; exit 1; }
 echo "[OK] no unresolved symbols"
+case " $ZZ9000_OPTS " in
+*" -DZZ9K_FB_NC "*)
+	N=$(m68k-linux-gnu-readelf -rW "$OUT" | awk '/^Relocation section .\.rela\.text/{t=1;next} /^Relocation section/{t=0} t && $5=="hat_cm_fb_add"' | wc -l)
+	D=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="hat_cm_fb_add" && $2=="T"{print $1}')
+	[ "$N" -ge 1 ] && [ -n "$D" ] \
+		|| { echo "[FAIL] -DZZ9K_FB_NC: no call to a defined hat_cm_fb_add in $OUT"; exit 1; }
+	echo "[OK] framebuffer NC registration linked: hat_cm_fb_add T @0x$D, $N .rela.text reference(s)" ;;
+esac
 
 # ---------------------------------------------------------------- 6. registration
 echo "[*] cdevsw[49] -> zz9000* (major 49 = /dev/zz9000)"
