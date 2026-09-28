@@ -304,6 +304,15 @@ run_step indent python3 "$HERE/src/patch_fpe_vec11.py" "$OUT"
 echo "[*] vector-60 arm (FP unimplemented effective address)"
 run_step indent python3 "$HERE/src/patch_fpe_vec60.py" "$OUT"
 
+# ---------------------------------------------------------------- 8.5 ISSUE-69
+# Stock 2.1c's setuid panics on uid -123456, for any user.  This pass is the last link of every
+# 040/060 kernel this line ships, so the one-byte fix lives here and no family can miss it --
+# except FPE=0, whose whole point is to reproduce the base image unchanged.  This is a deliberate
+# difference from upstream, which records ISSUE-69 and leaves it (KNOWN-ISSUES.md).
+echo "[*] ISSUE-69: the setuid test panic"
+run_step all python3 "$HERE/src/patch_setuid_hook.py" "$OUT"
+run_step all python3 "$HERE/src/patch_setuid_hook.py" "$OUT" --check
+
 # ---------------------------------------------------------------- 9. packaging guards
 # The standard pair every relink in this tree runs, plus the .text one that this build is the
 # first to actually need.

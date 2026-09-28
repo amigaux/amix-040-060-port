@@ -9437,6 +9437,11 @@ then falls through to the normal range check and returns `EINVAL` like every oth
 A patcher would assert the ten bytes `0c92 fffe 1dc0 6600 0014` at `.text 0x44fda` first.
 **Deliberately not done** (owner's decision, 2026-09-26).
 
+**On `driver-line` it is done, and that is a deliberate difference from this tree** (that line's
+owner, 2026-09-28). `src/patch_setuid_hook.py` makes exactly the edit above, after asserting the ten
+bytes and deriving the site from `setuid`'s symbol. `relink-040-fpe.sh` runs it, the last link of
+every kernel that line ships, and `--check` reports whether a kernel still has the hook.
+
 ## ⚠⚠ ISSUE-70 (2026-09-18, RECORDED — reproduced twice, NARROWED 2026-09-28 to the VA2000/Zorro III path): reading the whole VA2000 framebuffer with `xwd -root` wedges the machine seconds later
 
 Trying to take a screenshot of the running X11 desktop for `README.md` wedged the machine, twice
