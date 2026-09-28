@@ -367,11 +367,9 @@ survives as history but its conclusion has been replaced.
 
 **The zz9000 pass defaults to amix-z3660rtg `e23712d`** (PO-13, RT-07: the card blitter for FILLRECT/COPYRECT). `zz9000_040.o` is `40eebe2d` with `-DZZ9K_MONSW` and `0b670dbe` without; the imports are unchanged. The knobs `zz9k_blit_on` and `zz9k_blit_maxarea` are in `.data`; read their addresses from nm, because they move with every build. Built and gated only.
 
-**Pending: the a4091 pass follows amix-a4091's D42 contract (4df8332) once Antti's `dma_cache040.s` service lands.** `relink-040-a4091.sh` still copies `a4091_dma040.h` and checks `a4091_dma040_off`, so it will not build 4df8332 until then. At the next a4091 rebuild:
-- the header becomes `src/a4091_dmarec.h` and the knob `a4091_dma_off`;
-- the default object is `402f4bc8` (imports unchanged);
-- `-DA4091_D42` gives `c7e16481` and is allowed exactly `dma_prepare dma_complete` more.
-Until then, build it with `A4091_REV=96496aa`: the pass has no default revision, and the a4091 working tree at 4df8332 fails.
+**The a4091 pass follows the D42 contract (PO-15).** It defaults to amix-a4091 `4df8332`, and `a4091_040.o` is `402f4bc8` with the driver's stub arm. With `A4091_OPTS=-DA4091_D42` the object is `c7e16481`, which links upstream's `dma_prepare`/`dma_complete` (`src/dma_cache040.s`, contract `docs/contracts/DMA040-SERVICE-RECORD.md`); the pass refuses that build on a base without them. Built and gated only. The emulated proof is DL-02 with the data cache on, where the stub kernel panicked.
+
+**Open against the contract:** the service counts `edge_shared` for misaligned `TO_DEVICE` ranges too, where the call shape says `FROM_DEVICE` only (`KNOWN-ISSUES.md` DRIVER-LINE-1).
 
 ---
 

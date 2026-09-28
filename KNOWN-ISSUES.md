@@ -9838,3 +9838,20 @@ up there. The counter names the problem; it does not solve it.
 **Resolution options (owner decision pending):** a driver-owned, line-aligned bounce buffer for
 sense data, or a line-aligned sense buffer in place of `dp->sense`. Until then, a nonzero
 `edge_shared` on a sense-heavy run is this entry, not a new defect.
+
+**2026-09-29, the service landed** (upstream `ece209f`, `src/dma_cache040.s`; contract
+`docs/contracts/DMA040-SERVICE-RECORD.md`). Compared field by field with the A4091's header
+(`a4091_dmarec.h`) and call-shape note at amix-a4091 `4df8332`:
+- The offsets, field names, magic `"DMAR"`, the `0x60` size, the state values and the call
+  signature all agree.
+- **`edge_shared` counts in either direction.** `dma_prepare` tests `(pa | pa+len) & 15` before
+  it looks at `dir`. The call shape and the header count `FROM_DEVICE` only, with the invariant
+  `edge_shared <= prep_from`. A misaligned `TO_DEVICE` range, which needs no care at complete,
+  would still move the counter.
+- **`version`:** the contract says 1; the call shape and header say 2 (1 was the `0x5c` proposal).
+  The service never reads it.
+- **The zero invariant's scope:** the contract requires `edge_shared == 0` on block-aligned paths
+  only; the call shape requires it everywhere.
+- **Direction macros:** named `DMA040_*` in the contract and `DMA_*` in the header. Same values.
+
+None of this is adapted on this line. It goes back to the contract's author.
