@@ -9855,3 +9855,13 @@ sense data, or a line-aligned sense buffer in place of `dp->sense`. Until then, 
 - **Direction macros:** named `DMA040_*` in the contract and `DMA_*` in the header. Same values.
 
 None of this is adapted on this line. It goes back to the contract's author.
+
+**2026-09-29, resolved for the A4091 by the bounce** (owner's choice; amix-a4091 `fa8732a`, A4-18;
+`relink-040-a4091.sh` defaults to it). The 040/060 arm sends a misaligned `FROM_DEVICE` transfer of
+up to 1 KB through a static 16-byte-aligned buffer and copies it out after `dma_complete`. That covers
+every dd sense read and every short GSIO read. A longer misaligned read is refused with status
+`0xff`. **So on the A4091 line `edge_shared == 0` holds by construction: a nonzero value is a driver
+bug or a foreign caller of the service,** not this entry. The bounce shows in `a4091_kstat`, whose
+magic is now `"A4K2"` (`0x41344b32`): `bounce_n` counts bounced transfers and `bounce_toolong` the
+refused ones, both after `bw_mask[SDCARDS]`. The `DMAR` record is unchanged. The A3091 pilot does
+not use the service, so its sense reads are outside this resolution.
