@@ -9865,3 +9865,15 @@ bug or a foreign caller of the service,** not this entry. The bounce shows in `a
 magic is now `"A4K2"` (`0x41344b32`): `bounce_n` counts bounced transfers and `bounce_toolong` the
 refused ones, both after `bw_mask[SDCARDS]`. The `DMAR` record is unchanged. The A3091 pilot does
 not use the service, so its sense reads are outside this resolution.
+
+**2026-09-30, upstream records the same defect as ISSUE-73, and the contract differences are
+closed** (upstream `e953170`, `0556658`). ISSUE-73 is the canonical record of the shared line, for
+the A3091 pilot's sense read. This entry keeps only what is specific to this line: the A4091's
+bounce, above. The four differences listed on 2026-09-29 are all resolved upstream:
+- `edge_shared` is now counted only on the `FROM_DEVICE` arm. In the object, the direction branch
+  is at `0x118`, `prep_from`+1 at `0x11c`, the alignment test at `0x120`–`0x12a`, and
+  `edge_shared`+1 at `0x12e`; the `TO_DEVICE` path at `0x136` touches only `prep_to`. Checked by
+  disassembly on driver-line after the rebase onto `0e3c12e`.
+- The record is version 2.
+- The macros are `DMA_TO_DEVICE` / `DMA_FROM_DEVICE`.
+- The zero invariant is unconditional.

@@ -369,7 +369,7 @@ survives as history but its conclusion has been replaced.
 
 **The a4091 pass follows the D42 contract and bounces misaligned reads (PO-15 to PO-17).** It defaults to amix-a4091 `6cebff2`, where the bounce's service length is rounded up to 16 bytes and the buffer is cleared before each prepare. `a4091_040.o` is `4641f912` with the driver's stub arm. With `A4091_OPTS=-DA4091_D42` the object is `e07c7619`, which links upstream's `dma_prepare`/`dma_complete` (`src/dma_cache040.s`, contract `docs/contracts/DMA040-SERVICE-RECORD.md`); the pass refuses that build on a base without them. Misaligned `FROM_DEVICE` reads of up to 1 KB go through a 16-byte-aligned bounce, so `edge_shared` stays 0 (`KNOWN-ISSUES.md` DRIVER-LINE-1), and `a4091_kstat` now carries magic `A4K2`. Built and gated only. The emulated proof is DL-02 with the data cache on.
 
-**Open against the contract:** the service counts `edge_shared` for misaligned `TO_DEVICE` ranges too, where the call shape says `FROM_DEVICE` only (`KNOWN-ISSUES.md` DRIVER-LINE-1).
+**The D42 contract differences are closed upstream** (`e953170`, `0556658`): `edge_shared` counts `FROM_DEVICE` only, the record is version 2, and the macros are `DMA_*`. The shared sense line is upstream's ISSUE-73.
 
 ---
 
