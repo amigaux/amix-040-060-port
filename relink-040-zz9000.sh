@@ -120,10 +120,11 @@ ln -s "$AMIX_SYSROOT/usr/sys/amiga/inc"     "$TREE/amiga/inc"
 ln -s "$AMIX_SYSROOT/usr/include/sys"       "$TREE/sys"
 [ -f "$TREE/amiga/console/screen.h" ] && [ -f "$TREE/amiga/inc/amiga.h" ] \
 	|| { echo "ERROR: the sysroot has no usr/sys/amiga/console or usr/sys/amiga/inc"; exit 1; }
-# Pinned (PO-13, 2026-09-28): amix-z3660rtg e23712d, the card-blitter path (RT-07; b7e576c has
-# the same driver bytes).  zz9000_040.o: -DZZ9K_MONSW 40eebe2d..., plain 0b670dbe...  Imports
-# unchanged; the knobs zz9k_blit_on / zz9k_blit_maxarea sit in .data for image patching.
-ZZ9000_REV="${ZZ9000_REV-e23712d}"
+# Pinned (PO-13b, 2026-09-29): amix-z3660rtg 729cbdc -- the card-blitter path (RT-07, e23712d), its
+# fill colour in the RGB register's high half (c9aeb18) and the svga_switch reset at last close.
+# zz9000_040.o: -DZZ9K_MONSW 08500bbb..., plain 3b175753...  Imports unchanged; the knobs
+# zz9k_blit_on / zz9k_blit_maxarea sit in .data for image patching.
+ZZ9000_REV="${ZZ9000_REV-729cbdc}"
 if [ -n "$ZZ9000_REV" ]; then
 	REPO=$(git -C "$ZZ9000_SRC" rev-parse --show-toplevel)
 	REL=$(git -C "$ZZ9000_SRC" rev-parse --show-prefix)

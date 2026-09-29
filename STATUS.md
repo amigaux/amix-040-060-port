@@ -365,7 +365,7 @@ survives as history but its conclusion has been replaced.
 
 **The zz9000 pass can build the RTG framebuffer NC** (`ZZ9000_OPTS` adds `-DZZ9K_FB_NC`, amix-z3660rtg 26ff2d0, RT-05). The driver then registers its window through `hat_cm_fb_add`, and the pass refuses a base that does not export it. The A/B pair (A: monsw only; B: + FB_NC) is built for the metal comparison, and nothing is pinned until that verdict.
 
-**The zz9000 pass defaults to amix-z3660rtg `e23712d`** (PO-13, RT-07: the card blitter for FILLRECT/COPYRECT). `zz9000_040.o` is `40eebe2d` with `-DZZ9K_MONSW` and `0b670dbe` without; the imports are unchanged. The knobs `zz9k_blit_on` and `zz9k_blit_maxarea` are in `.data`; read their addresses from nm, because they move with every build. Built and gated only.
+**The zz9000 pass defaults to amix-z3660rtg `729cbdc`** (PO-13b). That is the card blitter (RT-07, `e23712d`), plus the fill colour in the RGB register's high half (`c9aeb18`) and `SVGAIOCGetMonitorSwitch` answering Amiga after the last close. `zz9000_040.o` is `08500bbb` with `-DZZ9K_MONSW` and `3b175753` without; the imports are unchanged. The knobs `zz9k_blit_on` and `zz9k_blit_maxarea` are in `.data`; read their addresses from nm. Built and gated only.
 
 **The a4091 pass follows the D42 contract (PO-15).** It defaults to amix-a4091 `4df8332`, and `a4091_040.o` is `402f4bc8` with the driver's stub arm. With `A4091_OPTS=-DA4091_D42` the object is `c7e16481`, which links upstream's `dma_prepare`/`dma_complete` (`src/dma_cache040.s`, contract `docs/contracts/DMA040-SERVICE-RECORD.md`); the pass refuses that build on a base without them. Built and gated only. The emulated proof is DL-02 with the data cache on, where the stub kernel panicked.
 
