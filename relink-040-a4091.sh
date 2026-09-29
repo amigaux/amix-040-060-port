@@ -82,12 +82,12 @@ ALIEN="$AMIX_SYSROOT/usr/sys/amiga/alien"
 SRCDIR="$HERE/build/a4091-src"
 rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"
 FILES="src/a4091-wr.c src/a4091_dmarec.h tools/a4091-widths.py"
-# Pinned (PO-16, 2026-09-29): amix-a4091 fa8732a -- the D42 contract's names (4df8332) plus the
-# bounce (A4-18): a misaligned FROM_DEVICE transfer of <= 1 KB goes through a static 16-aligned
-# buffer and is copied out after dma_complete, > 1 KB is refused with status 0xff, so edge_shared
-# stays 0 on this driver.  a4091_kstat's magic is "A4K2" with bounce_n/bounce_toolong after
-# bw_mask[SDCARDS].  a4091_040.o e66fef1e with the stub arm, e1f831ce with -DA4091_D42.
-A4091_REV="${A4091_REV-fa8732a}"
+# Pinned (PO-17, 2026-09-29): amix-a4091 6cebff2 (A4-19) -- the D42 contract's names, the bounce
+# (A4-18: a misaligned FROM_DEVICE transfer of <= 1 KB goes through a static 16-aligned buffer, > 1 KB
+# is refused with status 0xff, so edge_shared stays 0), and now the bounce's service length rounded
+# up to 16 bytes (the SCSI length stays nbyte) with the buffer cleared before prepare, so a short read
+# copies out zeros.  a4091_kstat's magic is "A4K2".  a4091_040.o 4641f912 (stub arm), e07c7619 (D42).
+A4091_REV="${A4091_REV-6cebff2}"
 DEFS="-DA4091_KVA $A4091_OPTS"
 if [ -n "$A4091_REV" ]; then
 	for f in $FILES; do
