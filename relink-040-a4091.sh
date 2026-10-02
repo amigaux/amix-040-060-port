@@ -90,7 +90,10 @@ FILES="src/a4091-wr.c src/a4091_dmarec.h tools/a4091-widths.py"
 # Moved 2026-10-02 to d2f0f07 (A4-21): the "A4091 slow" print is gated on a patchable poll threshold
 # (a4091_slow_poll, default 1,000,000) and a4091_maxpoll records the worst poll.
 # a4091_040.o 9732e320 (stub arm), 726dfbec (D42).
-A4091_REV="${A4091_REV-d2f0f07}"
+# Moved again 2026-10-02 to ff7ee6a (A4-22): one SCSI bus reset per card before its first command,
+# gated by a patchable a4091_busreset, counted in a4091_busreset_n / _to.
+# a4091_040.o 55dde040 (stub arm), 3e239160 (D42).
+A4091_REV="${A4091_REV-ff7ee6a}"
 DEFS="-DA4091_KVA $A4091_OPTS"
 if [ -n "$A4091_REV" ]; then
 	for f in $FILES; do
