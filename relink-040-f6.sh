@@ -24,7 +24,9 @@
 #   sh relink-040-f4arms.sh --ufault --cache 60 <z3660-kernel> <out>
 # Building a round-6 arm over a base without them would silently measure a different kernel:
 # no ufault census, and -- worse -- no cache arm, which is the difference between reaching
-# userland and stopping at swapconf's lookup.
+# userland and stopping at swapconf's lookup.  That last part is true on a Z3660 only: a base
+# without z3660queue has no piscsi driver and so no cache knob, and needs only `--ufault`
+# (2026-10-02, P-15 K2, docs/K2-ARMS-WITHOUT-Z3660.md).
 #
 # usage: sh relink-040-f6.sh [--kvd] [--mcs] [--swa] <in-kernel> <out-kernel>
 set -e
@@ -55,21 +57,28 @@ NM=m68k-linux-gnu-nm
 # ---------------------------------------------------------------- the input's own identity
 # Every one of these is a silent-wrong-kernel trap if it is missing, so they are asserted
 # BEFORE anything is assembled rather than after the link.
-$NM "$IN" | grep -qE " [TtDdBb] z3660queue\$" \
-	|| { echo "[FAIL] $IN has no z3660queue -- this post-pass belongs after relink-040-z3660.sh"; exit 1; }
 $NM "$IN" | grep -qE " [Tt] uft_latch\$" \
 	|| { echo "[FAIL] $IN has no uft_latch -- run relink-040-f4arms.sh --ufault first"; exit 1; }
-$NM "$IN" | grep -qE " [Dd] zc_magic\$" \
-	|| { echo "[FAIL] $IN has no zc_magic -- run relink-040-f4arms.sh --cache 60 first"; exit 1; }
-ZCA=$($NM "$IN" | awk '$3=="z3660_cache" && ($2=="D"||$2=="d") {print $1}')
-[ -n "$ZCA" ] \
-	|| { echo "[FAIL] z3660_cache is still a COMMON in $IN -- the cache arm is not baked in"; exit 1; }
-echo "[OK] the round-5 arms are present: uft_latch, zc_magic, z3660_cache defined in .data"
+# The cache arm is the Z3660 piscsi driver's own coherence knob, so it is required exactly when
+# that driver is in the base (2026-10-02, P-15 K2, docs/K2-ARMS-WITHOUT-Z3660.md).  A base with
+# no z3660queue has no knob to require; its host adapter brings its own coherence (D42, B2).
+if $NM "$IN" | grep -qE " [TtDdBb] z3660queue\$"; then
+	$NM "$IN" | grep -qE " [Dd] zc_magic\$" \
+		|| { echo "[FAIL] $IN has no zc_magic -- run relink-040-f4arms.sh --cache 60 first"; exit 1; }
+	ZCA=$($NM "$IN" | awk '$3=="z3660_cache" && ($2=="D"||$2=="d") {print $1}')
+	[ -n "$ZCA" ] \
+		|| { echo "[FAIL] z3660_cache is still a COMMON in $IN -- the cache arm is not baked in"; exit 1; }
+	echo "[OK] the round-5 arms are present: uft_latch, zc_magic, z3660_cache defined in .data"
 
-# The cache arm's VALUE is read out of the file, not assumed: --cache 0 links identically and
-# stops at swapconf's lookup, which would make every round-6 reading a measurement of the
-# wrong boot.
-run_step indent python3 "$HERE/src/patch_z3660_cache.py" "$IN" --check
+	# The cache arm's VALUE is read out of the file, not assumed: --cache 0 links identically and
+	# stops at swapconf's lookup, which would make every round-6 reading a measurement of the
+	# wrong boot.
+	run_step indent python3 "$HERE/src/patch_z3660_cache.py" "$IN" --check
+else
+	$NM "$IN" | grep -qE " [TtDdBb] (zc_magic|z3660_cache)\$" \
+		&& { echo "[FAIL] $IN has a cache arm but no z3660queue -- an incoherent base"; exit 1; }
+	echo "[OK] no z3660queue: uft_latch present; no cache arm to require (non-Z3660 base)"
+fi
 
 cp "$IN" "$HERE/build/unix-stage-f6"
 

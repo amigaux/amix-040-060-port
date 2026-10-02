@@ -78,8 +78,9 @@ none on our benches). A non-Z3660 060 on metal has never run any of these kernel
 ## 4. Can the generic arms run without a Z3660?
 
 Yes, with small guard changes and no object changes:
-- **f4arms:** require `z3660queue` only when `--cache` is given. `--ufault` (and `--dbg`) take any
-  finished base.
+- **f4arms:** require `z3660queue` only when `--cache` is given. `--ufault` takes any finished base.
+  (`--dbg` keeps the requirement: it can skip swap, so it is not an instrument, and the KD chains
+  do not use it.)
 - **f6:** require the cache arm (`z3660_cache` in `.data`) only when the base has `z3660queue`.
   Without the driver, there is no knob to require. The header's warning ("a different kernel: no
   cache arm") is true only on a Z3660.
