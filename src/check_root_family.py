@@ -35,6 +35,15 @@
 #      retargeted table would walk off the end of one or ignore a row of the other.
 #   3. every row the loop will scan resolves to a DEFINED controller-queue function.
 #   4. rootdev's card < SDCARDS.
+#   5. the root is a SCSI disk (sd, block major 18) or the contract's floppy root (amix-kerntools
+#      contracts/bootchain-v1.json rootdev.floppy, KT-34): rootdev FD0P 0x00400008 (major 16)
+#      with bo_name "/dev/fakeswap", the miniroot's dummydisk.  A floppy root has no card, so
+#      checks 1 and 4 do not apply to it and --require-card refuses it.  Any other major, or
+#      any other floppy minor or swap name, is refused.
+#
+# bo_name is read by symbol, at swapfile + 0x10 (the field kernel-rootdev-stamp.py writes).
+# The `/dev/dsk/c` anchor is kept as a cross-check for a SCSI root: it must occur exactly
+# once, at that field.
 #
 # WHAT IT DOES NOT DO is decide which family is right.  It cannot: whether card 0 is a real
 # A3000 controller or a phantom that answers autoconfig and then does not drive DSACK is a
@@ -58,6 +67,10 @@ LEA_RELOC = 0x0000D74C         # its operand -- the relocation src/patch_z3660.p
 BOUND_SITE = 0x0000D79E        # `moveq #N,%d1`
 MOVEQ_OPCODE = 0x72
 ANCHOR = b"/dev/dsk/c"
+SD_MAJOR, FD_MAJOR = 18, 16
+FD0P = 0x00400008
+FAKESWAP = "/dev/fakeswap"
+BO_NAME_OFF = 0x10             # swapfile.bo_name
 R_68K_32 = 1
 STT_SECTION = 3
 SHN_UNDEF = 0
@@ -205,16 +218,29 @@ def main():
         raise SystemExit("REFUSED: no rootdev in .data -- not an 040-line kernel of this port")
     dev = u32(data, rd["value"])
     g = decode_dev(dev)
-    root_node = node(g["card"], g["unit"], g["slice"])
+    floppy = g["major"] == FD_MAJOR
+    if g["major"] not in (SD_MAJOR, FD_MAJOR):
+        bad.append("rootdev major %d is neither sd (%d) nor the floppy (%d)"
+                   % (g["major"], SD_MAJOR, FD_MAJOR))
+    root_node = "fd0 (FD0P)" if floppy else node(g["card"], g["unit"], g["slice"])
 
     # ---------------------------------------------------------------- the swap node
-    if e.b.count(ANCHOR) != 1:
-        bad.append("the %r anchor occurs %d times, expected exactly once"
-                   % (ANCHOR.decode(), e.b.count(ANCHOR)))
-        swap = None
+    sw = e.lookup("swapfile")
+    if sw is None or e.names[sw["shndx"]] != ".data":
+        raise SystemExit("REFUSED: no swapfile in .data -- not an 040-line kernel of this port")
+    swap = e.cstr(".data", sw["value"] + BO_NAME_OFF)
+    if floppy:
+        if dev != FD0P:
+            bad.append("a floppy root other than FD0P (0x%08x): rootdev 0x%08x" % (FD0P, dev))
+        if swap != FAKESWAP:
+            bad.append("floppy root with bo_name %r, expected %r (rootdev.floppy)" % (swap, FAKESWAP))
     else:
-        o = e.b.index(ANCHOR)
-        swap = e.b[o:e.b.index(b"\0", o)].decode("latin1")
+        at = e.byname[".data"]["offset"] + sw["value"] + BO_NAME_OFF
+        if e.b.count(ANCHOR) != 1 or e.b.index(ANCHOR) != at:
+            bad.append("the %r anchor occurs %d times, expected exactly once, at swapfile.bo_name"
+                       % (ANCHOR.decode(), e.b.count(ANCHOR)))
+        if not (swap or "").startswith(ANCHOR.decode()):
+            bad.append("SCSI root with bo_name %r, not a /dev/dsk/c node" % swap)
 
     # ---------------------------------------------------------------- the controller registry
     if text[LEA_SITE:LEA_SITE + 2] != LEA_OPCODE:
@@ -267,7 +293,7 @@ def main():
     if tsize and tsize % ROW == 0 and tsize // ROW != nrows:
         bad.append("loop bound %d scans %d rows but %s is %d bytes = %d rows"
                    % (bound, nrows, tname, tsize, tsize // ROW))
-    if swap is not None:
+    if not floppy and (swap or "").startswith(ANCHOR.decode()):
         digit = swap[len("/dev/dsk/c")]
         try:
             if int(digit, 16) != g["controller"]:
@@ -275,7 +301,7 @@ def main():
                            % (digit, int(digit, 16), g["controller"]))
         except ValueError:
             bad.append("bo_name controller digit %r is not hex" % digit)
-    if g["card"] >= SDCARDS:
+    if not floppy and g["card"] >= SDCARDS:
         bad.append("rootdev card %d >= SDCARDS %d -- queue[] has no such slot"
                    % (g["card"], SDCARDS))
 
@@ -284,8 +310,11 @@ def main():
     # ---------------------------------------------------------------- the report
     print("   root      rootdev @.data+0x%06x = 0x%08x  major %d minor 0x%02x"
           % (rd["value"], dev, g["major"], g["minor"]))
-    print("             = card %d / target %d / slice %d  ->  %s"
-          % (g["card"], g["unit"], g["slice"], root_node))
+    if floppy:
+        print("             = the floppy, %s (contract rootdev.floppy)" % root_node)
+    else:
+        print("             = card %d / target %d / slice %d  ->  %s"
+              % (g["card"], g["unit"], g["slice"], root_node))
     print("   swap      bo_name %r" % swap)
     print("   registry  %s @.data+0x%06x, loop bound %d -> %d row(s) scanned%s"
           % (tname, toff, bound, nrows,
@@ -293,7 +322,8 @@ def main():
     for (r, ident, qname, label) in rows:
         print("      row %d  id 0x%08x  %-12s %s"
               % (r, ident, qname or "<unrelocated>", "%r" % label if label else ""))
-    print("   FAMILY    root=card%d(%s) queues=%s" % (g["card"], root_node, "+".join(queues)))
+    print("   FAMILY    root=%s queues=%s"
+          % ("floppy(FD0P)" if floppy else "card%d(%s)" % (g["card"], root_node), "+".join(queues)))
 
     # ---------------------------------------------------------------- the requirements
     if want_queue is not None and want_queue not in queues:
@@ -301,7 +331,9 @@ def main():
                    "cannot serve a rig whose root is on that controller, at any RAM size and "
                    "any load base -- the capability is absent, not merely unselected."
                    % (want_queue, "+".join(queues) or "none"))
-    if want_card is not None and g["card"] != want_card:
+    if want_card is not None and floppy:
+        bad.append("--require-card %d: rootdev is the floppy (FD0P), which has no card" % want_card)
+    elif want_card is not None and g["card"] != want_card:
         bad.append("--require-card %d: rootdev names card %d (%s)"
                    % (want_card, g["card"], root_node))
 
