@@ -9920,3 +9920,53 @@ says the SDMAC cannot reach RAM at or above `0x1000000`, but:
 buffer that were cached before the DMA wrote it, and chip RAM is not cacheable, so the bounce fixed
 it as a side effect. On this line the B2 protocol (`src/dma_cache040.s`) already pushes before a DMA
 and invalidates after one for the A3091.
+
+## ✅ DRIVER-LINE-3 (2026-10-02, PROVEN STATICALLY — the cdfs row; one hazard found and guarded): nothing indexes RFS's vfssw row, so cdfs can take it
+
+D44 put cdfs in RFS's vfssw row, provided that nothing in the kernel reaches that row by a fixed
+offset. This entry is that proof. `relink-040-cdfs.sh` makes the change, and
+`src/patch_cdfs_vfssw.py` re-asserts the proof on every build.
+
+**The table.** `vfssw` is 12 rows of 16 bytes in `.data`, and `nfstype` is 12. The rows are BADVFS,
+s5, ufs, fifo, **rfs (row 4)**, xnam, bfs, proc, spec, namefs, fdfs and nfs. Row 4 is
+`{ "rfs", rf_init, 0, 0 }`, which is exactly the shape cdfs needs (`{ "cdfs", cdfsinit, 0, 0 }`).
+`vfsinit` calls each row's init with the row and its index and ignores the result.
+`vfs_mountroot` tries rows 1 to `nfstype-1` in order, so row 4 runs after ufs (row 2). cdfs's
+mountroot answers `EROFS` regardless.
+
+**Nothing indexes row 4.** Every relocation in the image that lands inside the table was listed by
+its offset into the table. All of them point at the table's base except one: `vfsinit`'s store
+to row 0's `vsw_vfsops` (+8). The base references come from mount, dounmount, sysfs/sysfsind/sysfstyp,
+the statvfs routines, cstatfs/xcstat, fsflush, sync, `vfs_getvfssw`, `vfs_mountroot`, `vfsinit`,
+`vfs_fixedmajor` and RFS's `dusr_cstatfs`. Each of them walks the table or indexes it by an
+`fstype` taken from a mounted vfs. `rf_init` is referenced only by row 4, and `rfsys` only by
+`sysent[78]`. `cdfsinit` finds its own row by the name `"cdfs"`. A planted row-4 offset makes
+the check abort (negative control, 2026-10-02).
+
+**The hazard this exposes, and the guard for it.** Without `rf_init`, RFS's tables (`sndd`,
+`rcvd`, `gdp`) are never allocated. This line's tunables would otherwise allocate them (nsndd 150,
+nrcvd 150, maxgdp 24, nrduser 250).
+- Almost every RFS path is gated on `rf_state` (a COMMON, so RF_DOWN). The state cannot leave
+  RF_DOWN, because `rfsys_start` refuses a NULL `sndd` with ENOSYS (89) before it touches
+  `rf_state`; that is the stock kernel's own answer when RFS is configured off.
+- `fs_vcode` (called from s5 `iget`/`s5write`/`s5setattr`/`s5freesp`) reaches `vtord` only when
+  RF_UP. `rf_stime` (called from `stime`) returns 0 unless RF_UP. `systrap` only stores into the
+  u-area when `rf_state` is nonzero.
+- The exception is `rf_setidmap` and `rf_freeidmap`, reached by `rfsys(RF_SETIDMAP)`, which root
+  can issue (`idload`). Both walk `gdp .. gdp + maxgdp` with no RF_UP gate. With `gdp` NULL, that
+  walk reads and writes kernel addresses 0 to 0xde0.
+- So the pass also puts `cdfs_rfsys` in `sysent[78]`: while `sndd` is NULL, every RFS subcommand
+  gets RF_START's answer, ENOSYS. The counter is `cdfs_rfsys_denied`, after `cdfs_glue_magic`
+  `"CDF4"`.
+
+**What else the pass establishes about the object** (amix-cdfs `b383d14`, md5 `83955331…`):
+- scan060 CLEAN; the imports are exactly the 33 expected names.
+- Its `.rodata`, and libgcc's `__clz_tab` in the division helpers, are folded into `.data` by
+  `tools/fold-rodata.sh`.
+- The seven shifts by 11 are all CD-sector arithmetic. NBPP 2048 serves only as a DMA bound,
+  which a 4 KiB page satisfies.
+- The three libgcc helpers it imports come from the toolchain's own `libgcc.a`, and each scans
+  CLEAN.
+
+**Not proven here:** that the result mounts an ISO. That is a boot cell (DL-05) and belongs to
+amix-kerntools.
