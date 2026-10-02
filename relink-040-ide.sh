@@ -83,7 +83,9 @@ rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"
 # (cpushl/cinvl around PIO, the DTTn cache-inhibit check, ide_cache knob), polled-only on this line,
 # spin budgets x4 with the ide_spins_hw high-water, and the MB banner without a >>11.  ide.c includes
 # nothing from its own repository; rico.h and sd.h come from the sysroot's amiga/alien.
-IDE_REV="${IDE_REV-d19812b}"
+# Moved 2026-10-02 to 70e768e (reviewed, gayle-ide tag e2c7122): ATAPI CD-ROM via PACKET
+# passthrough, slave mode 2.
+IDE_REV="${IDE_REV-70e768e}"
 if [ -n "$IDE_REV" ]; then
 	git -C "$REPO" cat-file -e "$IDE_REV:src/ide.c" || { echo "ERROR: src/ide.c does not exist at $IDE_REV in $REPO"; exit 1; }
 	git -C "$REPO" show "$IDE_REV:src/ide.c" > "$SRCDIR/ide.c"
