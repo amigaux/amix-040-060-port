@@ -87,7 +87,10 @@ FILES="src/a4091-wr.c src/a4091_dmarec.h tools/a4091-widths.py"
 # is refused with status 0xff, so edge_shared stays 0), and now the bounce's service length rounded
 # up to 16 bytes (the SCSI length stays nbyte) with the buffer cleared before prepare, so a short read
 # copies out zeros.  a4091_kstat's magic is "A4K2".  a4091_040.o 4641f912 (stub arm), e07c7619 (D42).
-A4091_REV="${A4091_REV-6cebff2}"
+# Moved 2026-10-02 to d2f0f07 (A4-21): the "A4091 slow" print is gated on a patchable poll threshold
+# (a4091_slow_poll, default 1,000,000) and a4091_maxpoll records the worst poll.
+# a4091_040.o 9732e320 (stub arm), 726dfbec (D42).
+A4091_REV="${A4091_REV-d2f0f07}"
 DEFS="-DA4091_KVA $A4091_OPTS"
 if [ -n "$A4091_REV" ]; then
 	for f in $FILES; do
