@@ -9877,3 +9877,46 @@ bounce, above. The four differences listed on 2026-09-29 are all resolved upstre
 - The record is version 2.
 - The macros are `DMA_TO_DEVICE` / `DMA_FROM_DEVICE`.
 - The zero invariant is unconditional.
+
+## ⚠ DRIVER-LINE-2 (2026-10-02, BUILT — host-proven, EMU non-regression pending, HW not run): the A3091 start queue loses its invariant across disconnect and reselect
+
+Numbered outside the `ISSUE-NN` series for the reason DRIVER-LINE-1 gives.
+
+**The defect** (stock `amiga/alien/a3091.c`, found by amix-a4091 on 2026-08-07 by reading the
+interrupt path, fixed there at source in `be2f5e3`). The driver keeps units waiting for the chip on
+a start queue. The reselect path (DFA case 3, also entered from case 2 after it re-queues the unit
+whose selection was pre-empted) resumes the reselecting unit and never takes it off that queue. A
+unit can then be active and queued at once. When its chain drains, the stale entry survives, and the
+next idle `startany` builds a command from a null `comhead`: a wild DMA. Separately, `uqueue` links a
+unit without asking whether it is already linked, which cuts the queue at that unit and strands the
+units behind it. Only real disconnect/reselect traffic reaches either.
+
+**The fix on this line** is `relink-040-a3091q.sh`: three wrappers in `src/a3091q040.s`, reached by
+seven relocation retargets (`src/patch_a3091_queue.py`). `uqueue` refuses a unit that is already
+linked, the resume unlinks the reselecting unit before Antti's B2 re-arm runs, and `startany` drops a
+drained head. The counter block is `a3q_magic` `"A3Q!"` (`0x41335121`). `a3q_on` = 0 is the control
+kernel (`A3091Q_OFF=1`); it differs from the fixed image in that word and the build-id stamp only.
+`src/a3091dbg040.s`'s own recovery path still calls the stock bodies by name, and that is deliberate.
+
+**What is proven, and where:**
+- **Host (qemu-m68k):** `tools/test-a3091q.sh` links the same object against a model of the queue.
+  With the fix on, 10 checks pass, including the case-2-then-case-3 sequence on one unit. With it off,
+  the 6 control checks reproduce the stock defect, so the test can fail.
+- **EMU:** not able to show the fix. Amiberry's WD33C93 never disconnects (`amiberry/src/a2091.cpp`,
+  the intermediate-disconnect branch is compiled out), so cases 2 and 3 never run there and every
+  `a3q_` counter is expected to read 0. An emulator boot can show only that the wrappers are inert.
+- **HW:** not run. A real disconnecting target on the A3000's onboard SCSI under concurrent multi-unit
+  I/O is the only place the defect can occur.
+
+**The bounce half of `be2f5e3`'s patch is not carried, because its premise is refuted.** The patch
+says the SDMAC cannot reach RAM at or above `0x1000000`, but:
+- this line's base kernel roots through the stock, unbounced a3091 on real A3000s with the kernel at
+  `0x07000000` (A3640) and `0x08000000` (Mercury), per `STATUS.md`;
+- Amiberry's SDMAC masks to 24 bits only when a configuration sets `dma24bit`;
+- the failure that motivated the bounce (amix-a4091 `e70c1d7`, a cdfs kernel's RDB read returning
+  zeros) had its buffer near `0x078F0000`, already above 16 MB.
+
+**Hypothesis, not established:** that failure was a stale data cache. The CPU read lines of the
+buffer that were cached before the DMA wrote it, and chip RAM is not cacheable, so the bounce fixed
+it as a side effect. On this line the B2 protocol (`src/dma_cache040.s`) already pushes before a DMA
+and invalidates after one for the A3091.
