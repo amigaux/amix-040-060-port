@@ -24,6 +24,11 @@
 # at .text+0xd74c to the new table, and init()'s loop bound at .text+0xd79f to its row count.
 # check_root_family.py then re-reads the result and must find a4091queue among the rows.
 #
+# Plus one byte in stock autocon() (src/patch_autocon_unsigned.py, DRIVER-LINE-4): it compares
+# the manufacturer id against a SIGNED shift of the product code, so the A4092's maker 0xc0de
+# (>= 0x8000) never matched and the card was never registered.  asr.l -> lsr.l at .text 0x19282;
+# ids below 0x8000 match exactly as before.
+#
 # Order: after relink-040-z3660.sh (patch_z3660.py requires the lea to still name the stock
 # table), before relink-040-fpe.sh (always the last link).  The monsw and zz9000 passes do not
 # touch sd and may run before or after it.
@@ -219,6 +224,8 @@ echo "[OK] no unresolved symbols"
 # ---------------------------------------------------------------- 6. the two sd edits
 echo "[*] sd's init(): table $OLDTABLE -> a4091_scsicard, and its loop bound"
 run_step all python3 "$HERE/src/a4091_sd_rows.py" patch "$OUT" "$OLDTABLE"
+echo "[*] autocon(): an unsigned manufacturer compare, so the A4092's 0xc0de can match (DRIVER-LINE-4)"
+run_step all python3 "$HERE/src/patch_autocon_unsigned.py" "$OUT"
 echo "[*] the result's root-storage family (a4091queue must be among the rows)"
 run_step indent python3 "$HERE/src/check_root_family.py" "$OUT" --require-queue a4091queue
 

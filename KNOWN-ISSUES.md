@@ -9970,3 +9970,37 @@ nrcvd 150, maxgdp 24, nrduser 250).
 
 **Not proven here:** that the result mounts an ISO. That is a boot cell (DL-05) and belongs to
 amix-kerntools.
+
+## ✅ DRIVER-LINE-4 (2026-10-02, FIXED in the a4091 pass — metal re-run pending): stock `autocon()` cannot find a board whose AutoConfig manufacturer is ≥ 0x8000
+
+**Symptom.** This was the first A4092 on metal (A4000D, KD060-ZA). The kernel booted, but the a4091
+driver never attached: `a4091_kstat.attached` and `.nobase` were both 0, and the DMA record was empty.
+A read of the live kernel showed the board in `bootinfo.autocon[0]` with exactly its id
+(`0xC0DE/0x01` at `0x40000000`), but sd's second controller slot (`sd_queue_tbl`) was all zero.
+- The board was handed over correctly. boot2 copies every ConfigDev that expansion.library lists,
+  without filtering (`amix-src` `amiga/boot/boot2.c`, the `FindConfigDev` loop).
+- sd never registered it, so `a4091queue` was never called.
+
+**Cause.** In stock `autocon()` (`amiga/kernel/support.c`), `pc` is a signed `long`, and the
+manufacturer test compares `er_Manufacturer` with `pc >> 16`.
+- For `0xC0DE0001` the shift is arithmetic and gives `0xFFFFC0DE`. The unsigned short
+  `er_Manufacturer` zero-extends to `0x0000C0DE`, so the two never compare equal.
+- In this binary the code is `.text 0x19280`: `7e10 eea0 b085` = `moveq #16,%d7; asr.l %d7,%d0;
+  cmp.l %d5,%d0`.
+- Every manufacturer id met before was below `0x8000` (Commodore `0x0202`, Z3660 `0x144B`, E3B
+  `0x0E3B`). The A4092/A4770's `0xC0DE` is the first one at or above it.
+- In emulation the A4091 presents `0x0202/0x54`, so no rig could show this.
+- The 030 line has the same bug: its kernels compile the same `support.c` expression. amix-a4091
+  owns that fix, `((unsigned long)pc >> 16)` in its `support.c.patch`.
+
+**Fix (this line).** `relink-040-a4091.sh` runs `src/patch_autocon_unsigned.py`, which turns
+`asr.l %d7,%d0` into `lsr.l %d7,%d0` at `.text 0x19282` (`eea0` → `eea8`).
+- It asserts first that the global `autocon` is at `0x19222`, that the context bytes match exactly,
+  and that no relocation covers the site. It refuses anything else and is idempotent.
+- For any id below `0x8000` the two shifts give the same value, so existing rows match exactly as
+  before. The base and the families without the a4091 pass are unchanged.
+- The patched reference chain (`dd → a4091 (D42) → fpe`) differs from the unpatched one in that one
+  byte.
+
+**Verified:** statically, from the chain's own disassembly and the live read. **Not verified:**
+the re-cut KD060-ZA attaching the A4092 on the A4000D.
