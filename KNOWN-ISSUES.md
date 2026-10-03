@@ -10005,7 +10005,7 @@ manufacturer test compares `er_Manufacturer` with `pc >> 16`.
 **Verified:** statically, from the chain's own disassembly and the live read. **Not verified:**
 the re-cut KD060-ZA attaching the A4092 on the A4000D.
 
-## ⚠ DRIVER-LINE-5 (2026-10-03, RECORDED — a stale page constant, correct but narrow; context for DI-1): raw disk I/O still goes out in 2 KiB pieces
+## ⚠ DRIVER-LINE-5 (2026-10-03, RECORDED, AMENDED the same day — stale page constants, correct but narrow; context for DI-1): disk I/O above 4 KiB still goes out in 2 KiB pieces, on the raw path AND the block path
 
 **The fact.** The raw-device path for a SCSI disk is `/dev/rdsk` → `physio` → dd.c's `breakup` →
 `amiga_dma_pageio` (`amix-src` `amiga/alien/physdsk.c`). It bounces each transfer through a
@@ -10022,26 +10022,51 @@ kernel buffer, one NBPP-sized piece at a time.
 length, and the driver moves that many bytes linearly from that physical address. That is only safe
 while a piece stays inside one physical frame.
 - A 2 KiB bounce buffer satisfies this on a 4 KiB page: it is half a frame.
-- The buffer-cache path is a different case. `ddstrategy` → `startio` hands the WHOLE buf to the
-  driver (an 8 KiB UFS block is one request, `nbyte` 8192, dd.c `startio`). Only the raw path is
-  split.
+
+**The block path is split too.** The first version of this entry said the opposite and was
+wrong: it read dd.c alone. Corrected after amix-z3660scsi's DI-1 analysis
+(`docs/DI-1-misplaced-write.md` §3), and verified here against the KD060-Z binary and the SVR4
+reference (`usl-svr42` `common/uts/io/predki.c`: `fix_bswtbl`, `gen_strategy`; `fs/bio.c`:
+`buf_breakup`):
+- `fix_swtbls` (`.text 0x3d684`) puts `gen_strategy` in front of every block driver whose
+  `d_flag` lacks `D_NOBRKUP` (the `btst #4` at `0x3d6aa`). dd's bdevsw entry (`.data 0x9c10`)
+  points `d_flag` at `nullflag` = 0. So every disk bwrite goes through `gen_strategy` (`0x3d988`).
+- `gen_strategy` passes anything up to 4096 bytes through whole (`cmpil #4096` at `0x3d994`, already
+  converted to the Model-B page). A 2 KiB fragment write is still one request.
+- Above that it calls `buf_breakup` (`0x3d17a`). Its first piece is `min(bcount, 4096 −
+  (addr & 4095))`, converted (`andil #4095`, `movel #4096`, `cmpil #4095` at `0x3d1b8`–`0x3d1da`).
+  Every later piece is `min(resid, 2048)`: `pea 0x800` → `min` at `.text 0x3d21e`, **not
+  converted**. Block number and address advance together.
+- On a PAGE-ALIGNED buffer the first piece would be a full 4096. The `bhiw` at `0x3d1e0` then skips
+  it and starts the 2 KiB loop from the beginning. **So an 8 KiB UFS block (the inode block) reaches
+  the driver as four 2 KiB requests**, each one sdcom (dd `startio`; the completion-order shims of
+  `relink-040-dd.sh` sit between them).
+- An unaligned buffer gives one piece to the page boundary, then 2 KiB pieces.
 - (amix-a4091's `a3091.c.patch` commentary says `amiga_dma_pageio` "chunks every block/raw disk ...
-  transfer to a page". On this line that is half a page, and the block path is not chunked at
-  all.)
+  transfer to a page". On this line both breakups chunk to half a page.)
 
 **Why it matters (DI-1, P-15).** A disk on the Z3660 got one 2 KiB piece of an 8 KiB inode block
 replaced by the next piece's data. Pieces 1, 3 and 4 were correct.
-- UFS's own `bwrite` of that block is ONE firmware request, so it cannot produce a single-piece
-  error.
-- A raw writer of the same block can: fsck repairs, mkfs/newfs, tunefs, clri, or a `dd` to
-  `/dev/rdsk`. It sends four consecutive 2 KiB requests, which is the shape of the firmware's
-  register race, where a request lands at the previous request's address.
+- UFS's own `bwrite` of that block goes out as four consecutive 2 KiB requests (above), and so
+  does a raw writer.
+- Either one has the shape of the firmware's register race, where a request lands at the previous
+  request's address. **DI-1 needs no raw writer.**
+- The one kernel-side alternative the z3660scsi analysis leaves open is buffer-memory aliasing (two
+  buffers mapping one frame). A rig capture of the four requests' addresses would settle it.
 
 **Would a bigger piece be correct, and cheaper?** This is a 1.1 item, not 1.0.
-- **4 KiB, one Model-B page.** Correct if the bounce buffer from `ngeteblk(4096)` is page-aligned
-  and so lies in one physical frame. Both constants would change together, and the alignment would
-  have to be checked, not assumed. It halves the number of raw requests and the per-request mailbox
-  and cache-push overhead.
+- **Block path, `buf_breakup` `.text 0x3d21e` `0x800` → `0x1000`.** After the first piece every
+  later piece starts on a page boundary, so a 4 KiB piece stays inside one frame. That is correct
+  as one constant. It halves the requests for an 8 KiB block (two instead of four).
+  - A page-aligned 8 KiB buffer would then go out as two 4 KiB requests, and the skipped first
+    piece is harmless.
+  - `gen_strategy`'s 4096 threshold still passes an unaligned request of 4096 bytes or less whole
+    across a page boundary. That is what `z3660_pagecross_n` counts, and it stays a separate
+    question.
+- **Raw path, `amiga_dma_pageio`, 4 KiB.** Correct if the bounce buffer from `ngeteblk(4096)` is
+  page-aligned and so lies in one physical frame. Both of its constants would change together, and
+  the alignment would have to be checked, not assumed. It halves the number of raw requests and the
+  per-request mailbox and cache-push overhead.
 - **Larger, e.g. the Z3660 driver's 64 KiB `MAXXFER`.** Needs a physically contiguous bounce region
   that `ngeteblk` cannot promise, so it means a dedicated, contiguously allocated pool. Much
   cheaper for raw throughput, but a real change.
