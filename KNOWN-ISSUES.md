@@ -10004,3 +10004,67 @@ manufacturer test compares `er_Manufacturer` with `pc >> 16`.
 
 **Verified:** statically, from the chain's own disassembly and the live read. **Not verified:**
 the re-cut KD060-ZA attaching the A4092 on the A4000D.
+
+## ⚠ DRIVER-LINE-5 (2026-10-03, RECORDED — a stale page constant, correct but narrow; context for DI-1): raw disk I/O still goes out in 2 KiB pieces
+
+**The fact.** The raw-device path for a SCSI disk is `/dev/rdsk` → `physio` → dd.c's `breakup` →
+`amiga_dma_pageio` (`amix-src` `amiga/alien/physdsk.c`). It bounces each transfer through a
+kernel buffer, one NBPP-sized piece at a time.
+- In this line's kernels the piece size is still the stock 2 KiB, not the Model-B page.
+- In KD060-Z (`b9cee294`), `amiga_dma_pageio` at `.text 0xdba8` carries the constant twice:
+  - `.text 0xdbbe`: `pea 0x800` → `ngeteblk(2048)`, the bounce buffer;
+  - `.text 0xdd58`: `pea 0x800` → `min(resid, 2048)`, the per-request piece.
+- The 2 KiB → 4 KiB conversion never touched this unit, so on the 4 KiB-page line a raw transfer of
+  N bytes reaches the host adapter as ⌈N/2048⌉ back-to-back requests, each one sdcom with
+  consecutive block numbers.
+
+**Why it is still correct.** dd's `startio` gives the driver one `vtop()` of the first byte and a
+length, and the driver moves that many bytes linearly from that physical address. That is only safe
+while a piece stays inside one physical frame.
+- A 2 KiB bounce buffer satisfies this on a 4 KiB page: it is half a frame.
+- The buffer-cache path is a different case. `ddstrategy` → `startio` hands the WHOLE buf to the
+  driver (an 8 KiB UFS block is one request, `nbyte` 8192, dd.c `startio`). Only the raw path is
+  split.
+- (amix-a4091's `a3091.c.patch` commentary says `amiga_dma_pageio` "chunks every block/raw disk ...
+  transfer to a page". On this line that is half a page, and the block path is not chunked at
+  all.)
+
+**Why it matters (DI-1, P-15).** A disk on the Z3660 got one 2 KiB piece of an 8 KiB inode block
+replaced by the next piece's data. Pieces 1, 3 and 4 were correct.
+- UFS's own `bwrite` of that block is ONE firmware request, so it cannot produce a single-piece
+  error.
+- A raw writer of the same block can: fsck repairs, mkfs/newfs, tunefs, clri, or a `dd` to
+  `/dev/rdsk`. It sends four consecutive 2 KiB requests, which is the shape of the firmware's
+  register race, where a request lands at the previous request's address.
+
+**Would a bigger piece be correct, and cheaper?** This is a 1.1 item, not 1.0.
+- **4 KiB, one Model-B page.** Correct if the bounce buffer from `ngeteblk(4096)` is page-aligned
+  and so lies in one physical frame. Both constants would change together, and the alignment would
+  have to be checked, not assumed. It halves the number of raw requests and the per-request mailbox
+  and cache-push overhead.
+- **Larger, e.g. the Z3660 driver's 64 KiB `MAXXFER`.** Needs a physically contiguous bounce region
+  that `ngeteblk` cannot promise, so it means a dedicated, contiguously allocated pool. Much
+  cheaper for raw throughput, but a real change.
+- **Neither one fixes DI-1.** Fewer, bigger pieces only reduce exposure to a firmware race between
+  back-to-back requests. The fix belongs in the firmware.
+
+**The Z3660 request, register by register** (amix-z3660scsi `53f43bd` `src/z3660.c`, the object in
+KD060-Z). This is what the firmware sees for each request; a stale read of an early register is
+what misplaces a request.
+
+| # | Write | Value | Where |
+|---|---|---|---|
+| 1 | `P_DRVNUMX` (0x90) | unit | start of `z3660queue`, every command |
+| — | cache push (`--cache 60` only): `cpushl` + `cinvl` per 16-byte line over `[pa & ~15, pa + len)` | — | `z3660_push`, before any address register |
+| 2 | `WRITE_ADDR1` (0x240) / `READ_ADDR1` (0x20) | block number (LBA) | `z3660_rw` |
+| 3 | `WRITE_ADDR2` (0x244) / `READ_ADDR2` (0x24) | byte length | `z3660_rw` |
+| 4 | `WRITE_ADDR3` (0x248) / `READ_ADDR3` (0x28) | buffer physical address | `z3660_rw` — the last data register |
+| 5 | `P_WRITE` / `P_READ` | unit — **the trigger** | `z3660_rw` |
+| (read) | `z3660_sync()`, `P_USED_DMA` readback, then a bounce copy or `z3660_inv(pa, len)` | — | `z3660_rw` read arm |
+
+- `ADDR1` is the OLDEST write when the trigger lands, and `ADDR3` the newest.
+- A request that lands at the previous request's address is a stale `ADDR1`.
+- A request whose data comes from the previous request's buffer is a stale `ADDR3`.
+- One request per `MAXXFER` (64 KiB) chunk, so an 8 KiB block-path write is a single pass through
+  this table.
+- `z3660_pagecross_n` counts chunks that run past a page from their one `vtop`'d address.
