@@ -10436,7 +10436,8 @@ digit of `bo_name`.
 - The pass is idempotent (`[skip]`). `patch_rth1_hook.py --check` passes on the fpe output.
 - **Emulated 68060 (A3000 + Z3660), nine cells:**
   - Kernels: KD060-Z and KD060-ZA on the merged base, with this pass before fpe.
-  - Loaders: the kerntools line's `good_040_rth` candidate, and `good_040` for the old-loader case.
+  - Loaders: the kerntools line's final `good_040_rth` (b14ba6b5), and `good_040` for the old-loader case.
+    A first run with an interim loader (a186bf69, void: a twin-disk bug in it) gave the same table.
   - Read back from `/dev/mem` (`rth1_used`, `rth1_why`, `rootdev`, `bo_name`, the record), not only the
     console.
 
