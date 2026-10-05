@@ -10512,6 +10512,10 @@ without RTH1.
   - unfixed: three console streams with `TS_IOCWAIT` set in leftover state;
   - fixed: `t_state 0` on every ttcompat stream; the only nonzero `t_iocid`/`t_ioccmd` is the telnet pty's,
     which ttcompat itself recorded for a BSD ioctl it handled.
+- **Stress at load** (E5, no typing, 2026-10-05): r6 KD060-Z unfixed **2/100** panics vs fixed **0/100**.
+  - Both unfixed panics were dumped with the same leftover console-stream state (8 / 0x10 / 0x10) as the
+    earlier two.
+  - Not decisive alone (p ≈ 0.25); the dumps are the deterministic part.
 - **Not achieved:** a deterministic reproduction. Seeding freed 68-byte STREAMS buffers through a pipe does not
   land in the next `ttcompatopen` allocation on this allocator: a held-open pty's state read 0/0/0.
 - **Not verified:** metal.
