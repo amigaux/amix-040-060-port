@@ -3912,6 +3912,13 @@ time buys nothing until there is a rate ([[feedback-pause-elusive-bug-hunting]] 
 > The text below is the working record and may contain hypotheses later refuted;
 > STATUS.md §7 lists which.
 
+**Commodore knew a kernel defect with this shape (added 2026-10-03).** The *Known problems* of
+Commodore's *UNIX System V Release 4, Amiga Version 2.1 — Addendum* (public mirror: amigaunix.com, `amix_packages:v2releasenotes.pdf`), p. 17–18, describe programs running out of virtual memory while swap space is still
+free. It happens mostly under OPEN LOOK with less than 20 MB of swap. Their symptoms are "too many
+processes", error 11, the dynamic linker failing to map libraries, and `as_map` retrying, and their
+workaround is more swap. That matches the family recorded here and in ISSUE-40. It is **not
+established** that it is the same defect: no stock kernel has been run against these symptoms.
+
 Seen on the console during the 16-burst acceptance run on `68040-260731-10`, by a human watching the
 screen. It is a kernel `cmn_err` warning, not a panic:
 
@@ -4330,6 +4337,9 @@ the fall-through visible was the one nobody expected to move.
 
 > **Ledger: FIXED** — 68040 hardware. Canonical: [`STATUS.md`](STATUS.md) §4.
 > ⚠ `ptd_wake_n` = 0: the `pt_waiting` branch of the fix has never been exercised.
+
+> Commodore's 2.1 addendum lists a stock out-of-virtual-memory problem with free swap as a known
+> defect. It may be this one or ISSUE-39, which is not established; see the note under ISSUE-39.
 
 This issue was worked entirely in its own documents and never had a section here, which made it
 invisible to anyone reading the numbering. The record, in order:
@@ -9036,6 +9046,19 @@ Note the two fixes are independent and both are worth having:
 Also still open: whether this is the same failure the owner hit before ISSUE-64 was found. Both are
 `kstack` cascades. Nothing distinguishes them yet, and the earlier one was not captured on serial.
 
+### 2026-09-30: an outside data point on the byte write itself
+
+The driver line reports (their letter 08) that they wrote an A4092's SPI flash in circuit from
+AmigaOS **through a Z3660** and read it back byte-exact against the release image. So byte writes
+through that bridge into a Zorro III card are not refused as a class.
+
+That narrows the space without closing it, and the differences matter: their card is an A4092 and
+ours a VA2000, their bridge is the Z3660's and the refusal here was seen on a different machine,
+and a flash-programming path need not touch the same register decode as a framebuffer register
+window. What it does rule out is the widest reading — that a Zorro III card cannot be written a
+byte at a time at all. The refusal here remains a property of some specific decode, and which side
+owns it is still unsettled.
+
 ## ✅ ISSUE-66 (2026-09-07, FIXED AND HARDWARE-ACCEPTED 2026-09-08): `shmat` accepted a 2 KiB-aligned attach address on a 4 KiB kernel, and the segment then outran its anon map
 
 Found by the probe written to ask whether the second 2 KiB survivor from ISSUE-62's hunt was a
@@ -9384,11 +9407,9 @@ cannot be**, which is exactly why this stays a kernel defect: the fix belongs in
 
 ## ⚠⚠ ISSUE-69 (2026-09-26, RECORDED — a stock defect, not fixed here by request): `setuid(-123456)` panics the kernel, for any user
 
-Found by the easter-egg line (`~/kehitys/amix-playground/amix-eastereggs`, egg 005), **to be
-written down and not pursued now**. The full write-up, with the disassembly and a screenshot, is
-theirs: `amix-eastereggs/eggs/005-setuid-test-panic.md`. Same category as ISSUE-41 and ISSUE-68: a
-defect of **stock** AMIX 2.1c, not of this port, recorded because no user program should be able to
-panic the kernel.
+Recorded at the owner's request, **to be written down and not pursued now**. Same category as
+ISSUE-41 and ISSUE-68: a defect of **stock** AMIX 2.1c, not of this port, recorded because no user
+program should be able to panic the kernel.
 
 ### What happens
 
@@ -9414,7 +9435,7 @@ it at `0x9186`.
 
 ### Measured
 
-* **EMU, stock 2.1c kernel** (the easter-egg line's own Amiberry instance, 2026-09-26): run as
+* **EMU, stock 2.1c kernel** (a separate Amiberry instance, 2026-09-26): run as
   `daemon` (uid 1), the machine printed `PANIC: Test Panic!!!` and a backtrace and stopped.
 * **This port's kernels: not tested.** Prediction: they panic the same way. No override unit or
   byte patcher touches `setuid` (no patch offset falls inside `.text 0x44fcc`–`0x450c0`, and
@@ -9814,6 +9835,269 @@ that makes this hazard hard to reason about. Not applied here, because the A3091
 hardware-proven as it stands and the fix wants its own acceptance run — and because the generalized
 service already names this class in `edge_shared`, which is where the A3091 would be measured if it
 ever moves onto `dma_prepare`.
+
+## ✅ ISSUE-74 (2026-09-30, FIXED AND ACCEPTED on `68040-260928-05`, A3000 + Z3660/68060): Xrtg took the console keyboard with `SIOCACTIVATE` and never gave it back, so the console was deaf after every X session
+
+**Symptom, as the driver line reported it.** After an RTG X session ends, the console shell
+receives no keystrokes. Telnet is unaffected. Switching to another virtual console and back
+restores it. They found it on an A4000T with a real keyboard, fixed it on their side, and wrote to
+say they expected Xrtg to have it too, because both descend from the same isoriano rtg input code
+(their letter 07, 2026-09-30).
+
+It was reported here as a known annoyance rather than a bug — the operator had learned the virtual
+console workaround and stopped noticing. That workaround is the diagnosis: switching consoles is
+the one other thing in the system that calls `SelectScreen`.
+
+### The mechanism, read here from the console source before anything was measured
+
+* `rtgOpenInput` issues `SIOCACTIVATE` (`rtg/rtgInit.c`) and nothing in the tree ever issues
+  `SIOCBACK` — the whole server had one half of a pair.
+* The kernel's own `CloseScreen` does not cover for that. Its successor search begins at
+  `sp->next`, and for a screen that is alone in its group `sp->next` is null, so the loop body
+  never executes. It then falls through to setting `activescreen` to zero.
+* The keyboard interrupt path reads `activescreen`, finds no screen, and returns — for every key.
+  Nothing is slow or wedged: the key has nowhere to be delivered.
+* `SIOCBACK` maps to `HideScreen`, which does the thing `CloseScreen` omits: when `sp->next` is
+  null it walks the **whole** `screens[]` table for any screen still in use with both a `kbfunc`
+  and a `mifunc`, and selects that one. It acts only while we are the displayed or the active
+  screen, so calling it when we are neither is harmless.
+
+### Measured, not inferred: the kernel's own globals, read live
+
+Read through `/dev/mem` with stock `od` — no instrument had to be compiled. Addresses came from
+`tools/status-facts.sh`'s COMMON relocation-site table against `build/unix-040-rtg`, load base
+`0x08000000`, which the machine confirmed by content: `activescreen` resolved identically at three
+independent sites and `displayedscreen` at two, to two different addresses.
+
+| what | value |
+|---|---|
+| machine | A3000 with a **Z3660** carrying a 68060 — not the Mercury the same image was first accepted on. The accelerator is named because it mattered elsewhere the same day (see the reach note below) |
+| running kernel | `build/unix-040-rtg` = `68040-260928-05`, sha `a1fa4337`, bound at `0x08000000` (entry bytes and relocated operands match the image; the banner's `68060-` prefix is the CPU, not the image) |
+| `screens` | `0x08142dc8` (three sites agree) |
+| `activescreen` | at `0x08136b80` |
+| `displayedscreen` | at `0x08139b1c` |
+| stride | 300 bytes — from `MAXSCREENS` 32 against the symbol's 9600-byte size, and independently from the `0x12c` multiplier in the indexing code and the `0x08145348` loop bound |
+| console | `screens[0]`, flags `0x0003` (`INUSE|DISPLAY`), `kbfunc` `0x080018dc`, `mifunc` `0x08001858` |
+| Xrtg | `screens[10]` (`0xBB8` = 10 × 300) |
+
+The console row is the one that matters: **a successor existed the whole time.** `HideScreen`
+would have found it at the first slot it looked at. Nothing was missing but the call.
+
+### The accepting run: A/B on one harness, hand-started session, clean `SIGTERM`
+
+XDM had to go first. It masks the fault — the server is respawned within a second and re-activates
+the same screen — and an earlier attempt under XDM produced a reading that took three rebuilds to
+stop misreading. ISSUE-72 had already recorded that XDM confounds exactly this kind of observation;
+the lesson did not transfer on its own.
+
+| binary | during the session | after a clean exit, three samples |
+|---|---|---|
+| before the fix | `0x08143980` (Xrtg's screen) | `0`, `0`, `0` — and it stays there |
+| after the fix | — | `0x08142dc8`, `0x08142dc8`, `0x08142dc8` = `screens[0]`, the console |
+
+The fixed server's log carries `rtgCloseScreen: entered i=0 mapped=1 fd=5` and
+`rtg: SIOCBACK fd=5 rc=0`, so the path is not inferred from the effect.
+
+**And the symptom itself, on the operator's own keyboard.** Leaving XDM now returns the console
+keyboard immediately. The same operator had reported the opposite before the fix — that leaving XDM
+left the keyboard dead until a virtual-console switch and back — so this is a before-and-after on
+the original complaint, taken on the hardware by the person who first noticed it. The variable and
+the keyboard agree, which is the only combination that closes an issue like this one: a measurement
+nobody can feel is not a fix, and a feeling nobody can measure is not a diagnosis.
+
+### The fix
+
+`xrtg-amix`: `rtgHandBackInput()` issues `SIOCBACK`, called at the **top** of `rtgCloseScreen` and
+from `rtgAbort()` for the `FatalError` / `GiveUp` path, which does not run `CloseScreen` at all.
+
+**Placement is the whole fix, and the first attempt had it wrong.** Putting the hand-back after the
+chained `CloseScreen` call — where it reads naturally — produced a server that changed nothing,
+because the chained call is `amixCloseScreen`, which closes `amixFbs[i].fd` and then memsets the
+entire `amixFbs[i]` record. By the time the hand-back ran, its guard was false and the descriptor
+was closed. The same is true of the `CloseScreen(amixFbs[i].fd)` block that was already sitting
+there: it has never run either, and is now marked as such rather than quietly removed.
+
+### Two wrong turns worth keeping
+
+1. **A grep that could not match.** Checking the server log for the new line with
+   `grep "rtgCloseScreen: entered\|SIOCBACK"` returned nothing, and was read as "the code did not
+   run". The guest's 1991 `grep` has no alternation in a basic regular expression, so the pattern
+   matched nothing that exists. The line had been in the file since the first rebuild. This is the
+   project's own "no `-E` on the guest" note, met again from the other direction — there the flag
+   was missing, here the escape was inert.
+2. **A binary grep read as evidence.** `grep -c SIOCBACK` on the installed server returned 0 and
+   was briefly taken to mean the build had not picked up the change. The control — the same grep
+   for `va2000InitHW` and `rtgScreenInit`, strings the running server was printing at that moment —
+   also returned 0. The test had no power; only running the control showed that.
+
+### Not explained, and deliberately left so
+
+Under XDM, with the fixed server, the log shows the hand-back running and succeeding, yet the poll
+still caught `activescreen` at zero for a moment before the next generation claimed it. The
+hand-started A/B above is unambiguous and is the case the report is about, so this is recorded as
+an observation rather than given a mechanism it has not earned.
+
+The driver line offers one candidate, and it is written down as a candidate (their letter 08): a
+race between the old generation's hand-back and the new server's `SIOCACTIVATE` when the respawn
+happens inside a second — something the hand-started case cannot show by construction. They run no
+display manager on their images (a console login and `startx-rtg`), so they have not seen it. Worth
+testing if it ever matters; not tested here.
+
+### Scope beyond here
+
+The input code is shared ancestry, so the ZZ9000 driver's author may carry the same half-pair. The
+driver line has already fixed their side.
+
+## ✅ ISSUE-75 (2026-10-03, a stock defect: REPRODUCED ON DEMAND on `68060-260928-05`, FIXED AND HARDWARE-ACCEPTED on `68060-261003-05`, A3000 + Z3660/68060): a `TCSBRK` on the built-in serial port arms a timer that `close` never cancels, and it runs `getq(0x40)`
+
+**Symptom.** Twice on 2026-10-03 the machine panicked shortly after a user program finished on the
+built-in serial port (`sl`, `c 5,1`, the minor without hardware flow control). Both times the text
+was the same, and it carried no serial-driver frame at all:
+
+```
+WARNING: DBG krnxflt FAILEXIT w=2 va=614E6167 rw=1 depth=1
+TRAP proc = … (pid 156, inetd) psw = 2400, pc = 802BB28
+PANIC: KERNEL FAULT psw=0x2400, pc=0x802BB28, fmt=0x4, vector=0x2 (Bus Error)
+```
+
+The program set the port raw at `B200`, wrote a few dozen bytes, issued `ioctl(fd, TCSBRK, 1)` and
+closed. A third program that did the same writes **without** the `TCSBRK` played to completion and
+left the machine up, including through two telnet connections afterwards.
+
+### The mechanism, read from the stock driver and confirmed against the image
+
+Stock source `usr/sys/amiga/driver/sl.c`, as shipped with 2.1c:
+
+* `slsrvioc`, `TCSBRK` case (around line 844): it acknowledges the ioctl and then calls
+  `slproc(tp, T_BREAK)` **whatever the argument is**. SVR4 defines a non-zero argument as "wait for
+  output to drain, send no break"; this driver always sends the break.
+* `slproc`, `T_BREAK` case (around line 514): sets the break condition and calls
+  `timeout(sl_ttrstrt, tp, HZ/4)`. The callout id is discarded.
+* `slclose` (lines 166–211): clears `t_state`, sets `t_rdqp` and `sl.rdq` to NULL, disables the
+  serial interrupts, and returns. It never cancels the callout. The file has an `untimeout` only for
+  `tictoc`, which nothing ever assigns.
+* `sl_ttrstrt` (line 867) calls `slproc(tp, T_TIME)`, which calls `getoblk(tp)`. `getoblk`
+  (line 216) takes `WR(tp->t_rdqp)` with no NULL check.
+
+So a `TCSBRK` followed by a `close` within a quarter of a second leaves a callout that, 250 ms
+later, calls `getq((queue_t *)0 + 1)` = **`getq(0x40)`** (`sizeof(queue_t)` is `0x40`). In the
+image `build/unix-040-rtg` of `260928-05`, `getoblk` (`.text 0x11e86`) forms that address as
+`moveq #64` plus `t_rdqp`, with no test in front of it, and `pc 0x802BB28` is `getq+0x4c`
+(`.text 0x2bb28`) at load base `0x08000000`.
+
+### What `getq(0x40)` reads on this machine, measured
+
+Kernel VA `0x40` is inside DTT0 (`0x003FC060`: 0–1 GB, supervisor), so it is physical chip RAM
+`0x40`. The kernel's VBR is `&M68Kvec`, so that memory is **not** the live vector table: it is the
+exception vector table Kickstart left behind. Read live through `/dev/kmem` on solon (Kickstart
+with exec 47.13), identical before and after the measurements below:
+
+```
+ 40: 00f80b4a 00f80b4c 00f80b4e 00f80b50
+ 50: 00f80b52 00f80b54 00f80b56 00f80b58
+ 60: 00f80b5a 00f8122c 00f81284 00f812c4
+ 70: 00f8131c 00f813bc 00f81406 00f80e9e
+```
+
+Following `getq` instruction by instruction over those bytes, with ROM read through `/dev/kmem`:
+
+| step | read | value |
+|---|---|---|
+| `q_first` = `*(0x44)` | vector 17 | `0x00f80b4c` — a ROM address, so non-NULL |
+| `b_flag` low byte = `*(0x00f80b4c + 27)` | ROM | `0xef` — bit 3, `MSGNOGET`, is set |
+| so `getq` takes its "skip `MSGNOGET` messages" loop; `b_next` = `*(0x00f80b4c)` | ROM code bytes | `0x614e614c` |
+| next `btst #3, 27(a3)` | `0x614e614c + 27` | **`0x614e6167`** — unmapped, bus error at `getq+0x4c` |
+
+That is the panic's `va` and `pc` exactly. The process the panic names is whatever happened to be
+current when the callout ran (inetd twice, `flopd` in the reproduction), not a participant.
+
+### Reproduced on demand (HW, 060, 2026-10-03)
+
+A small program (open `c 5,1` with `O_NDELAY`, optionally `TCSBRK 1`, close, sleep 2 s, read
+`0x40`–`0x7f` again) was written with the prediction stated first: control survives and nothing at
+`0x40`–`0x7f` changes; with `TCSBRK` the machine panics with `va=614E6167`, `pc=0x802BB28` before
+the second read.
+
+* **Control** (open, close): machine up, the 64 bytes unchanged.
+* **With `TCSBRK 1`**: `TCSBRK rc=0`, `closed` printed, the second read never arrived, ping lost
+  within about a second; the console showed `va=614E6167`, `pc=0x802BB28`, `proc` = `flopd`
+  (pid 43). Prediction met.
+
+The two earlier panics were noticed at the next telnet login, about a minute later. That delay was
+not measured, and the reproduction shows the fault itself lands within two seconds of `close`.
+
+### Scope
+
+* **The defect is stock code**; nothing in this port touches `sl`. It is older than 2.1: the
+  `sl.c` shipped with 2.01 differs from 2.1c's only in the `B200` divisor (the MIDI rate), so the
+  `TCSBRK` callout and `slclose` are identical. The 2.1 addendum describes the serial driver as
+  rewritten since 1.1. What the stale `getq` does next
+  depends on what the low 128 bytes of chip RAM hold, which depends on the Kickstart version, and
+  on how the kernel maps VA `0x40`. **Stock 2.1c on a 68030 is not tested**: it may fault, loop
+  harmlessly, or quietly write into the leftover vectors, since `getq` also stores through `q`.
+* Even where it does not fault, it is wrong: `getq` writes `q_first`/`q_flag` at `0x44`/`0x5c`
+  and may hand a ROM "message" to `getoblk`.
+* A second, separate stock defect follows from the same lines: `TCSBRK` with a non-zero argument
+  should drain and must not send a break. Any program that "drains" with `TCSBRK 1` sends a
+  250 ms break down the line instead.
+
+### The fix (2026-10-03, `src/patch_sl_closedq.py`, first in `68040-261003-05`)
+
+Neither `sl_ttrstrt` (32 bytes, two fixed relocations) nor `getoblk`'s prologue has room for a
+test, and `getoblk` is a local symbol in three drivers (`co`, `ql`, `sl`), so `--weaken-symbol`
+cannot select this one. The guard therefore sits one level up, at the two places that call
+`getoblk` from a callout: `slproc`'s `T_TIME` case (`.text 0x12390`, 36 bytes) and `delay`
+(`.text 0x11fb6`, 16 bytes), the `M_DELAY` callout. Both clear `TIMEOUT` with a single
+`andiw` inside a `spltty`/`splx` pair. A read-modify-write of memory is one instruction, so no
+interrupt can split it, and the pair adds nothing. Its bytes pay for `tstl t_rdqp` and a branch
+past `getoblk` when the stream is closed. `sl_ttrstrt` still calls `slparam(OPEN)` first, so the
+break is still cleared after a close, as stock does.
+
+The patcher asserts the old bytes and that no relocation lies inside either span. A rebuild
+differs from the unpatched build of the same tree by exactly those 52 bytes plus the build-id stamp.
+
+**Not covered:** the `bufcall(getoblk)` that `TCGETA`/`TCGETS` arm when `allocb` fails. It is a
+third way to reach `getoblk` after a close, and needs an allocation failure followed by a close.
+The other `TCSBRK` defect (a non-zero argument sends a break and does not drain) is unchanged.
+
+### Accepted on hardware (HW, 060, 2026-10-03, `68040-261003-05`)
+
+The prediction was written down before the boot: open + `TCSBRK 1` + close survives, and
+`0x40`–`0x7f` reads the same before and after. `uname -m` read `68060-261003-05`. The same program
+that panicked `260928-05` within two seconds then ran **four times** (once, then three in a loop).
+Every run printed both reads with `0x44` = `0x00f80b4c`, unchanged. The machine stayed up through
+`uptime` and a fresh telnet login afterwards. Prediction met.
+
+This run tested ISSUE-75 only. The regression battery has not been run on `261003-05`, and the
+image also carries the base changes made after `260928-05`.
+
+## ✅ ISSUE-76 (2026-10-03, a stock defect: FIXED, not exercised on hardware here — no board with such an id in this machine): `autocon()` never matches a manufacturer id at or above `0x8000`
+
+**Reported by the driver line** (their letter 12, 2026-10-03), found while bringing up an A4092,
+whose manufacturer id is `0xC0DE`. They carry the same one-instruction fix in their relink.
+
+### The mechanism, checked here against the source and the image
+
+Stock `usr/sys/amiga/kernel/support.c`, `autocon` (around line 314): the board key `pc` is a
+`long`, and the manufacturer half is compared as `pc >> 16`. In the image, `.text 0x19282` is
+`asrl %d7,%d0`, an arithmetic shift, so `0xC0DE0001` becomes `0xFFFFC0DE`. The table side is the
+16-bit `er_Manufacturer`, loaded with `movew` into a cleared `%d5`, so it is `0x0000C0DE`. The
+two can never be equal for any id with bit 15 set, and `autocon` reports the board absent.
+
+### Who it touches
+
+Nothing this tree looks up today. The manufacturer ids in the stock drivers are `0x0202`,
+`0x0406`, `0x041d` and `0x07ee`, and the external drivers use `0x6d6e` (VA2000) and `0x144b`
+(Z3660). All are below `0x8000`, and for those `asrl` and `lsrl` give the same result. The
+defect bites the first driver written for a board above that line.
+
+### The fix (`src/patch_autocon_lsr.py`)
+
+One byte: `eea0` → `eea8`, i.e. `lsrl %d7,%d0`. The product compare that follows masks with
+`0xffff` and is unchanged. The patcher asserts the ten bytes around the shift. A rebuild differs
+from the unpatched one in exactly that byte and the build-id stamp. **Not exercised on hardware
+here**, because no board in this machine has such an id. That the low-id path is unchanged follows
+from the instruction semantics, not from a run.
 
 ## ⚠ DRIVER-LINE-1 (2026-09-28, RECORDED — owner decision pending): dd's REQUEST SENSE buffer shares a cache line with the next unit
 
