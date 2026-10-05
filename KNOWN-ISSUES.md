@@ -10255,7 +10255,7 @@ nrcvd 150, maxgdp 24, nrduser 250).
 **Not proven here:** that the result mounts an ISO. That is a boot cell (DL-05) and belongs to
 amix-kerntools.
 
-## ✅ DRIVER-LINE-4 (2026-10-02, FIXED in the a4091 pass — metal re-run pending): stock `autocon()` cannot find a board whose AutoConfig manufacturer is ≥ 0x8000
+## ✅ DRIVER-LINE-4 (2026-10-02, FIXED in the a4091 pass, HARDWARE-ACCEPTED 2026-10-05 on the A4000D; upstream's record is ISSUE-76): stock `autocon()` cannot find a board whose AutoConfig manufacturer is ≥ 0x8000
 
 **Symptom.** This was the first A4092 on metal (A4000D, KD060-ZA). The kernel booted, but the a4091
 driver never attached: `a4091_kstat.attached` and `.nobase` were both 0, and the DMA record was empty.
@@ -10286,8 +10286,22 @@ manufacturer test compares `er_Manufacturer` with `pc >> 16`.
 - The patched reference chain (`dd → a4091 (D42) → fpe`) differs from the unpatched one in that one
   byte.
 
-**Verified:** statically, from the chain's own disassembly and the live read. **Not verified:**
-the re-cut KD060-ZA attaching the A4092 on the A4000D.
+**Verified:** statically, from the chain's own disassembly and the live read.
+
+**2026-10-03, upstream records the same defect as ISSUE-76** (`3c77fdd`, `src/patch_autocon_lsr.py`,
+run from `relink-040.sh`). ISSUE-76 is the canonical record. Its patch writes the same byte at the
+same site, so since the merge of upstream `8f272c1` (`45613c2`) the base carries the fix and the
+a4091 pass's patcher reports `[skip]`. It stays in the pass as an idempotent guard for older bases.
+The families without the a4091 pass now carry the fix too.
+
+**Accepted on hardware, 2026-10-05** (A4000D, Z3660 with a real 68LC060, A4092 with ROM 42.39;
+kernel KD060-ZA-CD, build `68060-261005-51`, the ZA chain with the `lsr.l`). This is the hardware
+evidence ISSUE-76 lacks:
+- `autocon()` matched `0xC0DE/0x01`, and the driver attached: `a4091: card 1: board at 0x40000000`,
+  `a4091_kstat.attached` = 1.
+- A `cdfs` mount of a ZuluSCSI CD image at 1,3 read 4 of 4 packages with exact checksums. The DMA
+  record showed 9841 `FROM_DEVICE` transfers, prepared and completed, with 0 mismatches and 0 errors.
+- A full install from that CD completed (review board T-29).
 
 ## ⚠ DRIVER-LINE-5 (2026-10-03, RECORDED, AMENDED the same day — stale page constants, correct but narrow; context for DI-1): disk I/O above 4 KiB still goes out in 2 KiB pieces, on the raw path AND the block path
 
