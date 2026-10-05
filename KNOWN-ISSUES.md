@@ -10151,3 +10151,66 @@ ships in every kernel of their 1.0, including their 68030 kit at `ttcompatopen` 
 It is to arrive here as an opt-in pass. Asked of them (letter 23): the 64 bytes have room for
 thirteen `clrl`, which would clear all of 12..0x43, the same as the USL `bzero`, instead of three
 chosen fields.
+
+## ⚠ DRIVER-LINE-6 (2026-10-05, BUILT — host-proven, EMU-proven on nine cells, HW not run): the kernel roots on its compiled `rootdev`, so every family needed one kernel per target unit
+
+**Symptom (by design, not a crash).** The boot loader hands the kernel `d0 = 3` and `d1 = struct bootinfo *`
+and nothing about the disk it came from. The root is therefore the compiled `rootdev`, and the swap is the
+compiled `swapfile.bo_name`. To install on another unit, a family existed as one kernel file per controller
+and unit, 14 per family. The files differed in two bytes: the low byte of `rootdev` and the controller
+digit of `bo_name`.
+
+**Fix (this line): the RTH1 root hint, `docs/contracts/RTH1-ROOT-HINT.md`.**
+- **The loader** (the kerntools line's `good_040_rth` / `good_rth`) leaves a record in `bootinfo.reserved`
+  at kernel `bootinfo+0x678`. The record names the BootNode that was booted and, when the installer wrote
+  one, a root record. The loader has the root record from the kernel info block's `ib_pad`.
+- **`relink-040-rth1.sh`** links `src/rth1.c`. `src/patch_rth1_hook.py` retargets the one relocation of
+  main's `jsr vfs_mountroot` (`.text 0x5983a`, operand `0x5983c`, in the merged base) to
+  `rth1_mountroot()`.
+- **`rth1_apply()`:**
+  - checks the record and resolves the named controller among sd's two;
+  - then sets `rootdev` (slice 1) and the `bo_name` digit (slice 2) together, or leaves both;
+  - prints one `RTH1:` console line in every case;
+  - keeps what it did in `rth1_used` / `rth1_why`.
+- **A valid record naming an empty unit fails the mount; it never falls back.**
+- **Old and new mix:** an old loader leaves zeros, so the kernel uses the built-in root. An old kernel never
+  reads the area.
+
+**Two facts this work found, kept here because each would be rediscovered the hard way:**
+- **sd registers its controllers lazily.** Its static `init()` (`.text 0xd736`) runs only from `sdopen()`
+  (`.text 0xd6c4`) on the first disk open, which is normally the root's own open inside `vfs_mountroot`.
+  Before that, `sdcardbase()` answers 0 for every card. The first emulator cells resolved nothing until
+  `rth1_apply()` called `sdopen(0)` itself. The call is guarded, so the root's open later finds the init
+  done.
+- **`/dev/dsk/c` must occur exactly once in the image**, at `swapfile.bo_name`. `check_root_family.py` and
+  the 68030 line's stamper find the swap name by that anchor, so `rth1.c` compares the prefix without the
+  `c`.
+
+**Also corrected:** a wrong swap name is not harmless. `swapconf` (`.text 0xb401e`) calls `cmn_err` at level 3
+(panic) when `lookupname(bo_name)` fails (`0xb405c`), so the swap digit must move with the root.
+
+**Verified:**
+- `tools/test-rth1.sh` (the real object on qemu-m68k, 21 cases: every reject reason, both cards, unit 7 →
+  `f`, motherboard rows, a damaged root record without fallback, the lazy sd init, the wrapper order).
+- `scan060` CLEAN on `rth1.o`: no divide, no multiply.
+- The pass is idempotent (`[skip]`). `patch_rth1_hook.py --check` passes on the fpe output.
+- **Emulated 68060 (A3000 + Z3660), nine cells:**
+  - Kernels: KD060-Z and KD060-ZA on the merged base, with this pass before fpe.
+  - Loaders: the kerntools line's `good_040_rth` candidate, and `good_040` for the old-loader case.
+  - Read back from `/dev/mem` (`rth1_used`, `rth1_why`, `rootdev`, `bo_name`, the record), not only the
+    console.
+
+  | cell | case | result |
+  |---|---|---|
+  | 1 | old loader + new kernel | `built in (no record)`, root `c6d0s1`, as today |
+  | 2 | new + new, booted from the A3000 SCSI | record BOOT\|BMOBO; no motherboard controller registered (AGA: W-D7 skips it), so `built in (controller not present)` and `c6d0s1` |
+  | 3 | root record, Z3660 unit 6 | `from the root record`, `c6d0s1` |
+  | 4 | root record, Z3660 unit 3, disk moved there | `c3d0s1` / `c3d0s2`, multiuser |
+  | 5 | root record naming the empty Z3660 unit 2 | `RTH1: root c2d0s1 from the root record ...`, then `vfs_mountroot` fails: no fallback |
+  | 6 | root record, A4091 unit 1 (card 1) | `c9d0s1` |
+  | 7 | root record, A4091 unit 6 | `ced0s1` |
+  | 8 | the A4091 boots its own disk, unit 6 (BOOT\|BCDEV, board 0x48000000) | `from the boot disk`, `ced0s1` |
+  | 9 | as 8, the disk moved to unit 2 | `cad0s1`, multiuser |
+
+  Cells, logs and decoded dumps are kept with the driver line's evidence, outside this tree.
+- **Not verified:** metal.

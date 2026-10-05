@@ -111,7 +111,9 @@ It names the root disk explicitly. It is needed when the root is not on the disk
 
 **Hook.** `rth1_mountroot()` runs at the one call to `vfs_mountroot` in `main`. It calls `rth1_apply()`
 and then `vfs_mountroot()`.
-- By then `io_init` has run, so sd has registered its controllers.
+- sd registers its controllers lazily: its static `init()` runs from `sdopen()`, on the first open of
+  any disk, which would otherwise be the root's own open inside `vfs_mountroot`. So `rth1_apply()` calls
+  `sdopen(0)` first. The init is guarded, so the root's open later finds it done.
 - On the 68040/68060 line this is a retarget of that call's relocation (`.text 0x5983c` in the merged
   driver-line base), asserted against its current target.
 - On the 68030 line it is the same retarget in the kit's `main` object.
