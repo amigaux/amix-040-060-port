@@ -64,20 +64,21 @@ version is not 1.
 ### The rule for "the BootNode that was booted" (loader)
 
 The strap hands boot1 an open `struct IOStdReq` on the partition, and boot1 passes it to boot2. boot2 walks
-`ExpansionBase->MountList` and keeps a BootNode only if:
+`ExpansionBase->MountList` and keeps a BootNode only if all three hold:
 
-- its `FileSysStartupMsg`'s `fssm_Device` (a BSTR) equals `iob->io_Device`'s name; and
+- its `FileSysStartupMsg`'s `fssm_Device` (a BSTR) equals `iob->io_Device`'s name;
 - its `DosEnvec` start, `de_LowCyl × de_Surfaces × de_BlocksPerTrack × de_SizeBlock × 4`, equals the
-  partition start. The partition start is the kernel info block's offset − 0x2600.
+  partition start, which is the kernel info block's offset − 0x2600;
+- `OpenDevice(fssm_Device, fssm_Unit)` on it yields `iob->io_Unit`. The loader closes the device again.
+
+The `OpenDevice` test is applied to every candidate, not only when two survive. It costs fewer bytes than a
+second pass. Exactly one node kept means `RTH_BOOT` and `boot_unit`; more than one means `RTH_AMBIG`.
 
 **Matching on the name or the DosType alone is not enough.**
 - On the Z3660 the firmware's mounter also lists `UNIX_Root` and `UNIX_Swap` (priority −128, despite their
   NOMOUNT flags). Measured on the A4000D, 2026-10-05.
 - Two disks laid out identically on one controller (an install source and its target) give two nodes with
-  the same name and start.
-- When more than one node survives, the loader opens each candidate (`OpenDevice(fssm_Device, fssm_Unit)`)
-  and keeps the one whose `io_Unit` equals `iob->io_Unit`. If that still leaves anything but exactly one,
-  it sets `RTH_AMBIG` and not `RTH_BOOT`.
+  the same name and start; only the unit test separates them.
 
 ## The root record — `struct rto1`, 0x1c bytes, written by the installer
 
