@@ -10456,7 +10456,7 @@ digit of `bo_name`.
   Cells, logs and decoded dumps are in workspace `tmp/2026-10-05-rootdev-hint/impl/`.
 - **Not verified:** metal.
 
-## ⚠ DRIVER-LINE-7 (2026-10-05, a stock defect: FIX BUILT as an opt-in pass, EMU-proven by dump; not in any card set yet): `ttcompatopen()` leaves the state the ioctl-ack path trusts uninitialised, so a console stream can panic the kernel at boot with `ttcompat: unexpected ioctl acknowledgment`
+## ✅ DRIVER-LINE-7 (2026-10-05, a stock defect: FIXED, default in `relink-040-fpe.sh` step 8.6 and in the r6 card set by the owner's decision; EMU-proven by dump; HW not run): `ttcompatopen()` leaves the state the ioctl-ack path trusts uninitialised, so a console stream can panic the kernel at boot with `ttcompat: unexpected ioctl acknowledgment`
 
 **Symptom.** Rarely, about 70 s into a boot, right after "The system is ready" and the hostname line:
 `PANIC: ttcompat: unexpected ioctl acknowledgment`. The backtrace is `ioctl → strioctl → strdoioctl →
@@ -10489,15 +10489,20 @@ without RTH1.
   with `t_state 0x3e` (TS_IOCWAIT set) / `0x22` / `0x22`. Only the odds move with the build.
 - **Not involved:** `sl` and ISSUE-75; no ttcompat stream is on the serial port.
 
-**Fix (this line, opt-in): `src/patch_ttcompat_init.py`, run by `relink-040-ttcompat.sh`.**
+**Fix (this line): `src/patch_ttcompat_init.py`, run by `relink-040-fpe.sh` (step 8.6, after the ISSUE-69 step) on every kernel.**
 - The 16 single-byte `clrb %a0@(12..27)` (64 bytes at `ttcompatopen+0x80`) become four `clrl` of the same
   bytes, plus `clrl` of +56, +60 and +64, and nops.
 - Same length, no relocation in the span, no layout change. Found by symbol; asserts the stock bytes;
   idempotent; has a `--check` mode.
 - Everything cleared before is still cleared.
-- **Not in `relink-040.sh`'s default list:** a default chain keeps producing today's bytes until a card set
-  takes the fix.
-- **Run it before `relink-040-fpe.sh`,** which stamps the build id.
+- **Default since r6** (owner's decision, 2026-10-05):
+  - The fpe pass is the last link of every 040/060 kernel and stamps the build id, so no kernel of this line
+    is cut without the fix by accident.
+  - `TTCOMPAT_INIT=0` is the deliberate opt-out, which reproduces a pre-r6 image.
+  - `relink-040-ttcompat.sh` applies it explicitly earlier in a chain; fpe then reports `[skip]`.
+  - Measured in a scratch tree: default fpe equals the explicit pass followed by the old fpe;
+    `TTCOMPAT_INIT=0` equals the old fpe output; both byte for byte.
+- **Exposure:** every kernel before r6, the K1 r5 release kernels included, carries the stock defect.
 - The 68030 kit's ET_REL carries the same 64 bytes (K030-U: `ttcompatopen` at `.text 0x39a38`), so the same
   tool applies there before `elf2brel`.
 - `tools/test-ttcompat-init.sh` (8 cases, hermetic).

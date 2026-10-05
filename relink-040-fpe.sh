@@ -12,6 +12,7 @@
 #
 #   sh relink-040-fpe.sh [base-kernel] [output]
 #   FPE=0 sh relink-040-fpe.sh ...        rollback: reproduce the base image byte for byte
+#   TTCOMPAT_INIT=0 sh relink-040-fpe.sh ...  opt out of DRIVER-LINE-7 (step 8.6): a pre-r6 image
 #
 #   FPE_REQUIRE_QUEUE=z3660queue FPE_REQUIRE_CARD=1 sh relink-040-fpe.sh ...
 #                                         refuse a base whose root-storage family is not the
@@ -289,6 +290,20 @@ run_step indent python3 "$HERE/src/patch_fpe_vec60.py" "$OUT"
 echo "[*] ISSUE-69: the setuid test panic"
 run_step all python3 "$HERE/src/patch_setuid_hook.py" "$OUT"
 run_step all python3 "$HERE/src/patch_setuid_hook.py" "$OUT" --check
+
+# ---------------------------------------------------------------- 8.6 DRIVER-LINE-7
+# Stock ttcompatopen leaves t_state/t_iocid/t_ioccmd uninitialised, and a console stream can then
+# panic the kernel at boot ("ttcompat: unexpected ioctl acknowledgment").  In the r6 card set by the
+# owner's decision (2026-10-05), so it lives here for the same reason as ISSUE-69: every kernel of
+# this line passes through this step.  Idempotent: a chain that ran relink-040-ttcompat.sh earlier
+# gets [skip].  TTCOMPAT_INIT=0 is the deliberate opt-out (reproducing a pre-r6 image).
+if [ "${TTCOMPAT_INIT:-1}" = 0 ]; then
+	echo "[*] DRIVER-LINE-7: ttcompat state init SKIPPED (TTCOMPAT_INIT=0, deliberate opt-out)"
+else
+	echo "[*] DRIVER-LINE-7: clear the ttcompat state at open"
+	run_step all python3 "$HERE/src/patch_ttcompat_init.py" "$OUT"
+	run_step all python3 "$HERE/src/patch_ttcompat_init.py" --check "$OUT"
+fi
 
 # ---------------------------------------------------------------- 9. packaging guards
 # The standard pair every relink in this tree runs, plus the .text one that this build is the

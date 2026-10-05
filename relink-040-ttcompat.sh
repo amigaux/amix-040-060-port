@@ -1,11 +1,11 @@
 #!/bin/sh
-# relink-040-ttcompat.sh -- OPT-IN: clear the three ttcompat state fields the stock open leaves
+# relink-040-ttcompat.sh -- EXPLICIT: clear the three ttcompat state fields the stock open leaves
 # uninitialised (DRIVER-LINE-7, src/patch_ttcompat_init.py; 2026-10-05).
 #
-# Not in relink-040.sh's base list, on purpose: until the fix is decided for a card set, a default
-# chain must keep producing today's bytes.  When it is wanted, run this pass anywhere in the chain
-# BEFORE relink-040-fpe.sh: fpe stamps the build id, and patching after the stamp would give one build
-# id two byte-sets.  It links nothing; it is a same-length byte patch located by symbol.
+# Since r6 (owner's decision, 2026-10-05) the fix is DEFAULT: relink-040-fpe.sh applies it in its
+# step 8.6 to every kernel, before it stamps the build id (TTCOMPAT_INIT=0 opts out).  This pass stays
+# for applying it explicitly earlier in a chain; fpe then reports [skip].  Like fpe's step, it must run
+# BEFORE the build id is stamped.  It links nothing; it is a same-length byte patch located by symbol.
 #
 # usage: sh relink-040-ttcompat.sh [base-kernel] [output]
 set -e
