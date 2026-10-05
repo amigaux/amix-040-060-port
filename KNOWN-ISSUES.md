@@ -10455,3 +10455,58 @@ digit of `bo_name`.
 
   Cells, logs and decoded dumps are in workspace `tmp/2026-10-05-rootdev-hint/impl/`.
 - **Not verified:** metal.
+
+## ⚠ DRIVER-LINE-7 (2026-10-05, a stock defect: FIX BUILT as an opt-in pass, EMU-proven by dump; not in any card set yet): `ttcompatopen()` leaves the state the ioctl-ack path trusts uninitialised, so a console stream can panic the kernel at boot with `ttcompat: unexpected ioctl acknowledgment`
+
+**Symptom.** Rarely, about 70 s into a boot, right after "The system is ready" and the hostname line:
+`PANIC: ttcompat: unexpected ioctl acknowledgment`. The backtrace is `ioctl → strioctl → strdoioctl →
+runqueues → ldtermrsrv → ldterm_ioctl_reply → putnext → ttcompat_ioctl_ack → panic`. It was seen four times on
+the emulated 060 (A3000 + Z3660, rig row E5), in kernels on both sides of upstream's `8f272c1`, and with and
+without RTH1.
+
+**The mechanism, from the stock code and from two dumps.**
+- **`ttcompatopen`** (`.text 0x36f7c` in the 2.1c base) `allocb()`s the 0x44-byte per-stream state and points
+  `q_ptr` at `b_rptr`.
+  - It clears bytes 4..31, i.e. `t_iocpending` and `t_curstate`, and nothing else.
+  - `t_state` (+56), `t_iocid` (+60) and `t_ioccmd` (+64) keep whatever the reused buffer held. 0x44 is above
+    `FASTBUF` (64), so the data comes from `kmem_alloc` and is not zeroed.
+  - The generic SVR4 source has the same shape (`io/ttcompat.c`, `ttcompatopen`): it initialises `t_savbp`,
+    `t_iocpending` and `t_curstate` only.
+- **`ttcompat_ioctl_ack`** takes an `M_IOCACK` as its own when bit 3 (`TS_IOCWAIT`) of byte +59 is set and
+  `ioc_id == t_iocid`, then switches on `t_ioccmd`.
+  - It handles 0x7402, 0x7408-0x740a, 0x7411, 0x7412, 0x7474, 0x7475 and 0x747c-0x747e; anything else
+    reaches `panic`.
+  - `ioc_id` is the single global counter in streamio (`++ioc_id`), small at boot.
+- **The dumps** (amiberry savestates of the panicked guests; the state found by walking the 040 tables from
+  `kroot040`):
+  - every ttcompat stream is a console stream (ttcompat → ldterm → `co`);
+  - most state fields hold leftovers: ASCII fragments, small integers;
+  - **both panicked dumps** — a merged-base kernel without RTH1, and r6 KD060-ZA — hold, at the same address,
+    a console stream with `t_state 8` / `t_iocid 0x10` / `t_ioccmd 0x10`.
+  - It panics when ioctl id 0x10 happens to be acked on that stream: a race between getty, scrmon and the SAC
+    as the system comes up.
+- **Older than this port's changes:** a healthy boot of the r5 KD060-Z (pre-merge) carries a console stream
+  with `t_state 0x3e` (TS_IOCWAIT set) / `0x22` / `0x22`. Only the odds move with the build.
+- **Not involved:** `sl` and ISSUE-75; no ttcompat stream is on the serial port.
+
+**Fix (this line, opt-in): `src/patch_ttcompat_init.py`, run by `relink-040-ttcompat.sh`.**
+- The 16 single-byte `clrb %a0@(12..27)` (64 bytes at `ttcompatopen+0x80`) become four `clrl` of the same
+  bytes, plus `clrl` of +56, +60 and +64, and nops.
+- Same length, no relocation in the span, no layout change. Found by symbol; asserts the stock bytes;
+  idempotent; has a `--check` mode.
+- Everything cleared before is still cleared.
+- **Not in `relink-040.sh`'s default list:** a default chain keeps producing today's bytes until a card set
+  takes the fix.
+- **Run it before `relink-040-fpe.sh`,** which stamps the build id.
+- The 68030 kit's ET_REL carries the same 64 bytes (K030-U: `ttcompatopen` at `.text 0x39a38`), so the same
+  tool applies there before `elf2brel`.
+- `tools/test-ttcompat-init.sh` (8 cases, hermetic).
+
+**Verified (EMU, 2026-10-05):**
+- Dumps of the r6 KD060-Z at run level 2, unfixed vs fixed (one 49-byte difference):
+  - unfixed: three console streams with `TS_IOCWAIT` set in leftover state;
+  - fixed: `t_state 0` on every ttcompat stream; the only nonzero `t_iocid`/`t_ioccmd` is the telnet pty's,
+    which ttcompat itself recorded for a BSD ioctl it handled.
+- **Not achieved:** a deterministic reproduction. Seeding freed 68-byte STREAMS buffers through a pipe does not
+  land in the next `ttcompatopen` allocation on this allocator: a held-open pty's state read 0/0/0.
+- **Not verified:** metal.
