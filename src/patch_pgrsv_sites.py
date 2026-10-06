@@ -101,7 +101,16 @@ def sites(e):
     return rt, gt, out
 
 
+BTOPR = bytes.fromhex("068200000fff720ce2aa")    # page_get: addil #4095,%d2; moveq #12,%d1; lsrl %d1,%d2
+
+
 def validate(e, rt, gt, ss):
+    # pgrsv.c computes npages as (bytes + 0xfff) >> 12; the kernel's own page_get must do the same,
+    # or the reserve would count in a different page than the allocator it guards.
+    plo, phi = extent(gt, e, CALLEE)
+    if BTOPR not in e.text(plo, min(phi - plo, 0x40)):
+        raise SystemExit("ABORT: page_get's btopr is not +4095, >>12 (4 KiB pages) -- pgrsv.c's "
+                         "PAGESHIFT would not match this kernel")
     for x in EXEMPT:
         n = [s for s in ss if s[2] == x]
         if len(n) != 1:
