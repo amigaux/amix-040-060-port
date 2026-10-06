@@ -10520,6 +10520,86 @@ without RTH1.
   land in the next `ttcompatopen` allocation on this allocator: a held-open pty's state read 0/0/0.
 - **Not verified:** metal.
 
+## ⚠ DRIVER-LINE-8 (2026-10-06, a stock defect: BUILT — opt-in pass, OFF by default; host-proven, no EMU regression; the deadlock did NOT reproduce in 25 unfixed runs (14 I3-shape installs, 11 synthetic), so the fix rests on the mechanism, not on a tally; HW not run): `page_get()` keeps no reserve, so pageout can wait forever for the page its own push needs
+
+**Symptom.** An interactive install on the 32 MB rig stopped at `apkg install (11 packages)`: no disk write
+for 58 minutes, the console still echoing, Ctrl-C ignored (installng's I3 cell, 2026-10-06; the re-run with
+the same media completed in 1080 s). The savestate (`tmp/2026-10-06-r6/k1cells/I3-HANG.md`):
+- `freemem` 0, `freemem_wait` 3; pageout, fsflush and apkg all asleep on `&freemem` at priority 2 (below
+  PZERO, hence no Ctrl-C);
+- **pageout's own stack:** `page_get ← segkmem_alloc ← sptalloc ← kmem_alloc ← kmem_zalloc ← getfreeblk ←
+  getblk ← bread ← ufs_bmap ← ufs_putpage ← checkpage ← pageout`. To push a dirty file page it needed an
+  indirect block, the buffer cache grew by an 8 KiB `kmem_zalloc(KM_SLEEP)`, and that waited for a free page
+  that only pageout could produce;
+- apkg's last page went in a fault inside `read(2)` (`pvn_kluster → page_get`); fsflush blocks the same way
+  in `ufs_sync`;
+- no I/O was outstanding: nothing in z3660, sd or `biowait`; the z3660 completion queue empty; sptmap with
+  622 free units. Swap present and nearly empty (110 of 7680 slots) — irrelevant, the push is of a file page.
+
+**The stock code.** `page_get` waits only while `freemem < npages`, so any caller may take the last page.
+The SVR4.0 3B2 source has the same loop (`vm/vm_page.c`, `page_get`'s wait: `cleanup`, `outofmem`,
+`freemem_wait++`, `sleep(&freemem, PSWP+2)`), with its own `XXX` comment that nothing guarantees the
+wait is ever satisfied. SVR4.2 closed it: ordinary callers must leave `minpagefree` pages free
+(`common/uts/mem/vm_page.c`, `page_get`'s `reqfree`; `vm_pageout.c` adds `minpagefree` to every
+threshold), and kernel memory is exempt (`seg_kmem.c` passes `P_NORESOURCELIM`), as is sched. Mtune's
+`MINPAGEFREE` defaults to 20 (range 10..50).
+
+**Fix (this line, opt-in): `relink-040-pgrsv.sh`, the SVR4.2 shape without editing a stock byte.**
+- **`src/pgrsv.c`**, `pgrsv_get(bytes, flags)`: for a caller that may wait, while
+  `freemem < npages + pgrsv_pages` it wakes pageout, bumps `freemem_wait` and sleeps on `&freemem` at
+  `PSWP+2` — the stock wait, on the stock channel and counter, only `pgrsv_pages` earlier; for a caller
+  that may not wait it returns 0 below the reserve. Then it calls `page_get`. sched and pageout are exempt;
+  so are requests `page_get` refuses anyway (`npages >= max_page_get`). `pgrsv_pages` is a `.data`
+  tunable, 20 by default, 0 disables; counters `pgrsv_calls/_waits/_fails` behind the magic `pgrv`.
+- **`src/patch_pgrsv_sites.py`** retargets the R_68K_32 of `jsr page_get` at the 11 ordinary call sites
+  (anon_private, anon_zero, hat_dup and the unnamed body after hat_devload, pvn_kluster, rfc_pageget,
+  rfc_writefill, s5getapage, segmap_pagecreate, segu_get_orig, ufs_getapage) to `pgrsv_get`. Kernel
+  memory keeps the direct path: `segkmem_alloc` (every kmem page, pageout's buffer included), the
+  page-table allocators `hat_ptalloc`/`hat_sdtalloc` (a kernel mapping can need one, at interrupt level
+  too), and `page_delmem`. A caller the tool does not know aborts the pass instead of being classified by
+  default. `page_get`'s file-static `freemem_wait` and `max_page_get` are exposed by the instructions that
+  use them (`addql #1,` / `cmpl …,%d2`).
+- **Why not the tunables:** `page_get` compares against 0, not against `minfree`, so no retune of
+  `minfree/desfree/lotsfree` closes the window; a smaller buffer cache does not stop pageout needing a
+  fresh buffer when the one it wants was freed.
+- **No new deadlock shape:** the added sleep is the stock sleep at the stock point, earlier; kernel memory
+  can still reach the last pages, as before.
+- **Gates:** exact import/export sets, no `.rodata`, no COMMON, scan060 CLEAN, both SR writes present
+  (`-traditional` can drop an asm), the sites asserted and re-checked, `check_relink_relocs` 0 complaints.
+- **Order:** before `relink-040-fpe.sh`: `… → rth1 → ttcompat → pgrsv → [isp060] → fpe`. Off by default.
+- `tools/test-pgrsv.sh`: the real object on qemu-m68k against 17 rules (the SR helpers come from the
+  harness: qemu user mode cannot run them); with a built kernel, `--check`, an idempotent second patch,
+  and a refusal of a base without the unit.
+
+**Verified (2026-10-06):**
+- Host: the 17 rules; the pass on the r6 KD060-Z input (11 sites, 0 complaints); both rebuilds
+  byte-identical; the default chain unchanged — `relink-040-fpe.sh` on the same input without the pass
+  equals r6's unstamped fpe output byte for byte, and the emitted chain equals r6's unstamped chain.
+- EMU, the I3 shape (installng's recipe: the hang run's media `k1/old-swap2`, blank 200 MB targets at
+  z3/z0, the same answers, done = `INSTALL COMPLETE` in the target's `install.log`, hang = no target write
+  for 900 s then two savestates 120 s apart):
+  - **32 MB** (the I3 rig): unfixed **8/8 complete**, fixed **8/8 complete**;
+  - **16 MB** (the same shape with the kernel's bank cut to 16 MB to raise the pressure; the miniroot boots
+    and reaches the same `apkg install (11 packages)` step): unfixed **6/6 complete**, fixed **6/6
+    complete**;
+  - no hang in either arm, so the tally cannot tell them apart. installng saw 1 hang in 4 such installs on
+    a quieter host; here eight emulators shared one host and an install took 1380-1860 s instead of 1080 s,
+    which plausibly changes the timing the deadlock needs. What the series does show is no regression:
+    the fixed kernel completed all 14 installs.
+- EMU, synthetic load, the same load on both kernels (`memstress /var/tmp/ms 48 2 2 2 4 900 2`: two
+  readers of a 48 MB file, two writers of 3 MB files, two mappers dirtying random pages of the big file
+  through `MAP_SHARED`, a 4 MB anonymous hog, two small-file extractors; 32 MB rig; when telnet stops
+  answering, two savestates 120 s apart decide between "progress" and "stall"):
+  - **unfixed** (r6, 4 runs, 6 checks): `freemem` **0** at every check, pageout idle with its scan quota
+    spent, forks waiting on `free_pts`; progress between the states (page-ins, faults, syscalls), so
+    starved, not deadlocked. No run reached the I3 signature;
+  - **fixed** (1 run, 3 checks through 2467 s): `freemem` pinned at **20**, the reserve, at every check;
+    `pgrsv_waits` climbing (10567 → 23957), `pgrsv_fails` almost flat (195 → 339, refused no-wait
+    klusters); alive to the end.
+  The deadlock itself did not reproduce under synthetic load (0 of 7 unfixed runs); what the pair shows is
+  the reserve doing its job: ordinary consumers stop at 20 free pages and kernel memory keeps them.
+- **Not verified:** metal. 128 MB metal has never shown the hang; it is a small-memory failure.
+
 ## ⚠ DRIVER-LINE-9 (2026-10-06, BUILT — opt-in pass, OFF by default; EMU-proven against a 68030; HW not run): on the 68060, every unimplemented-integer form `isp61_vec` declines kills the process, the 64-bit divides among them
 
 **Symptom.** On the 68060 the July APKGENG 1.12.0 (`fb2f08f4`, the one live on pkg.amigaux.org) cannot
