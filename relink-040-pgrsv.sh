@@ -69,6 +69,9 @@ echo "      [OK]   scan060 CLEAN ($SCANLINES decoded lines)"
 NSR=$(grep -c 'movew %d[0-7],%sr\|movew #9216,%sr' "$HERE/build/pgrsv.lst" || true)
 [ "$NSR" -ge 2 ] || { echo "[FAIL] pgrsv.o carries $NSR SR writes, want the splimp and the splx"; exit 1; }
 
+echo "[*] page geometry in the compiled bytes (no 2 KiB shift from the cross headers)"
+run_step indent sh "$HERE/src/check_page_geometry.sh" "$OBJ"
+
 echo "[*] imports and exports must be exactly these:"
 WANT="bclnlist cleanup curproc freemem page_get pgrsv_fmw pgrsv_mpg proc_pageout proc_sched sleep wakeprocs"
 GOT=$(m68k-linux-gnu-nm "$OBJ" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
