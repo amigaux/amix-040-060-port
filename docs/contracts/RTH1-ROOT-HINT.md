@@ -61,6 +61,12 @@ the structure, on both sides:
 All other bits are 0. A version-1 reader ignores bits it does not know only after rejecting a record whose
 version is not 1.
 
+**`length` bounds every read.** A kernel reads the root record at 0x1c, or anything else past the fixed
+header, only after it has checked `length` (the low half of `verlen`) and found it ≥ 0x38: a version-1
+kernel rejects a shorter record before touching 0x1c, and reads nothing beyond 0x38. A later version can
+therefore grow the record by raising `length` without an old kernel reading past what a loader wrote
+(agreed with upstream, 2026-10-06).
+
 ### The rule for "the BootNode that was booted" (loader)
 
 The strap hands boot1 an open `struct IOStdReq` on the partition, and boot1 passes it to boot2. boot2 walks
@@ -124,7 +130,8 @@ and then `vfs_mountroot()`.
 the one-kernel families that is `c6d0s1` / `c6d0s2` (unit 6, first controller).
 
 **The record is used only when every one of these holds; otherwise the built-in root is used:**
-1. `magic` is `"RTH1"`, the version is 1, the length ≥ 0x38, and longs 0x00..0x18 sum to 0.
+1. `magic` is `"RTH1"`, the version is 1, the length ≥ 0x38, and longs 0x00..0x18 sum to 0. All four are
+   checked before `root[]` (0x1c) is read.
 2. Choose the reference:
    - if `root[0]` is `"RTO1"`, its version is 1 and its seven longs sum to 0, use the root record:
      `unit`, `base`, `id`, `RTO_MOBO`;
