@@ -10215,3 +10215,69 @@ digit of `bo_name`.
 
   Cells, logs and decoded dumps are kept with the driver line's evidence, outside this tree.
 - **Not verified:** metal.
+
+## ⚠ DRIVER-LINE-9 (2026-10-06, BUILT — opt-in pass, OFF by default; EMU-proven against a 68030; HW not run): on the 68060, every unimplemented-integer form `isp61_vec` declines kills the process, the 64-bit divides among them
+
+**Symptom.** On the 68060 the July APKGENG 1.12.0 (`fb2f08f4`, the one live on pkg.amigaux.org) cannot
+upgrade itself: its `installf -f`, `pkgchk` and `pkgadd` are `Killed (137)` (installng,
+2026-10-05). The cause is vector 61. `installf` holds a
+`divs.l (16,%fp),%d2:%d1` — a 64-bit dividend from memory, in its hashing — and `isp61_vec` accepts only
+the 64-bit *multiplies* the 2026-08 census found (`#imm`, `Dn`, `(An)`, `(d16,An)`). Every other form ends
+at `nullvect`, which sends SIGKILL. The forms that die: `divs.l`/`divu.l` with a 64-bit dividend (any EA),
+`muls.l`/`mulu.l` with an indexed, absolute or PC-relative source, `movep`, `cmp2`/`chk2`, `cas2` and a
+misaligned `cas`.
+
+**Fix (this line, opt-in): Motorola's M68060 Integer Support Package behind `isp61`.**
+- **`build-isp060.sh`** builds `build/isp060_pkg.o` the way `build-fpsp060.sh` builds the FPSP: the pinned
+  NetBSD tarball's `060sp/isp.S` (the `isp.sa` image, `.text` 0x1880) between `src/isp060_head.s` (the
+  128-byte call-out table) and `src/isp060_glue.s`, one assembly unit, `copyright.S` linked in. The entry
+  table is decoded from the result every build: all 32 slots inside the glue, all 8 entry points `bra.l`
+  into the image.
+- **`relink-040-isp060.sh`** links the package, and `src/patch_isp060_hook.py` retargets the one relocation
+  every `isp61` decline ends at (`Lisp_stock`'s `jmp nullvect`) to `isp060_unimp`. `M68Kvec[61]` still
+  names `isp61_vec`, so the forms measured on hardware for cc1 and wolf3d keep their path; only what
+  `isp61` declines reaches the package. `isp060_unimp` sends anything that is not a user-origin vector-61
+  format-0 frame on a 68060 to `nullvect` itself.
+- **Call-outs**, the FPSP glue's policy: chk, divide by zero, trace and access arrive with the frame the CPU
+  would have pushed for that exception and go to `nullvect`, which dispatches on the frame's vector.
+  `M68Kvec[5]`, `[6]` and `[9]` are `nullvect` in this kernel, so this is where a 68030's own exception
+  goes. `_060_isp_done` rebuilds the `ureturn` state as `Lco_done` does. The memory call-outs are the FPSP
+  glue's (the package keeps the stacked SR at the same `a6` offset).
+- **`cas2` and misaligned `cas` are terminated, not emulated.** The package's locked sequence uses `moves`
+  under masked interrupts and cannot take a page fault; this glue has no way to pin a user page, so
+  `_060_real_lock_page` refuses and the package ends the instruction through its own access-error exit
+  (SIGSEGV instead of SIGKILL). No installed binary uses either (scan060 census). A real lock
+  (`as_fault` with `F_SOFTLOCK`) is follow-up work.
+- **Gates:** the pin, the image size, zero unresolved in the image, the table and entry decode, the exact
+  import set (`copyin copyout cputype nullvect panic sup_cacr ureturn`, all in the base), no collision,
+  the hook asserted and re-checked, `check_relink_relocs` 0 complaints. scan060 of the package reports one
+  candidate, a data word (`0x010a`, decoded as `movepw`) inside the image's 16-bit offset table at package
+  `.text` 0x5e4; the pass allows exactly that hit, pinned by its neighbours' bytes.
+- **Order:** after `relink-040.sh`, before `relink-040-fpe.sh` (the last link):
+  `… → rth1 → ttcompat → [pgrsv] → isp060 → fpe`. Off by default: no default chain changes.
+- `tools/test-isp060.sh`: the package build and its gates; with a built kernel, `--check`, an idempotent
+  second patch (byte-identical), and a refusal of a base without the package.
+
+**Verified (EMU, 2026-10-06; the r6 KD060-Z chain with the pass vs without; the 68030 reference is the E1
+rig's stock kernel):**
+- **Probe set** (`isp060probe`, every form above in a child process each, at `-O0`, `-O`, `-O2`):
+  - without the pass every case is SIGKILLed;
+  - with it, 370 of 370 result lines equal the 68030's once the condition-code bits the M68000 PRM leaves
+    undefined are masked (N and Z after a divide overflow, N and V after `cmp2`); quotient, remainder,
+    the overflow rule (registers unchanged, V set) and every defined flag are identical;
+  - divide by zero (`divs.l Dn`, `divu.l (d16,An)`) and `chk2` out of bounds deliver SIGFPE, as on the
+    68030; `cas2` gets SIGSEGV (terminated, see above).
+- **July `installf`:** `installf core /stand/unix` and `installf -f core` return 0 and register
+  `/stand/unix` with its size and checksum, as on the 68030; without the pass `installf -f` and `pkgchk` are
+  Killed (137). July `pkgchk core` segfaults on the 68030 as well, so that one is the engine's own.
+- **gcc-cross-amix `tests/mul64`** (probe.c with the 64-bit multiplies kept, five shapes):
+  - all five shapes (`-O0`, `-O`, `-O2`, `-O2 -fomit-frame-pointer`, `-m68040 -O`) print checksum
+    `89d09b77` over 0x15c590 vectors, the 68030's;
+  - without the pass three of the five are Killed (forms `isp61` declines, e.g. the indexed source);
+  - the run takes about 13 minutes against about 2 on the 68030 rig: every declined multiply is a trap
+    into the package.
+- **Rebuilds are byte-identical**, and the default chain is unchanged: `relink-040-fpe.sh` on the r6 Z input
+  without the pass reproduces r6's unstamped fpe output byte for byte.
+- **Not verified:** metal. Amiberry is not proof of which instructions silicon traps (AGENTS.md); one boot
+  of a probe on the Z3660 is owed. Performance: an emulated form costs a trap plus copyin-based operand
+  reads, so a binary dense in declined forms runs visibly slower than with `isp61`'s fast path.
