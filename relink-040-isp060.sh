@@ -1,6 +1,7 @@
 #!/bin/sh
-# relink-040-isp060.sh -- OPT-IN: Motorola's M68060 Integer Support Package behind isp61
-# (DRIVER-LINE-9; 2026-10-06).  Not part of any default chain.
+# relink-040-isp060.sh -- Motorola's M68060 Integer Support Package behind isp61
+# (DRIVER-LINE-9; 2026-10-06).  DEFAULT since r6 (owner, Q-6.1): relink-040-fpe.sh runs this pass in
+# its step 0.6 (ISP060=0 opts out); this script stays for applying it explicitly, and fpe then [skip]s.
 #
 #   build-isp060.sh            build/isp060_pkg.o = src/isp060_head.s + 060sp/isp.S + src/isp060_glue.s
 #   src/patch_isp060_hook.py   isp61_vec's one `jmp nullvect` (every decline) -> isp060_unimp
@@ -118,7 +119,8 @@ DSZ=$(( 0x$(m68k-linux-gnu-readelf -SW "$OUT" | awk '{gsub(/[][]/,"")} $2==".dat
 	|| { echo "[FAIL] .data size not 4-aligned -> .bss misaligned at runtime"; exit 1; }
 run_step indent python3 "$HERE/src/patch_b2_flip.py" "$OUT" --check
 run_step 1 python3 "$HERE/src/check_relink_relocs.py" "$OUT"
-python3 "$HERE/src/stamp_buildid.py" "$OUT"
+# Called from relink-040-fpe.sh (step 0.6) the build id is left to fpe, the last link.
+[ "${PASS_NO_STAMP:-0}" = 1 ] || python3 "$HERE/src/stamp_buildid.py" "$OUT"
 
 echo "[OK] built $OUT"
 echo "     next:  relink-040-fpe.sh (always the last link)"

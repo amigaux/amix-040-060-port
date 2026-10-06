@@ -13,6 +13,9 @@
 #   sh relink-040-fpe.sh [base-kernel] [output]
 #   FPE=0 sh relink-040-fpe.sh ...        rollback: reproduce the base image byte for byte
 #   TTCOMPAT_INIT=0 sh relink-040-fpe.sh ...  opt out of DRIVER-LINE-7 (step 8.6): a pre-r6 image
+#   PGRSV=0 sh relink-040-fpe.sh ...      opt out of DRIVER-LINE-8 (step 0.6): no page-out reserve
+#   ISP060=0 sh relink-040-fpe.sh ...     opt out of DRIVER-LINE-9 (step 0.6): no 68060 ISP
+#                                         (all three = 0 reproduces the r6 image as first cut)
 #
 #   FPE_REQUIRE_QUEUE=z3660queue FPE_REQUIRE_CARD=1 sh relink-040-fpe.sh ...
 #                                         refuse a base whose root-storage family is not the
@@ -77,6 +80,37 @@ if [ "$FPE" = 0 ]; then
 	[ "$A" = "$B" ] || { echo "[FAIL] FPE=0 output differs from the base"; exit 1; }
 	echo "[OK] FPE=0: $OUT is the base image, sha256 $A"
 	exit 0
+fi
+
+# ---------------------------------------------------------------- 0.6 DRIVER-LINE-8 / -9
+# In r6 by the owner's decision (Q-6.1, 2026-10-06), so they live here for the reason ISSUE-69 and
+# DRIVER-LINE-7 do: every 040/060 kernel of this line passes through this script.  Both are LINKS,
+# so they run BEFORE this script's own `ld -r` and its vector retargets (never after them), in the
+# order ttcompat -> pgrsv -> isp060 -> fpe; the ttcompat bytes (step 8.6) sit in the base and are
+# not moved by a link, so applying them later gives the same image.  Each pass keeps its own gates;
+# called from here it leaves the build id to step 9.  Idempotent: a base that already carries a
+# pass gets [skip].  PGRSV=0 / ISP060=0 are the deliberate opt-outs.  FPE=0 never reaches here: it
+# reproduces the base image unchanged.
+PRE="$HERE/build/unix-stage-fpe-pre"
+if [ "${PGRSV:-1}" = 0 ]; then
+	echo "[*] DRIVER-LINE-8: page-out reserve SKIPPED (PGRSV=0, deliberate opt-out)"
+elif m68k-linux-gnu-nm "$IN" | grep -qE " [Tt] pgrsv_get\$"; then
+	echo "[*] DRIVER-LINE-8: [skip] the base already carries the page-out reserve"
+else
+	echo "[*] DRIVER-LINE-8: the page-out reserve (relink-040-pgrsv.sh)"
+	rm -f "${PRE:?}-pgrsv"
+	run_step indent env PASS_NO_STAMP=1 sh "$HERE/relink-040-pgrsv.sh" "$IN" "$PRE-pgrsv"
+	IN="$PRE-pgrsv"
+fi
+if [ "${ISP060:-1}" = 0 ]; then
+	echo "[*] DRIVER-LINE-9: 68060 ISP SKIPPED (ISP060=0, deliberate opt-out)"
+elif m68k-linux-gnu-nm "$IN" | grep -qE " [Tt] isp060_top\$"; then
+	echo "[*] DRIVER-LINE-9: [skip] the base already carries the 68060 ISP"
+else
+	echo "[*] DRIVER-LINE-9: the 68060 ISP behind isp61 (relink-040-isp060.sh)"
+	rm -f "${PRE:?}-isp060"
+	run_step indent env PASS_NO_STAMP=1 sh "$HERE/relink-040-isp060.sh" "$IN" "$PRE-isp060"
+	IN="$PRE-isp060"
 fi
 
 # ---------------------------------------------------------------- 0. the extracted tree
@@ -303,6 +337,15 @@ else
 	echo "[*] DRIVER-LINE-7: clear the ttcompat state at open"
 	run_step all python3 "$HERE/src/patch_ttcompat_init.py" "$OUT"
 	run_step all python3 "$HERE/src/patch_ttcompat_init.py" --check "$OUT"
+fi
+
+# ---------------------------------------------------------------- 8.7 DRIVER-LINE-8 / -9, re-checked
+# Step 0.6's retargets went in before this script's link; prove the link left them as they were.
+if m68k-linux-gnu-nm "$OUT" | grep -qE " [Tt] pgrsv_get\$"; then
+	run_step all python3 "$HERE/src/patch_pgrsv_sites.py" --check "$OUT"
+fi
+if m68k-linux-gnu-nm "$OUT" | grep -qE " [Tt] isp060_top\$"; then
+	run_step all python3 "$HERE/src/patch_isp060_hook.py" --check "$OUT"
 fi
 
 # ---------------------------------------------------------------- 9. packaging guards

@@ -10520,7 +10520,7 @@ without RTH1.
   land in the next `ttcompatopen` allocation on this allocator: a held-open pty's state read 0/0/0.
 - **Not verified:** metal.
 
-## ⚠ DRIVER-LINE-8 (2026-10-06, a stock defect: BUILT — opt-in pass, OFF by default; host-proven, no EMU regression; the deadlock did NOT reproduce in 25 unfixed runs (14 I3-shape installs, 11 synthetic), so the fix rests on the mechanism, not on a tally; HW not run): `page_get()` keeps no reserve, so pageout can wait forever for the page its own push needs
+## ⚠ DRIVER-LINE-8 (2026-10-06, a stock defect: FIXED in r6 by the owner's decision (Q-6.1), default in `relink-040-fpe.sh` step 0.6; host-proven, no EMU regression; the deadlock did NOT reproduce in 25 unfixed runs (14 I3-shape installs, 11 synthetic), so the fix rests on the mechanism, not on a tally; HW not run): `page_get()` keeps no reserve, so pageout can wait forever for the page its own push needs
 
 **Symptom.** An interactive install on the 32 MB rig stopped at `apkg install (11 packages)`: no disk write
 for 58 minutes, the console still echoing, Ctrl-C ignored (installng's I3 cell, 2026-10-06; the re-run with
@@ -10544,7 +10544,7 @@ wait is ever satisfied. SVR4.2 closed it: ordinary callers must leave `minpagefr
 threshold), and kernel memory is exempt (`seg_kmem.c` passes `P_NORESOURCELIM`), as is sched. Mtune's
 `MINPAGEFREE` defaults to 20 (range 10..50).
 
-**Fix (this line, opt-in): `relink-040-pgrsv.sh`, the SVR4.2 shape without editing a stock byte.**
+**Fix (this line, in r6): `relink-040-pgrsv.sh`, the SVR4.2 shape without editing a stock byte.**
 - **`src/pgrsv.c`**, `pgrsv_get(bytes, flags)`: for a caller that may wait, while
   `freemem < npages + pgrsv_pages` it wakes pageout, bumps `freemem_wait` and sleeps on `&freemem` at
   `PSWP+2` — the stock wait, on the stock channel and counter, only `pgrsv_pages` earlier; for a caller
@@ -10566,7 +10566,17 @@ threshold), and kernel memory is exempt (`seg_kmem.c` passes `P_NORESOURCELIM`),
   can still reach the last pages, as before.
 - **Gates:** exact import/export sets, no `.rodata`, no COMMON, scan060 CLEAN, both SR writes present
   (`-traditional` can drop an asm), the sites asserted and re-checked, `check_relink_relocs` 0 complaints.
-- **Order:** before `relink-040-fpe.sh`: `… → rth1 → ttcompat → pgrsv → [isp060] → fpe`. Off by default.
+- **Default since r6** (owner's decision Q-6.1, 2026-10-06): `relink-040-fpe.sh` runs the pass in its step 0.6,
+  before its own link, in the order `… → rth1 → ttcompat → pgrsv → isp060 → fpe`, and re-checks the sites
+  after the link (step 8.7). `PGRSV=0` is the deliberate opt-out; the explicit pass stays, and fpe then
+  reports `[skip]`.
+  - **Measured in a scratch tree** (no build-id stamp), on all three r6 060 families (KD060-Z, -ZA,
+    -ZA-CD), byte for byte: the default fpe, from the rth1 output or from the ttcompat output, equals the
+    explicit `relink-040-pgrsv.sh` → `relink-040-isp060.sh` → the previous fpe; `PGRSV=0 ISP060=0`
+    equals r6's fpe output as first cut (unstamped). The ttcompat bytes sit in the base, so step 8.6 after
+    the links gives the same image as the explicit pass before them.
+  - Called from fpe the passes leave the build id to fpe's own stamp, so a default build still takes one
+    id.
 - `tools/test-pgrsv.sh`: the real object on qemu-m68k against 17 rules (the SR helpers come from the
   harness: qemu user mode cannot run them); with a built kernel, `--check`, an idempotent second patch,
   and a refusal of a base without the unit.
@@ -10600,7 +10610,7 @@ threshold), and kernel memory is exempt (`seg_kmem.c` passes `P_NORESOURCELIM`),
   the reserve doing its job: ordinary consumers stop at 20 free pages and kernel memory keeps them.
 - **Not verified:** metal. 128 MB metal has never shown the hang; it is a small-memory failure.
 
-## ⚠ DRIVER-LINE-9 (2026-10-06, BUILT — opt-in pass, OFF by default; EMU-proven against a 68030; HW not run): on the 68060, every unimplemented-integer form `isp61_vec` declines kills the process, the 64-bit divides among them
+## ✅ DRIVER-LINE-9 (2026-10-06, FIXED in r6 by the owner's decision (Q-6.1), default in `relink-040-fpe.sh` step 0.6; EMU-proven against a 68030; HW not run): on the 68060, every unimplemented-integer form `isp61_vec` declines kills the process, the 64-bit divides among them
 
 **Symptom.** On the 68060 the July APKGENG 1.12.0 (`fb2f08f4`, the one live on pkg.amigaux.org) cannot
 upgrade itself: its `installf -f`, `pkgchk` and `pkgadd` are `Killed (137)` (installng,
@@ -10611,7 +10621,7 @@ at `nullvect`, which sends SIGKILL. The forms that die: `divs.l`/`divu.l` with a
 `muls.l`/`mulu.l` with an indexed, absolute or PC-relative source, `movep`, `cmp2`/`chk2`, `cas2` and a
 misaligned `cas`.
 
-**Fix (this line, opt-in): Motorola's M68060 Integer Support Package behind `isp61`.**
+**Fix (this line, in r6): Motorola's M68060 Integer Support Package behind `isp61`.**
 - **`build-isp060.sh`** builds `build/isp060_pkg.o` the way `build-fpsp060.sh` builds the FPSP: the pinned
   NetBSD tarball's `060sp/isp.S` (the `isp.sa` image, `.text` 0x1880) between `src/isp060_head.s` (the
   128-byte call-out table) and `src/isp060_glue.s`, one assembly unit, `copyright.S` linked in. The entry
@@ -10637,8 +10647,10 @@ misaligned `cas`.
   the hook asserted and re-checked, `check_relink_relocs` 0 complaints. scan060 of the package reports one
   candidate, a data word (`0x010a`, decoded as `movepw`) inside the image's 16-bit offset table at package
   `.text` 0x5e4; the pass allows exactly that hit, pinned by its neighbours' bytes.
-- **Order:** after `relink-040.sh`, before `relink-040-fpe.sh` (the last link):
-  `… → rth1 → ttcompat → [pgrsv] → isp060 → fpe`. Off by default: no default chain changes.
+- **Default since r6** (owner's decision Q-6.1, 2026-10-06): `relink-040-fpe.sh` runs the pass in its step 0.6,
+  after the page-out reserve and before its own link (`… → ttcompat → pgrsv → isp060 → fpe`), and
+  re-checks the hook after the link (step 8.7). `ISP060=0` is the deliberate opt-out; the explicit pass
+  stays, and fpe then reports `[skip]`. See DRIVER-LINE-8 for the byte-for-byte proof of both.
 - `tools/test-isp060.sh`: the package build and its gates; with a built kernel, `--check`, an idempotent
   second patch (byte-identical), and a refusal of a base without the package.
 

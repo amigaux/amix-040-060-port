@@ -1,11 +1,14 @@
 #!/bin/sh
-# relink-040-pgrsv.sh -- OPT-IN: a free-page reserve in front of page_get (DRIVER-LINE-8; 2026-10-06).
-# Not part of any default chain.  Closes the low-memory deadlock where pageout sleeps on freemem
-# waiting for the buffer its own page push needs (the I3 install hang, 32 MB rig).
+# relink-040-pgrsv.sh -- a free-page reserve in front of page_get (DRIVER-LINE-8; 2026-10-06).
+# DEFAULT since r6 (owner, Q-6.1): relink-040-fpe.sh runs this pass in its step 0.6 (PGRSV=0 opts out);
+# this script stays for applying it explicitly, and fpe then reports [skip].  Closes the low-memory
+# deadlock where pageout sleeps on freemem waiting for the buffer its own page push needs (the I3
+# install hang, 32 MB rig).
 #
 #   src/pgrsv.c              pgrsv_get(): ordinary callers wait (or fail, if they may not wait) until
 #                            pgrsv_pages pages would remain, then call page_get -- SVR4.2's minpagefree
-#   src/patch_pgrsv_sites.py every `jsr page_get` but segkmem_alloc's and page_delmem's -> pgrsv_get
+#   src/patch_pgrsv_sites.py every `jsr page_get` but kernel memory's (segkmem_alloc, hat_ptalloc,
+#                            hat_sdtalloc) and page_delmem's -> pgrsv_get
 #                            (relocation words only); page_get's two file-statics exposed as aliases
 #   src/pgrsv_tail040.s      the closing .balign 4
 #
@@ -123,7 +126,8 @@ DSZ=$(( 0x$(m68k-linux-gnu-readelf -SW "$OUT" | awk '{gsub(/[][]/,"")} $2==".dat
 	|| { echo "[FAIL] .data size not 4-aligned -> .bss misaligned at runtime"; exit 1; }
 run_step indent python3 "$HERE/src/patch_b2_flip.py" "$OUT" --check
 run_step 1 python3 "$HERE/src/check_relink_relocs.py" "$OUT"
-python3 "$HERE/src/stamp_buildid.py" "$OUT"
+# Called from relink-040-fpe.sh (step 0.6) the build id is left to fpe, the last link.
+[ "${PASS_NO_STAMP:-0}" = 1 ] || python3 "$HERE/src/stamp_buildid.py" "$OUT"
 
 echo "[OK] built $OUT"
 echo "     next:  relink-040-fpe.sh (always the last link)"
