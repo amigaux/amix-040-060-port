@@ -21,13 +21,13 @@ unsigned long sdcardbase(int c) { return (sd_inited && c >= 0 && c < 2) ? cardba
 
 int sdopen(int c) { sd_inited = 1; return (c >= 0 && c < 2 && cardbase[c]) ? 0 : 6; }
 
-int printf(const char *fmt, ...)
+int printf(const char *spec, ...)
 {
-	va_list ap;
+	va_list rest;
 
-	va_start(ap, fmt);
-	vsnprintf(line, sizeof line, fmt, ap);
-	va_end(ap);
+	va_start(rest, spec);
+	vsnprintf(line, sizeof line, spec, rest);
+	va_end(rest);
 	return 0;
 }
 
