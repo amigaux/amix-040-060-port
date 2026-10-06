@@ -143,6 +143,14 @@ int main(void)
 	     0x00480016, "/dev/dsk/c6d0s2", 0, 2, "built in (bad record)");
 	CASE("bad checksum", (two_cards(), boot(3, 3, 0x40000000, 0x144b0100), RTH1[3] ^= 1),
 	     0x00480016, "/dev/dsk/c6d0s2", 0, 2, "built in (bad record)");
+	/* length bounds the read: a record shorter than 0x38 is refused before root[] at 0x1c is looked at,
+	 * even when root[] holds a valid root record; a longer one (a later version's) is still read. */
+	CASE("length 0x34: root[] never read", (two_cards(), boot(3, 3, 0x40000000, 0x144b0100),
+	     rootrec(1, 0x48000000, 0xc0de0100, 0), RTH1[1] = 0x00010034, seal(RTH1, 7)),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 2, "built in (bad record)");
+	CASE("length 0x40: still read", (two_cards(), boot(3, 3, 0x40000000, 0x144b0100),
+	     rootrec(1, 0x48000000, 0xc0de0100, 0), RTH1[1] = 0x00010040, seal(RTH1, 7)),
+	     0x00480019, "/dev/dsk/c9d0s2", 2, 0, "root c9d0s1 from the root record");
 	CASE("ambiguous boot node", (two_cards(), boot(0x10, 3, 0, 0)),
 	     0x00480016, "/dev/dsk/c6d0s2", 0, 4, "built in (no boot node)");
 	CASE("unit 13 (LUN 1)", (two_cards(), boot(3, 13, 0x40000000, 0x144b0100)),
