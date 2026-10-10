@@ -61,3 +61,6 @@ local/muistiinpanot.txt
 
 # Transfer bundles for the guest -- regenerated on demand, never committed
 test-tools/*-bundle.tar
+
+# Assistant-local instructions -- local only, never tracked (AGENTS.md is the public guide)
+CLAUDE.md
