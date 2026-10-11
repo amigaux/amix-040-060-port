@@ -10256,7 +10256,7 @@ threshold), and kernel memory is exempt (`seg_kmem.c` passes `P_NORESOURCELIM`),
   the reserve doing its job: ordinary consumers stop at 20 free pages and kernel memory keeps them.
 - **Not verified:** metal. 128 MB metal has never shown the hang; it is a small-memory failure.
 
-## ⚠ DRIVER-LINE-9 (2026-10-06, BUILT — opt-in pass, OFF by default; EMU-proven against a 68030; HW not run): on the 68060, every unimplemented-integer form `isp61_vec` declines kills the process, the 64-bit divides among them
+## ✅ DRIVER-LINE-9 (2026-10-06, BUILT — opt-in pass, OFF by default; EMU-proven against a 68030; HW-proven 2026-10-11 on a full 68060 on the Z3660): on the 68060, every unimplemented-integer form `isp61_vec` declines kills the process, the 64-bit divides among them
 
 **Symptom.** On the 68060 the July APKGENG 1.12.0 (`fb2f08f4`, the one live on pkg.amigaux.org) cannot
 upgrade itself: its `installf -f`, `pkgchk` and `pkgadd` are `Killed (137)` (installng,
@@ -10318,6 +10318,10 @@ rig's stock kernel):**
     into the package.
 - **Rebuilds are byte-identical**, and the default chain is unchanged: `relink-040-fpe.sh` on the r6 Z input
   without the pass reproduces r6's unstamped fpe output byte for byte.
-- **Not verified:** metal. Amiberry is not proof of which instructions silicon traps (AGENTS.md); one boot
-  of a probe on the Z3660 is owed. Performance: an emulated form costs a trap plus copyin-based operand
-  reads, so a binary dense in declined forms runs visibly slower than with `isp61`'s fast path.
+- **Verified on metal (2026-10-11)**, class `060-Z3660`: a full 68060 (PCR `0x04300600`, rev 6) on the
+  A4000T's Z3660, kernel KD060-Z `68060-261006-83` (sha256 `1d4771b5…`, `sum -r` 55171; the pass linked
+  in, `--check` confirms the hook). `isp060probe`: 369/369 lines identical to the EMU reference with the
+  pass, 0 killed; `isp61_unsupported_n` 1 → 0x65; zero divide and `chk2` out of bounds → SIGFPE, `cas2`
+  → SIGSEGV, as designed.
+- Performance: an emulated form costs a trap plus copyin-based operand reads, so a binary dense in
+  declined forms runs visibly slower than with `isp61`'s fast path.
