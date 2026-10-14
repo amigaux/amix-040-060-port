@@ -10111,3 +10111,43 @@ and the installed system cold-booted twice. So the byte has now been run, not on
 though still on **their** hardware and as they reported it. The driver line has also merged this
 tree's `main` (`8f272c1`, their merge `45613c2`). Our ISSUE-75 and ISSUE-76 patchers run in their
 base build unchanged.
+
+## ⚠⚠ ISSUE-77 (2026-10-14, a stock defect: RECORDED, fix to come from the driver line as an opt-in pass): `ttcompatopen` leaves `t_state`, `t_iocid` and `t_ioccmd` uninitialised, so a boot-time race can panic with "unexpected ioctl acknowledgment"
+
+**Found and measured by the driver line** (their letters 20 and 22, 2026-10-05 and 2026-10-13), on
+the emulated 060. Mechanism checked here against the source and the stock image. Not observed on
+this port's hardware.
+
+**Symptom.** Rarely, right after "The system is ready", the kernel panics with `ttcompat:
+unexpected ioctl acknowledgment`. The backtrace runs from `ioctl` through `strioctl`,
+`strdoioctl`, `runqueues`, `ldtermrsrv` and `ldterm_ioctl_reply` into `ttcompat_ioctl_ack`.
+They saw it 4 times in about 200 boots before their fix, and 2/100 against 0/100 under load.
+
+### The mechanism
+
+* The 3B2 SVR4 `ttcompatopen` (`uts/3b2/io/ttcompat.c`) `allocb`s the per-stream state, points
+  `q_ptr` at it, and initialises only `t_iocpending` and the `t_curstate` fields. The later i386
+  SVR4 and SVR4.2 versions (`uts/i386/io/ttcompat.c`, `i386/uts/io/ttcompat/ttcompat.c`) add a
+  `bzero` of the whole structure right after the `allocb`. So USL fixed this later, and AMIX
+  follows the 3B2 shape.
+* In the stock image, `ttcompatopen` is at `.text 0x36f7c`. It clears bytes 4..31 of the 0x44-byte
+  state: `clrl` at 4 and 8, then sixteen single-byte `clrb` at 12..27 (`.text 0x36ffc`–`0x37038`),
+  then `clrl` at 28. Offsets 32..0x43 keep whatever the reused buffer held. `allocb` does not zero,
+  and 0x44 bytes is above the fast-buffer size, so the bytes come from `kmem_alloc`.
+* `ttcompat_ioctl_ack` (`.text 0x377fe`) trusts three of those fields. It tests `TS_IOCWAIT`
+  (`btst #3,59(a3)`), compares the ack's id with `t_iocid` (`cmpl 60(a3)`), and switches on
+  `t_ioccmd` (`64(a3)`). If a leftover `t_state` has `TS_IOCWAIT` and the leftover id matches an
+  ioctl acked on that stream, the switch meets a command ttcompat never sent and panics in its
+  `default:` arm. `ioc_id` is one global counter, so this is a race among getty, the screen monitor
+  and the SAC at boot.
+* Their dumps show only console streams (ttcompat → ldterm → `co`), and both panicked dumps
+  held leftovers `8 / 0x10 / 0x10`. With their fix, every ttcompat stream reads `t_state` 0 at run level 2.
+
+### The fix (pending)
+
+Their `patch_ttcompat_init.py` is same-length with no relocation. It turns the sixteen `clrb` into
+four `clrl` over the same bytes, adds `clrl` at 56, 60 and 64, and fills the rest with `nop`. It
+ships in every kernel of their 1.0, including their 68030 kit at `ttcompatopen` `.text 0x39a38`.
+It is to arrive here as an opt-in pass. Asked of them (letter 23): the 64 bytes have room for
+thirteen `clrl`, which would clear all of 12..0x43, the same as the USL `bzero`, instead of three
+chosen fields.

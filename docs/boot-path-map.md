@@ -106,6 +106,18 @@ Confirmed by the `*(uchar*)0xde0002 |= 0x80` store at `0x18f76` (“A3000
 Bletcherosity”). Does, in C:
 * `boot_arg0 = method; boot_arg1 = bootinfo`;
 * `case EXEC1:` `bcopy(bootinfo, &bootinfo_global, …)`;
+  **The two `struct bootinfo` are not the same size** (the driver line's letter 19, 2026-10-05;
+  the struct definitions and the copy length were checked here against the sources and the stock
+  image). The loader's `struct BootData` (`boot/bootdata.h`) has ten longs, including the rodata
+  fields. The kernel's (`kernel/support.c`) has seven. So the loader builds 0x778 bytes, and
+  `config` copies only 0x76c (`pea 0x76c` at `.text 0x190ac`). As a result:
+  - kernel `bootinfo+0x66c..0x677` holds the loader's `bd_dvaddr`/`bd_doffset`/`bd_dsize`, not
+    whatever the kernel's field names say;
+  - the loader's `reserved[]` starts at the same offset on both sides, `+0x678`;
+  - the loader's last 12 bytes never reach the kernel.
+
+  Harmless for stock fields. It is why the RTH1 root hint (driver line,
+  `docs/contracts/RTH1-ROOT-HINT.md` on their side) lives at `reserved[0]` and stays short.
 * size chip RAM, build `MAINSTORE`/`VSIZOFMEM` from `bootinfo.memory[]`
   (the 32 MB the turbo card reports lands here — see boot screenshot:
   `Total Unix memory = 33554384`);
