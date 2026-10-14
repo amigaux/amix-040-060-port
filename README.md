@@ -330,6 +330,18 @@ regions** — 32 MB at `0x08000000` and another 16 MB at `0x07000000`, the secon
 first — and the current boot/kernel path counts only the region containing the kernel. The other
 16 MB is therefore left unused because of the region-selection algorithm, not a 16 MB ceiling.
 
+### Does AMIX need an FPU?
+
+Stock 2.1c does. Commodore's 2.1 addendum lists a 68881/68882 as required. Without one the kernel
+prints `no fpu detected` and then panics in `init`'s first `exec`: Line-F trap (vector 0xB) at
+`.text 0x12a`, the `frestore` routine. `fpu_setup` executes it without checking for an FPU, and
+`setregs` calls `fpu_setup` on every `exec`. Confirmed on the emulator (A3000 configuration without
+an FPU). The same panic was reported from an A1200 with an ACA1231 (68030, no FPU).
+
+Patching that check is not enough on its own, because user programs execute FPU instructions too.
+A machine without an FPU also needs a software FPU. This port has one only for the 68LC060
+(`relink-040-fpe.sh`).
+
 ### Zorro III
 
 It works now, with one card: an MNT VA2000 with its Zorro III firmware, driving X11 on both CPUs
