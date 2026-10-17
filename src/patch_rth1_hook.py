@@ -19,15 +19,16 @@
 #
 # --queue-tbl: sd.o keeps its two controller records in a file-static .bss array.  The three
 # accessors sdopen, sdqueue and sdhardwarename each `lea` it through one relocation; when they
-# agree, the array is exposed as sd_queue_tbl for src/sdcardbase040.s (the a4091 pass's way,
-# src/a4091_sd_rows.py, for kernels built without that pass).
+# agree, the array is exposed as sd_queue_tbl for src/sdcardbase040.s (the way the driver line's
+# a4091 pass does it, for kernels built without that pass).
 
 import os, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from a4091_sd_rows import Elf, QUEUE_LEAS, R_68K_32  # noqa: E402
+from kelf import Elf, R_68K_32  # noqa: E402
 
 HOOK, CALLEE, CALLER = "rth1_mountroot", "vfs_mountroot", "main"
+QUEUE_LEAS = (0xD6D2, 0xD6FE, 0xD720)         # sdopen, sdqueue, sdhardwarename: `lea queue,%a0`
 
 
 def u32(b, o): return struct.unpack(">I", b[o:o + 4])[0]

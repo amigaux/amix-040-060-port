@@ -18,7 +18,7 @@
 import os, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from a4091_sd_rows import Elf, R_68K_32  # noqa: E402
+from kelf import Elf, R_68K_32  # noqa: E402
 
 VEC, OLD, NEW = "isp61_vec", "nullvect", "isp060_unimp"
 STT_SECTION = 3

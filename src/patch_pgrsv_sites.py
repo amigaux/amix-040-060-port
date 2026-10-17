@@ -30,7 +30,7 @@
 import os, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from a4091_sd_rows import Elf, R_68K_32  # noqa: E402
+from kelf import Elf, R_68K_32  # noqa: E402
 
 CALLEE, HOOK = "page_get", "pgrsv_get"
 EXEMPT = ("segkmem_alloc", "hat_ptalloc", "hat_sdtalloc", "page_delmem")
