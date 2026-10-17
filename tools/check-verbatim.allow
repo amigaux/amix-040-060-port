@@ -158,3 +158,13 @@ test-tools/issue34-060-unimpl-integer-260727.txt d6154f75faf4	Motorola's name fo
 commit 612d4c8 message 321200550e01	The licence's own retention clause, in the message of the
 	commit that imported the package.  A pushed message cannot be rewritten.
 commit 612d4c8 message 1261a7b89b43	The second line of the same clause, same commit.
+
+# The other two are covered by THIRD_PARTY_NOTICES/MOTOROLA-M68060-SP.txt, which names this file
+# as a modified version carrying short sequences from the package's integrator skeleton
+# (dist/fskeletn.s; the gate finds them in NetBSD's fill of it, fnetbsd.S).  They are recorded so
+# the gate stays green once the package trees are in the default corpus.
+
+src/fpsp060_glue.s 972baea9b9c2	The skeleton's BSUN prelude (save, clear the NaN condition), with
+	only the destination changed, as the notice says.
+src/fpsp060_glue.s 5e52be45fead	The skeleton's FPU-disabled exit: restore d0 and make the stacked
+	PC name the faulting instruction.  The notice names the file.
