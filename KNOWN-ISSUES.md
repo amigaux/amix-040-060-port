@@ -10112,7 +10112,7 @@ though still on **their** hardware and as they reported it. The driver line has 
 tree's `main` (`8f272c1`, their merge `45613c2`). Our ISSUE-75 and ISSUE-76 patchers run in their
 base build unchanged.
 
-## ⚠⚠ ISSUE-77 (2026-10-14, a stock defect: RECORDED, fix to come from the driver line as an opt-in pass): `ttcompatopen` leaves `t_state`, `t_iocid` and `t_ioccmd` uninitialised, so a boot-time race can panic with "unexpected ioctl acknowledgment"
+## ⚠⚠ ISSUE-77 (2026-10-14, a stock defect: RECORDED; fix arrived 2026-10-17 as an opt-in pass, OFF by default, not run on metal here): `ttcompatopen` leaves `t_state`, `t_iocid` and `t_ioccmd` uninitialised, so a boot-time race can panic with "unexpected ioctl acknowledgment"
 
 **Found and measured by the driver line** (their letters 20 and 22, 2026-10-05 and 2026-10-13), on
 the emulated 060. Mechanism checked here against the source and the stock image. Not observed on
@@ -10143,7 +10143,7 @@ They saw it 4 times in about 200 boots before their fix, and 2/100 against 0/100
 * Their dumps show only console streams (ttcompat → ldterm → `co`), and both panicked dumps
   held leftovers `8 / 0x10 / 0x10`. With their fix, every ttcompat stream reads `t_state` 0 at run level 2.
 
-### The fix (pending)
+### The fix
 
 Their `patch_ttcompat_init.py` is same-length with no relocation. It turns the sixteen `clrb` into
 four `clrl` over the same bytes, adds `clrl` at 56, 60 and 64, and fills the rest with `nop`. It
@@ -10152,7 +10152,14 @@ It is to arrive here as an opt-in pass. Asked of them (letter 23): the 64 bytes 
 thirteen `clrl`, which would clear all of 12..0x43, the same as the USL `bzero`, instead of three
 chosen fields.
 
-## ⚠ DRIVER-LINE-6 (2026-10-05, BUILT — host-proven, EMU-proven on nine cells, HW not run): the kernel roots on its compiled `rootdev`, so every family needed one kernel per target unit
+**Arrived 2026-10-17, in the wide form** (their `driver-line-1.0`, merged here). `relink-040-ttcompat.sh`
+runs `src/patch_ttcompat_init.py`, which clears all of 4..0x43 at open within the same 64 bytes and
+upgrades the narrow form if it meets it. Opt-in, OFF by default, any time before `relink-040-fpe.sh`.
+Measured here 2026-10-18 on the merged tree: 37 bytes changed against `build/unix-040`, all inside
+`ttcompatopen`; `--check` `[ok]` on the full opt-in chain's fpe output; `test-ttcompat-init` 0
+failing. Not run on metal here.
+
+## ⚠ ISSUE-78 (2026-10-05, the driver line's DRIVER-LINE-6; BUILT — host-proven, EMU-proven on nine cells, HW not run): the kernel roots on its compiled `rootdev`, so every family needed one kernel per target unit
 
 **Symptom (by design, not a crash).** The boot loader hands the kernel `d0 = 3` and `d1 = struct bootinfo *`
 and nothing about the disk it came from. The root is therefore the compiled `rootdev`, and the swap is the
@@ -10217,6 +10224,9 @@ digit of `bo_name`.
 - **Not verified:** metal.
 
 ## ⚠ DRIVER-LINE-8 (2026-10-06, a stock defect: BUILT — opt-in pass, OFF by default; host-proven, no EMU regression; the deadlock did NOT reproduce in 25 unfixed runs (14 I3-shape installs, 11 synthetic), so the fix rests on the mechanism, not on a tally; HW not run): `page_get()` keeps no reserve, so pageout can wait forever for the page its own push needs
+
+**Numbering.** Kept under the driver line's tag: it takes an ISSUE number here once it has a run
+on this port's hardware (agreed in letter 23, 2026-10-14). Not run on metal here yet.
 
 **Symptom.** An interactive install on the 32 MB rig stopped at `apkg install (11 packages)`: no disk write
 for 58 minutes, the console still echoing, Ctrl-C ignored (installng's I3 cell, 2026-10-06; the re-run with
@@ -10296,7 +10306,7 @@ threshold), and kernel memory is exempt (`seg_kmem.c` passes `P_NORESOURCELIM`),
   the reserve doing its job: ordinary consumers stop at 20 free pages and kernel memory keeps them.
 - **Not verified:** metal. 128 MB metal has never shown the hang; it is a small-memory failure.
 
-## ✅ DRIVER-LINE-9 (2026-10-06, BUILT — opt-in pass, OFF by default; EMU-proven against a 68030; HW-proven 2026-10-11 on a full 68060 on the Z3660): on the 68060, every unimplemented-integer form `isp61_vec` declines kills the process, the 64-bit divides among them
+## ✅ ISSUE-79 (2026-10-06, the driver line's DRIVER-LINE-9; BUILT — opt-in pass, OFF by default; EMU-proven against a 68030; HW-proven 2026-10-11 on a full 68060 on the Z3660): on the 68060, every unimplemented-integer form `isp61_vec` declines kills the process, the 64-bit divides among them
 
 **Symptom.** On the 68060 the July APKGENG 1.12.0 (`fb2f08f4`, the one live on pkg.amigaux.org) cannot
 upgrade itself: its `installf -f`, `pkgchk` and `pkgadd` are `Killed (137)` (installng,

@@ -1,5 +1,6 @@
-| isp060_glue.s -- the AMIX side of the M68060 Integer Support Package (DRIVER-LINE-9, 2026-10-06;
-| opt-in, relink-040-isp060.sh).  Concatenated after isp060_head.s + 060sp/isp.S by build-isp060.sh.
+| isp060_glue.s -- the AMIX side of the M68060 Integer Support Package (ISSUE-79, the driver
+| line's DRIVER-LINE-9, 2026-10-06; opt-in, relink-040-isp060.sh).  Concatenated after
+| isp060_head.s + 060sp/isp.S by build-isp060.sh.
 |
 | WHAT IT ADDS.  Vector 61 (unimplemented integer instruction) on the 68060 already reaches
 | isp61_vec, the measured fast path for the 64-bit multiplies the installed userland uses.  Every

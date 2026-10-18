@@ -1,4 +1,5 @@
-| isp060_head.s -- the 128-byte call-out section of the M68060 ISP (DRIVER-LINE-9, 2026-10-06; opt-in).
+| isp060_head.s -- the 128-byte call-out section of the M68060 ISP (ISSUE-79, the driver line's
+| DRIVER-LINE-9, 2026-10-06; opt-in).
 |
 | LICENCE.  A MODIFIED VERSION under the Motorola M68060 Software Package licence, identified as
 | such as that licence requires: the table's shape and its 32 four-byte fields are the package's

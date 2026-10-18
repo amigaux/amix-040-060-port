@@ -1,5 +1,5 @@
 #!/bin/sh
-# test-isp060.sh -- self-test of the opt-in 68060 ISP pass (DRIVER-LINE-9).
+# test-isp060.sh -- self-test of the opt-in 68060 ISP pass (ISSUE-79, the driver line's DRIVER-LINE-9).
 #
 #     sh tools/test-isp060.sh [patched-kernel [unpatched-base]]
 #
@@ -9,7 +9,7 @@
 # With a kernel built by relink-040-isp060.sh: --check passes; a second patch is [skip] and leaves
 # every byte as it was.  With an unpatched base as well: the patcher refuses it (no isp060_unimp).
 # The behaviour itself -- every emulated form against a 68030 -- is the emulator probe set in
-# KNOWN-ISSUES DRIVER-LINE-9; it needs a booted 68060 and is not hermetic.
+# KNOWN-ISSUES ISSUE-79; it needs a booted 68060 and is not hermetic.
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 sh "$HERE/build-isp060.sh" > "$HERE/build/test-isp060-build.log" 2>&1 \

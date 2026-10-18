@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# patch_isp060_hook.py -- send isp61_vec's declines to Motorola's ISP (DRIVER-LINE-9; opt-in,
-# relink-040-isp060.sh).
+# patch_isp060_hook.py -- send isp61_vec's declines to Motorola's ISP (ISSUE-79, the driver
+# line's DRIVER-LINE-9; opt-in, relink-040-isp060.sh).
 #
 #   patch_isp060_hook.py KERNEL            retarget; idempotent ([skip] when already done)
 #   patch_isp060_hook.py --check KERNEL    verify a finished kernel; writes nothing

@@ -1,6 +1,6 @@
 #!/bin/sh
 # relink-040-isp060.sh -- OPT-IN: Motorola's M68060 Integer Support Package behind isp61
-# (DRIVER-LINE-9; 2026-10-06).  Not part of any default chain.
+# (ISSUE-79, the driver line's DRIVER-LINE-9; 2026-10-06).  Not part of any default chain.
 #
 #   build-isp060.sh            build/isp060_pkg.o = src/isp060_head.s + 060sp/isp.S + src/isp060_glue.s
 #   src/patch_isp060_hook.py   isp61_vec's one `jmp nullvect` (every decline) -> isp060_unimp

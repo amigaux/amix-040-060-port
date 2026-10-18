@@ -1,6 +1,7 @@
 #!/bin/sh
-# build-isp060.sh -- DRIVER-LINE-9 (opt-in): Motorola's M68060 Integer Support Package as one
-# relocatable object the kernel relink can consume: build/isp060_pkg.o.
+# build-isp060.sh -- ISSUE-79 (the driver line's DRIVER-LINE-9; opt-in): Motorola's M68060
+# Integer Support Package as one relocatable object the kernel relink can consume:
+# build/isp060_pkg.o.
 #
 # Source: the freely-redistributable M68060 Software Package as imported by NetBSD
 # (sys/arch/m68k/060sp/isp.S, the isp.sa hex image in GNU syntax) inside the pinned syssrc.tgz --
