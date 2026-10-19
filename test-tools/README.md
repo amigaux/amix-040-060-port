@@ -137,6 +137,28 @@ cc -o pgcold pgcold.c   # /tmp was cleared, rebuild
 ./pgcold E 24 /pgc      # phase B: probe.  PASS = PRESERVED
 ```
 
+## memstress.c — synthetic low-memory load (DRIVER-LINE-8)
+A throwaway written for the page-out reserve proof (2026-10-06) and kept as it ran; its header
+comment is its documentation. It forks readers, writers, `MAP_SHARED` mappers, small-file writers
+and an anonymous hog against one directory, kills them after `secs` and prints `MEMSTRESS_DONE`.
+Built with the cross toolchain, from the repository root; the guest's native `cc` was not tried:
+
+```sh
+(. tools/config-load.sh; m68k-cbm-sysv4-gcc -O -o build/memstress test-tools/memstress.c)
+```
+
+`memstress dir bigMB readers writers mappers anonMB secs [smallwriters]`. Create `dir` first
+(`mkdir -p /var/tmp/ms`); the big file is made once and reused. The shapes we ran, all on a 32 MB rig:
+
+| Invocation | Load | What it gave on the unfixed kernel |
+|---|---|---|
+| `memstress /var/tmp/ms 48 2 2 2 4 900 2` | **the proof run**: 2 readers of a 48 MB file, 2 writers of 3 MB files, 2 mappers dirtying random pages of the big file, a 4 MB hog, 2 small-file writers, 900 s | 4 of 4 thrashed with `freemem` 0 at every check and then finished; starved, not deadlocked. With the reserve (1 run), `freemem` stayed at 20 |
+| `memstress /var/tmp/ms 48 2 2 2 4 600` | calibration 1: the same without small-file writers, 600 s | 1 of 3 stopped answering telnet (called a hang at 451 s), 1 ran far over time, 1 finished |
+| `memstress /var/tmp/ms 32 1 1 1 0 900 3` | calibration 2: one of each on a 32 MB file, no hog, 3 small-file writers | 4 of 4 finished; too light to starve the machine |
+
+Neither the deadlock nor its signature reproduced in these 11 unfixed runs; see DRIVER-LINE-8 in
+`../KNOWN-ISSUES.md` for what the runs do and do not show.
+
 ## proctest.c — /proc process-memory acceptance test (ISSUE-17/18)
 Forks a child and reads+writes its memory through `/proc/<pid>` in three regions that
 hit three different kernel paths (resident-private, COW, never-touched), plus a
