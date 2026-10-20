@@ -10305,6 +10305,37 @@ threshold), and kernel memory is exempt (`seg_kmem.c` passes `P_NORESOURCELIM`),
   The deadlock itself did not reproduce under synthetic load (0 of 7 unfixed runs); what the pair shows is
   the reserve doing its job: ordinary consumers stop at 20 free pages and kernel memory keeps them.
 - **Not verified:** metal. 128 MB metal has never shown the hang; it is a small-memory failure.
+- **⚠ Correction, 2026-10-20: the `pgrsv_fails` above are not klusters.** `pvn_kluster` passes
+  `P_CANWAIT` (`pea 1` at merged `.text 0xb196c`, before its call at `0xb1976`), so it can wait at
+  the reserve but can never return through `pgrsv_fails`. Only two live retargeted sites pass no-wait:
+  - `rfc_pageget` (`0xa1cc4`), which skips that cache fill on 0;
+  - this port's `hat_dup` child-page copy (`0xd8e9a`), which on 0 frees the fresh anon slot and falls
+    back to a shared/COW mapping.
+
+  The aggregate counter cannot tell the two apart. The attribution in the bullet above is kept as
+  recorded and corrected by this one. Read from the merged base; the flags were re-checked here.
+- **Site audit here, 2026-10-20, before the metal run** (read from the 3B2 and SVR4.2 sources and from
+  the merged base; read-only):
+  - **Census.** 15 `R_68K_32` relocations against `page_get`, every one a `jsr` operand. Two further
+    textual matches are `max_page_get` (`page_init_orig` `0xaf464`, `page_get` `0xaffc2`).
+  - **Split.** The 11 retargeted / 4 exempt split is right. The stock `hat_dup` body around `0xb53e4`
+    is unreachable: nothing names its entry, and `as_dup` calls this port's `hat_dup`. Its site is
+    retargeted harmlessly.
+  - **Kernel memory.** `hat_dup`'s direct call is a child data page; its tables go through the exempt
+    `hat_ptalloc`. `segu_get_orig` stays ordinary, as in SVR4.2, which exempts sched rather than
+    `segu_get`.
+  - **No new lock edge.** UFS/S5 putpage declines a locked inode instead of waiting, and none of the
+    held segmap, anon or RFS state is needed by pageout. fsflush reaches no ordinary site.
+  - **SR.** Stock `page_get` itself writes SR = `0x2400` absolutely (`0xaffea`), as `pgrsv_spl` does.
+    No ordinary site enters above IPL 4.
+
+  What the audit leaves to the run is dynamic: whether 20 pages is enough under real pressure.
+- **⚠ The synthetic load, open (2026-10-20, raised with the driver line).** In `memstress`'s
+  `mapper()`, `(rnd() * 4096L) % len` overflows 32 bits. The compiled loop (`asl.l #12`, then the
+  signed `tdivs.l`) yields a negative offset whenever bit 19 of `rnd()` is set. Simulated from each
+  child's seed, **both mappers' first store lands below the mapping** (15.9 and 43.9 MB). Not run
+  here. If that store faults, the "two mappers dirtying random pages" above did not happen, and
+  nothing in the program would have reported it.
 
 ## ✅ ISSUE-79 (2026-10-06, the driver line's DRIVER-LINE-9; BUILT — opt-in pass, OFF by default; EMU-proven against a 68030; HW-proven 2026-10-11 on a full 68060 on the Z3660): on the 68060, every unimplemented-integer form `isp61_vec` declines kills the process, the 64-bit divides among them
 
