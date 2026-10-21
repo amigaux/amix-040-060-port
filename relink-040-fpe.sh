@@ -16,6 +16,8 @@
 #   PGRSV=0 sh relink-040-fpe.sh ...      opt out of DRIVER-LINE-8 (step 0.6): no page-out reserve
 #   ISP060=0 sh relink-040-fpe.sh ...     opt out of DRIVER-LINE-9 (step 0.6): no 68060 ISP
 #                                         (all three = 0 reproduces the r6 image as first cut)
+#   TCP_HIWAT=0 sh relink-040-fpe.sh ...  opt out of DRIVER-LINE-10 (step 8.8): stock TCP queue
+#                                         (with the three above, reproduces the r6 image)
 #
 #   FPE_REQUIRE_QUEUE=z3660queue FPE_REQUIRE_CARD=1 sh relink-040-fpe.sh ...
 #                                         refuse a base whose root-storage family is not the
@@ -346,6 +348,19 @@ if m68k-linux-gnu-nm "$OUT" | grep -qE " [Tt] pgrsv_get\$"; then
 fi
 if m68k-linux-gnu-nm "$OUT" | grep -qE " [Tt] isp060_top\$"; then
 	run_step all python3 "$HERE/src/patch_isp060_hook.py" --check "$OUT"
+fi
+
+# ---------------------------------------------------------------- 8.8 DRIVER-LINE-10
+# Stock TCP's lower read queue holds 4096 bytes, and ipintr frees, uncounted, every datagram that does
+# not fit in one service pass: the 4th full segment of each burst.  Owner decision D11 (2026-10-21);
+# here for the reason ISSUE-69 and DRIVER-LINE-7 are.  One .data longword, so after the link.
+# Idempotent; TCP_HIWAT=0 is the deliberate opt-out.
+if [ "${TCP_HIWAT:-1}" = 0 ]; then
+	echo "[*] DRIVER-LINE-10: TCP lower-read hiwat SKIPPED (TCP_HIWAT=0, deliberate opt-out)"
+else
+	echo "[*] DRIVER-LINE-10: TCP lower-read hiwat 4096 -> 16384"
+	run_step all python3 "$HERE/src/patch_tcp_hiwat.py" "$OUT"
+	run_step all python3 "$HERE/src/patch_tcp_hiwat.py" --check "$OUT"
 fi
 
 # ---------------------------------------------------------------- 9. packaging guards

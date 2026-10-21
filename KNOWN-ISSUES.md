@@ -10681,3 +10681,41 @@ rig's stock kernel):**
   bounds → SIGFPE, `cas2` → SIGSEGV, as designed. Run by the Z3660 station.
 - Performance: an emulated form costs a trap plus copyin-based operand reads, so a binary dense in
   declined forms runs visibly slower than with `isp61`'s fast path.
+
+## ✅ DRIVER-LINE-10 (2026-10-21, a stock defect: FIXED, default in `relink-040-fpe.sh` step 8.8 by the owner's decision D11; HW-proven on the A4000D by a live /dev/kmem write before the build-time fix): TCP's lower read queue holds 4096 bytes, so IP frees the 4th and later full-size segments of every burst, and counts none of them
+
+**Symptom.** A 4 MiB FTP push into a Z3660 box ran at 25-30 KB/s (pull: about 600 KB/s) on both
+benches, with 300-400 sender retransmissions, each one after a 200 ms timeout. The firmware and the
+z3660eth driver delivered every frame (capture count = MAC count = driver count). The box's
+`netstat -s` showed IP "total packets received" about 440 above TCP's, with every error and drop
+counter at 0. On the wire the 4th and later frames of each back-to-back train were the lost ones.
+
+**Cause.** `ipintr`, IP's lower read service procedure, drains its whole queue in one pass and for each
+datagram tests `canput()` on TCP's lower read queue (`tcplrinit`: `tcplrput` queues, `tcplrsrv` feeds
+`tcp_linput`). On a full queue it calls `freemsg()` and nothing else: no `ipstat` field, and its
+`STRLOG` is compiled out (stock `ipintr+0x41c`; USL `netinet/ip_input.c` has the same code).
+`putq` counts `b_wptr - b_rptr`, `tcpm_info[IQP_MUXRQ].mi_hiwat` is 4096, a full segment is about
+1500 bytes, so the third datagram sets QFULL. `tcplrsrv` cannot run before `ipintr` returns, so the
+rest of the pass is freed. The z3660eth driver polls once a tick (60 Hz), so a tick's frames reach IP
+together. The 24576-byte window is a different queue: each connection's upper read queue (`SO_RCVBUF`).
+
+**Fix: one longword.** `src/patch_tcp_hiwat.py` sets `tcpm_info[3].mi_hiwat` 0x1000 -> 0x4000. That is
+the `module_info` `tcplrinit` points to, and its value is copied into `q_hiwat` when IP is linked under
+TCP at boot. 16384 covers IP's own 8192-byte queue plus one segment, so one `ipintr` pass always fits.
+- The site is found through `tcplrinit`'s `qi_minfo` relocation, not a fixed offset (stock 2.1c `.data`
+  0xf9c8, file 0xe6ba4; the K030-U chain 0xfdb0).
+- The whole entry is asserted (`TCPM_ID`, maxpsz 4096, lowat 1024) and no relocation may cover the word.
+- An old value other than 0x1000 or 0x4000 aborts the build.
+- `mi_lowat` and the other four entries are untouched. Entry 2's hiwat is the stream head's (`tcpopen`).
+- `relink-040-fpe.sh` step 8.8 writes and re-checks it after the link; `TCP_HIWAT=0` is the opt-out.
+- `tools/test-tcp-hiwat.sh` covers the patch, the skip, the `--check` codes, one changed byte, and
+  refusals of a wrong old value, a `qi_minfo` off entry 3 and a relocated word.
+
+**Verified on metal (A4000D, 2026-10-21, KD060-Z `68040-261019-81`):** `q_hiwat` written 0x1000 ->
+0x4000 through /dev/kmem in the running kernel, after checking the queue's `q_qinfo` was `tcplrinit`.
+- Push 4 MiB: 24.6 KB/s before, 334 and 294 KB/s after.
+- Sender retransmissions: 372 before, 13 and 15 after.
+- IP minus TCP received: 443 before, 22 and 15 after (the broadcast floor).
+- Both transfers byte-exact; the pull was unchanged at about 640 KB/s.
+
+The 68030 kit (K030-U) does not pass through `relink-040-fpe.sh`, so its build calls the tool itself.
