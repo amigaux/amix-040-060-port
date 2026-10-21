@@ -10314,6 +10314,10 @@ threshold), and kernel memory is exempt (`seg_kmem.c` passes `P_NORESOURCELIM`),
 
   The aggregate counter cannot tell the two apart. The attribution in the bullet above is kept as
   recorded and corrected by this one. Read from the merged base; the flags were re-checked here.
+  The driver line reports that RFS was not mounted in any of these runs: their savestates show only
+  `/`, `/proc` and `/dev/fd`, and no RFS daemon (letter 28). That leaves fork-time `hat_dup` copies
+  falling back to COW. The count fits their harness's telnet liveness probe every 30 s. Plausible,
+  not proven per fork.
 - **Site audit here, 2026-10-20, before the metal run** (read from the 3B2 and SVR4.2 sources and from
   the merged base; read-only):
   - **Census.** 15 `R_68K_32` relocations against `page_get`, every one a `jsr` operand. Two further
@@ -10330,12 +10334,25 @@ threshold), and kernel memory is exempt (`seg_kmem.c` passes `P_NORESOURCELIM`),
     No ordinary site enters above IPL 4.
 
   What the audit leaves to the run is dynamic: whether 20 pages is enough under real pressure.
-- **⚠ The synthetic load, open (2026-10-20, raised with the driver line).** In `memstress`'s
-  `mapper()`, `(rnd() * 4096L) % len` overflows 32 bits. The compiled loop (`asl.l #12`, then the
-  signed `tdivs.l`) yields a negative offset whenever bit 19 of `rnd()` is set. Simulated from each
-  child's seed, **both mappers' first store lands below the mapping** (15.9 and 43.9 MB). Not run
-  here. If that store faults, the "two mappers dirtying random pages" above did not happen, and
-  nothing in the program would have reported it.
+- **⚠ The synthetic load: the mappers never ran (raised 2026-10-20, resolved 2026-10-21).**
+  - **The overflow, found here.** In `memstress`'s `mapper()`, `(rnd() * 4096L) % len` overflows 32
+    bits. The compiled loop (`asl.l #12`, then the signed `tdivs.l`) yields a negative offset whenever
+    bit 19 of `rnd()` is set. Simulated from each child's seed, both mappers' first store would land
+    below the mapping (15.9 and 43.9 MB).
+  - **The loop was never reached** (the driver line, from the proof savestates, letter 28). In every
+    proof savestate, the four unfixed runs and the reserve run, both mappers are zombies with exit
+    status 4: the mmap failure path, not a fault. Their whole-file mapping exceeded the default 16 MB
+    soft `RLIMIT_VMEM`. The default is confirmed here (`SVMMLIM` = `0x1000000`, AMIX
+    `usr/sys/master.d/kernel`), and the limit check is `as_map`'s (3B2 `vm/vm_as.c:490`).
+  - **So the "two mappers dirtying random pages of the big file through `MAP_SHARED`" above did not
+    happen.** The synthetic load was the readers, the writers, the small-file writers and the hog.
+    Dirty file pages came from `write(2)` only. The `freemem` pair (0 unfixed, 20 with the reserve)
+    is unaffected.
+  - **The fixed program** is `test-tools/memstress.c` as of `9022d74` (merged with PR #2, `efd8ca2`).
+    It raises the mapper's soft limit, keeps the offset in range, reports every child that ended
+    early, and is built by the guest's `cc`. The proof version stays in history at `8b7143a`. A run
+    with the fixed program is heavier than the proof runs, because its mappers do dirty the mapping,
+    so its numbers are not directly comparable with the ones above.
 
 ## ✅ ISSUE-79 (2026-10-06, the driver line's DRIVER-LINE-9; BUILT — opt-in pass, OFF by default; EMU-proven against a 68030; HW-proven 2026-10-11 on a full 68060 on the Z3660): on the 68060, every unimplemented-integer form `isp61_vec` declines kills the process, the 64-bit divides among them
 
