@@ -137,6 +137,45 @@ cc -o pgcold pgcold.c   # /tmp was cleared, rebuild
 ./pgcold E 24 /pgc      # phase B: probe.  PASS = PRESERVED
 ```
 
+## memstress.c — synthetic low-memory load (DRIVER-LINE-8)
+It forks readers, writers, `MAP_SHARED` mappers, small-file writers and an anonymous hog against one
+directory, kills them after `secs`, reports how every child ended and prints `MEMSTRESS_DONE`. Its
+header comment is its documentation. Build on the guest with `cc -o memstress memstress.c`, or with the
+cross toolchain from the repository root:
+
+```sh
+(. tools/config-load.sh; m68k-cbm-sysv4-gcc -O -o build/memstress test-tools/memstress.c)
+```
+
+`memstress dir bigMB readers writers mappers anonMB secs [smallwriters]`. Create `dir` first
+(`mkdir -p /var/tmp/ms`); the big file is made once and reused. At most 64 children. A child that ended
+before the SIGKILL is printed with its role and status, the rest must end by signal 9, and the exit
+status is 1 if either check fails.
+
+**Two versions.** Use this one.
+- **The proof version** is commit `8b7143a`, as it ran on 2026-10-06 (cross build sha256 `aa3f54c4…`).
+  Its mappers never stored to the big file. Their `mmap` of the whole file exceeded the default 16 MB
+  soft `RLIMIT_VMEM`, so each printed `mmap: Not enough space` and exited 4. Every savestate of the proof
+  runs shows both mappers as zombies with exit status 4. Had the mapping succeeded, the offset
+  `(rnd() * 4096L) % len` overflows 32 bits and is negative for about half the draws (Antti, letter 27).
+  So the runs below loaded the machine with the readers, writers, small-file writers and the hog only;
+  dirty file pages came from `write(2)`, not from mapped stores.
+- **This version** raises each mapper's soft `RLIMIT_VMEM` to the hard limit (unlimited by default),
+  keeps the offset inside the mapping, bounds the children and reports how they ended. Checked on the
+  32 MB rig with `48 1 0 2 0 60`: both mappers alive at 40 s with the 48 MB mapping, all three children
+  ended by signal 9, for the native `cc` build and the cross build alike.
+
+The shapes we ran with the proof version, all on a 32 MB rig:
+
+| Invocation | Load | What it gave on the unfixed kernel |
+|---|---|---|
+| `memstress /var/tmp/ms 48 2 2 2 4 900 2` | **the proof run**: 2 readers of a 48 MB file, 2 writers of 3 MB files, 2 mappers (exited at start, see above), a 4 MB hog, 2 small-file writers, 900 s | 4 of 4 thrashed with `freemem` 0 at every check and then finished; starved, not deadlocked. With the reserve (1 run), `freemem` stayed at 20 |
+| `memstress /var/tmp/ms 48 2 2 2 4 600` | calibration 1: the same without small-file writers, 600 s | 1 of 3 stopped answering telnet (called a hang at 451 s), 1 ran far over time, 1 finished |
+| `memstress /var/tmp/ms 32 1 1 1 0 900 3` | calibration 2: one of each on a 32 MB file, no hog, 3 small-file writers | 4 of 4 finished; too light to starve the machine |
+
+Neither the deadlock nor its signature reproduced in these 11 unfixed runs; see DRIVER-LINE-8 in
+`../KNOWN-ISSUES.md` for what the runs do and do not show.
+
 ## proctest.c — /proc process-memory acceptance test (ISSUE-17/18)
 Forks a child and reads+writes its memory through `/proc/<pid>` in three regions that
 hit three different kernel paths (resident-private, COW, never-touched), plus a
