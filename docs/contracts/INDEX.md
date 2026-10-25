@@ -179,6 +179,7 @@ a prior analysis, and it is listed separately so that distinction survives.
 |---|---|---|
 | [DMA040-SERVICE-RECORD.md](DMA040-SERVICE-RECORD.md) | `dma_cache040.s` (`dma_prepare`, `dma_complete`); the record itself lives in each controller's own object | agreed with the driver line 2026-09-28, `amix-mail` thread `2026-09-27-kickoff-questions` |
 | [RTH1-ROOT-HINT.md](RTH1-ROOT-HINT.md) | `rth1.c` (`rth1_mountroot`, `rth1_apply`); the loader half is the kerntools line's boot2 | driver line 2026-10-05 (decision D-2); proposed to the upstream line, not yet agreed |
+| [KINFO.md](KINFO.md) | `kinfo.c` (`/dev/kinfo`, cdevsw[53]); `tools/kabi-sidecar.py` | driver line 2026-10-25; the record and the sidecar are the kernel-modules project's C2-1 v2 and C2-3 (`amix-dlm`) |
 
 It exists because `tools/status-facts.sh` cannot enumerate that block: it finds counter blocks by
 `*_magic` symbols and their members by symbol prefix, and a C structure inside an array in a
