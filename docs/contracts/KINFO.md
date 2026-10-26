@@ -105,3 +105,27 @@ Its gates:
   the zero sum, an `lseek` to 528 against the whole read, the reads at the end, and `EPERM` on `write`.
 - `tools/kinfo-decode.py` decodes a record pulled from the box (or the output of `od -X`) field by field and
   checks its shape.
+
+## The module kernel (2026-10-26)
+
+The k46 module kernel (amix-dlm stage-3 kernel brief, S3-20) carries the module core, spliced in by
+`relink-040-dlm.sh`. kinfo and rth1 are built for it with `DLM=1`:
+
+- **kinfo** (`-DKINFO_DLM`). The kabi tag is `k46.1.0` (`KINFO_KABI` overrides). Every `read(2)` refreshes
+  the module list at 536 from the core's `dlm_kinfo_list()`, with up to 32 entries, and sets the length
+  (540 + 32 × n) and the check to match. Without `KINFO_DLM` the object is the static kernel's, byte for byte.
+- **rth1** (`-DRTH1_DLM`). `rth1_mountroot()` calls `dlm_marc_post()` once `vfs_mountroot()` has returned 0,
+  so the boot-class modules load in process 0 once the root is mounted.
+- Between the two passes and the splice, `dlm_kinfo_list` and `dlm_marc_post` stay open. Each pass names them
+  to `check_relink_relocs.py --pending`, and `relink-040-dlm.sh` refuses a base with any other import open.
+
+The chain leaves z3660eth, zz9000 and monsw out (majors 49, 51 and 52 belong to modules):
+
+    dd -> z3660 (Z3660_NET=off) -> f4arms -> f6 -> rth1 (DLM=1) -> kinfo (DLM=1) -> dlm -> fpe
+       -> [kerntools sddevsize, W-D7] -> relink-040-dlm.sh --fill -> [emit]
+
+- `--fill` runs after the W-D7 inject, which grows `.text`, and before emit, which only patches `.data` words.
+- `tools/kabi-sidecar.py` writes the sidecar of C2-3 version 5 for such an image:
+  - `family=generic` and `loader-min=2`;
+  - `ident`, `arena` and `ksym` from the image's own AXK1 record, after checking it;
+  - no `root` or `rootfs`.

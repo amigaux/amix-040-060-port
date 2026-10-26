@@ -17,7 +17,16 @@ sidecar and /dev/kinfo cannot disagree:
   rootfs   the root filesystems the image can mount: ufs (ufs_mountroot), s5 (s5mountroot)
   pin      gcc-<version>-<commit> of gcc-cross-amix; by default its HEAD, refused unless the
            installed m68k-cbm-sysv4-gcc is that commit's wrapper
-No arena key: this is a static kernel.  No timestamps: the same image gives the same bytes.
+No timestamps: the same image gives the same bytes.
+
+A module kernel (kinfo_kabi not "static", relink-040-dlm.sh) gets the sidecar of C2-3 version 5
+(amix-dlm C3-3 section 3) instead: family must be generic; loader-min=2; no root or rootfs; and
+after sha256, from the image's own AXK1 record (dlm_ident, filled by relink-040-dlm.sh --fill):
+  ident    the record's image offset (from the bind address: .text, .rodata, .data, no padding)
+  arena    the arena's image offset and capacity, as the record gives them
+  ksym     the symbol block's image offset and size, as the record gives them
+The record is checked first: magic, version and length, the check, its kabi tag = kinfo's, line 46,
+and the arena and block offsets those of dlm_arena and dlm_ksym in the image.
 
 -o OUT writes the sidecar there (default: KERNEL's directory/kabi when KERNEL is named unix, else
 KERNEL.kabi).  --stand DIR lays out the package's files instead: DIR/stand/k46/unix (a copy of
@@ -34,6 +43,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "src"))
 import a4091_sd_rows as rows  # noqa: E402  (the reader of sd's controller table)
 
 LOADER_MIN = 1
+LOADER_MIN_DLM = 2
+AXK1_MAGIC = 0x41584B31
 MOBO_ROWS = {0x0202F003: "mobo:a3000-wd", 0x1DE0A400: "mobo:gayle"}
 ROOTFS = (("ufs", "ufs_mountroot"), ("s5", "s5mountroot"))
 
@@ -60,6 +71,30 @@ def data_bytes(e, syms, name, n):
 
 def cstr(b):
     return b.split(b"\0")[0].decode("latin-1")
+
+
+def image_offset(e, syms, name):
+    if name not in syms or e.names[syms[name]["shndx"]] != ".data":
+        die("%s: no .data symbol %s" % (e.path, name))
+    return sum(e.sec[n]["size"] for n in (".text", ".rodata") if n in e.sec) + syms[name]["value"]
+
+
+def axk1(e, syms, kabi):
+    rec = data_bytes(e, syms, "dlm_ident", 64)
+    w = [int.from_bytes(rec[i:i + 4], "big") for i in range(0, 64, 4)]
+    if w[0] != AXK1_MAGIC or w[1] != (1 << 16 | 64):
+        die("dlm_ident is not an AXK1 version 1 record of 64 bytes")
+    if sum(w) & 0xFFFFFFFF:
+        die("AXK1 check fails: is the image filled (relink-040-dlm.sh --fill)?")
+    if cstr(rec[12:36]) != kabi or w[9] != 46:
+        die("AXK1 says kabi %r line %d; kinfo says %r on line 46" % (cstr(rec[12:36]), w[9], kabi))
+    if w[10] != image_offset(e, syms, "dlm_arena") or w[12] != image_offset(e, syms, "dlm_ksym"):
+        die("AXK1's arena/ksym offsets are not dlm_arena's/dlm_ksym's in this image")
+    if not w[11] or w[11] & 0xFFFF or not w[13]:
+        die("AXK1 arena capacity 0x%x / block size 0x%x" % (w[11], w[13]))
+    return [("ident", "0x%08x" % image_offset(e, syms, "dlm_ident")),
+            ("arena", "0x%08x 0x%08x" % (w[10], w[11])),
+            ("ksym", "0x%08x 0x%08x" % (w[12], w[13]))]
 
 
 def default_pin():
@@ -91,6 +126,14 @@ def sidecar(kernel, family, pin):
         build = "68060-" + build[6:]
     if build.endswith("000000-00"):
         die("buildid %r is the unstamped literal" % build)
+    raw = open(kernel, "rb").read()
+    head = [("kabi", kabi), ("family", family), ("line", "k46"), ("pin", pin), ("build", build),
+            ("size", str(len(raw))), ("sha256", hashlib.sha256(raw).hexdigest())]
+    if kabi != "static":
+        if family != "generic":
+            die("a module kernel (kabi %s) is family generic, not %r" % (kabi, family))
+        lines = head + [("loader-min", str(LOADER_MIN_DLM))] + axk1(e, syms, kabi)
+        return "".join("%s=%s\n" % kv for kv in lines)
     tname, bound, table, _ = rows.read_table(e)
     keys = []
     for ident, _q, _n in table:
@@ -105,15 +148,7 @@ def sidecar(kernel, family, pin):
     fs = [n for n, s in ROOTFS if s in syms]
     if not fs:
         die("no root filesystem in %s" % kernel)
-    raw = open(kernel, "rb").read()
-    lines = [
-        ("kabi", kabi),
-        ("family", family),
-        ("line", "k46"),
-        ("pin", pin),
-        ("build", build),
-        ("size", str(len(raw))),
-        ("sha256", hashlib.sha256(raw).hexdigest()),
+    lines = head + [
         ("loader-min", str(LOADER_MIN)),
         ("root", ",".join(keys)),
         ("rootfs", ",".join(fs)),
