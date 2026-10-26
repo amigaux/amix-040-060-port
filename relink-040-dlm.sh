@@ -38,7 +38,9 @@
 # A core that defines dlm_halt (core patch 0030) gets mdboot's haltsys and rtnfirm calls through
 # src/dlm_halt040.s (src/patch_dlm_halt.py): the halt pass runs on halt and reboot, never on panic.
 # A core that defines dlm_sd_close (core patch 0032, C4-1 section 3) takes sd's module registrations
-# from the four-card sd's sd4_init (src/patch_dlm_sd.py); it needs a relink-040-sd4card.sh base.
+# from the four-card sd's sd4_init (src/patch_dlm_call.py); it needs a relink-040-sd4card.sh base.
+# A core that defines dlm_marc_root (core patch 0034, spec 30 section 3) gets rth1_mountroot's call
+# before rth1_apply (rth1_nomarc, relink-040-rth1.sh DLM=1): the arena's root modules link there.
 # From kabi k46.1.1 on, bdevsw[20] -- the stock RAM disk's block row -- is freed for the module
 # ramdisk (src/patch_free_brow.py): every routine nodev, d_flag &nullflag (0).
 #
@@ -243,6 +245,13 @@ if m68k-linux-gnu-nm "$O/add.o" | grep -qE " T dlm_sd_close\$"; then
 	SDSEAM=1
 	echo "      dlm_sd_close: in the core -- sd4_init takes the module registrations through it"
 fi
+MARC=0
+if m68k-linux-gnu-nm "$O/add.o" | grep -qE " T dlm_marc_root\$"; then
+	echo "$NM_IN" | grep -qE " T rth1_nomarc\$" \
+		|| { echo "[FAIL] the core has dlm_marc_root but the base has no rth1_nomarc -- relink-040-rth1.sh DLM=1 at this revision"; exit 1; }
+	MARC=1
+	echo "      dlm_marc_root: in the core -- rth1_mountroot calls it before rth1_apply"
+fi
 FREEB20=0
 case "$DLM_KABI" in k46.1.0) ;; *) FREEB20=1; echo "      $DLM_KABI: bdevsw[20] (the stock RAM disk) freed for the module ramdisk";; esac
 HALTO=
@@ -267,8 +276,12 @@ if [ -n "$HALTO" ]; then
 	run_step indent python3 "$HERE/src/patch_dlm_halt.py" --check "$OUT"
 fi
 if [ $SDSEAM = 1 ]; then
-	run_step indent python3 "$HERE/src/patch_dlm_sd.py" "$OUT"
-	run_step indent python3 "$HERE/src/patch_dlm_sd.py" --check "$OUT"
+	run_step indent python3 "$HERE/src/patch_dlm_call.py" "$OUT" sd4_init sd4_noclose dlm_sd_close
+	run_step indent python3 "$HERE/src/patch_dlm_call.py" --check "$OUT" sd4_init sd4_noclose dlm_sd_close
+fi
+if [ $MARC = 1 ]; then
+	run_step indent python3 "$HERE/src/patch_dlm_call.py" "$OUT" rth1_mountroot rth1_nomarc dlm_marc_root
+	run_step indent python3 "$HERE/src/patch_dlm_call.py" --check "$OUT" rth1_mountroot rth1_nomarc dlm_marc_root
 fi
 if [ $FREEB20 = 1 ]; then
 	run_step indent python3 "$HERE/src/patch_free_brow.py" "$OUT"
