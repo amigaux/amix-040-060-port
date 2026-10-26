@@ -125,8 +125,14 @@ The chain leaves z3660eth, zz9000 and monsw out (majors 49, 51 and 52 belong to 
        -> [kerntools sddevsize, W-D7] -> relink-040-dlm.sh --fill -> [emit]
 
 - `--fill` runs after the W-D7 inject, which grows `.text`, and before emit, which only patches `.data` words.
-- `tools/kabi-sidecar.py` writes the sidecar of C2-3 version 5 for such an image:
+  It also takes the fingerprint: amix-dlm's `tools/mkabi.py --check` against `abi/k46/abi-<kabi>.txt`
+  (C3-3 §4). A fingerprint that moved fails the build; `DLM_ABI_NEW=1` writes the new text instead, for the
+  one rewrite of a tag's reference that C3-3 allows.
+- `cputype` is a DDI data name, so `src/cputype060.s` gives it `.size cputype,4`: the fingerprint carries
+  its `st_size`.
+- `tools/kabi-sidecar.py` writes the sidecar of C2-3 version 5 for such an image, in C3-3 §3's order:
   - `family=generic` and `loader-min=2`;
-  - `root` and `rootfs` as for a static kernel. Through stage 3 the root controllers and filesystems stay
-    built in, and kbootset's gate 3 needs them;
-  - last, `ident`, `arena` and `ksym` from the image's own AXK1 record, after checking it.
+  - `ident`, `arena` and `ksym` from the image's own AXK1 record, after checking it;
+  - `abi` as `--fill` printed it (`--abi`);
+  - last, `root` and `rootfs` as for a static kernel. Through stage 3 the root controllers and filesystems
+    stay built in, and kbootset's gate 3 needs them.

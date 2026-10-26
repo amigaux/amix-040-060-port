@@ -22,9 +22,10 @@
 # monsw and zz9000 are not linked: majors 49, 51 and 52 belong to modules.  The base must be
 # kinfo's DLM=1 output: its two open imports, dlm_kinfo_list and dlm_marc_post, are the core's.
 # fpe stays the last link.  `relink-040-dlm.sh --fill <kernel>` then fills the block's sizes and
-# AXK1's offsets in place and runs the gate (the brief's steps 9 and 10), on the last form whose
-# layout changes: after amix-kerntools' W-D7 probe inject, which grows .text (124 bytes on KD060-Z)
-# and so moves every .data image offset; before emit-family-chains, which patches .data words only.
+# AXK1's offsets in place, takes the fingerprint (tools/mkabi.py against abi/k46/abi-<kabi>.txt,
+# C3-3 section 4) and runs the gate (the brief's steps 9 and 10), on the last form whose layout
+# changes: after amix-kerntools' W-D7 probe inject, which grows .text (124 bytes on KD060-Z) and so
+# moves every .data image offset; before emit-family-chains, which patches .data words only.
 #
 # usage: sh relink-040-dlm.sh [base-kernel] [output]
 #        sh relink-040-dlm.sh --fill <kernel>
@@ -32,15 +33,17 @@
 #   DLM_REV=<rev>    the amix-dlm revision the core and tools come from (default: the pin below)
 #   DLM_KABI=<tag>   default k46.1.0; must equal the base's kinfo_kabi
 #   DLM_ARENA=<n>    the arena's capacity (default 0x60000, M-MOD1)
+#   DLM_ABI_NEW=1    --fill: a fingerprint that moved is written (KERNEL.abi.txt) and taken instead of
+#                    failing -- only for the one rewrite of a tag's reference C3-3 allows
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
 
-# db0abef: the stage-3 kernel brief with section 1 complete (core patches 0001-0013, core/plat,
-# tools/mkident.py), reviewed 2026-10-26.
+# e86c9c4: core patches 0001-0014 (the printf formats), tools/mkabi.py and the k46.1.0 reference,
+# reviewed 2026-10-26.
 DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
-DLM_REV="${DLM_REV:-db0abef}"
+DLM_REV="${DLM_REV:-e86c9c4}"
 DLM_KABI="${DLM_KABI:-k46.1.0}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
@@ -66,6 +69,12 @@ stage() {
 	echo "$REV" > "$S/.rev"
 }
 
+# the probe's offset table (the brief's step 2), for the core and for the fingerprint
+offs() {
+	sh "$S/core/tools/mkoffs" m68k-cbm-sysv4-gcc $AMIX_KERNEL_CFLAGS -I"$S/core/include" > "$S/core/dlm_offs.h" \
+		|| { echo "[FAIL] mkoffs"; exit 1; }
+}
+
 # ================================================================ --fill: steps 9 and 10
 if [ "$1" = --fill ]; then
 	K="$2"
@@ -73,15 +82,27 @@ if [ "$1" = --fill ]; then
 	m68k-linux-gnu-nm "$K" | grep -qE " [Tt] fpe_vec11\$" \
 		|| { echo "[FAIL] $K has no FPE: --fill runs on relink-040-fpe.sh's output"; exit 1; }
 	stage
-	echo "[*] amix-dlm $(echo "$REV" | cut -c1-7): mkksym -f, mkident.py --fill, --check, ksymgate"
+	offs
+	echo "[*] amix-dlm $(echo "$REV" | cut -c1-7): mkksym -f, mkident.py --fill, --check, mkabi.py, ksymgate"
 	run_step indent "$S/mkksym" -f "$K"
 	python3 "$S/kit/tools/mkident.py" --fill "$K" > "$K.dlm" || { echo "[FAIL] mkident.py --fill"; exit 1; }
 	sed 's/^/      /' "$K.dlm"
 	run_step indent python3 "$S/kit/tools/mkident.py" --check "$K"
+	REF="$S/kit/abi/k46/abi-$DLM_KABI.txt"
+	ABI="python3 $S/kit/tools/mkabi.py"
+	if $ABI --check "$REF" "$K" "$S/kit/abi/k46/ddi.list" "$S/core/dlm_offs.h" > "$K.abi" 2>&1; then
+		sed 's/^/      /' "$K.abi"
+	else
+		sed 's/^/      /' "$K.abi"
+		[ "$DLM_ABI_NEW" = 1 ] || { echo "[FAIL] mkabi.py: the fingerprint moved and the kabi tag did not"; exit 1; }
+		$ABI --text "$K.abi.txt" "$K" "$S/kit/abi/k46/ddi.list" "$S/core/dlm_offs.h" > "$K.abi" \
+			|| { echo "[FAIL] mkabi.py --text"; exit 1; }
+		echo "      DLM_ABI_NEW=1: $(cat "$K.abi"), the text in $(basename "$K").abi.txt -- the new reference"
+	fi
 	python3 "$S/kit/tools/ksymgate.py" "$S/axrel" "$K" "$S/kit/abi/k46/ddi.list" "$S/kit/abi/k46/core.list" \
 		> "$K.gate" 2>&1 || { sed 's/^/      /' "$K.gate"; echo "[FAIL] ksymgate"; exit 1; }
 	sed 's/^/      /' "$K.gate"
-	echo "[OK] filled $K: AXK1 lines in $(basename "$K").dlm, the gate in $(basename "$K").gate"
+	echo "[OK] filled $K: AXK1 lines in $(basename "$K").dlm, abi= in .abi, the gate in .gate"
 	exit 0
 fi
 
@@ -141,8 +162,7 @@ PY
 [ "$KK" = "$DLM_KABI" ] || { echo "[FAIL] the base's kinfo_kabi is '$KK', not $DLM_KABI (relink-040-kinfo.sh DLM=1)"; exit 1; }
 O="$S/obj"
 rm -f "$O"/*.o "$O"/*.warn
-sh "$S/core/tools/mkoffs" m68k-cbm-sysv4-gcc $AMIX_KERNEL_CFLAGS -I"$S/core/include" > "$S/core/dlm_offs.h" \
-	|| { echo "[FAIL] mkoffs"; exit 1; }
+offs
 echo "      mkoffs: $(grep -c '^#define' "$S/core/dlm_offs.h") layouts"
 sh "$S/core/tools/mkreg" "$S/kit/abi/registry/majors" > "$S/core/dlmreg.c" || { echo "[FAIL] mkreg"; exit 1; }
 KCC="m68k-cbm-sysv4-gcc $AMIX_KERNEL_CFLAGS -Wall -I$S/core/include -I$S/core"
@@ -157,9 +177,11 @@ $LCC -c "$S/kit/core/plat/k46/line.c" -o "$O/plat-line.o" 2>> "$O/kobj.warn"
 for f in dlm_cache dlm_hooksw dlm_spl; do m68k-cbm-sysv4-gcc -c "$S/core/$f.s" -o "$O/$f.o"; done
 OTHER=$(grep -v 'types.h:182\|In file included\|^ *from ' "$O/kobj.warn" | grep . || true)
 [ -z "$OTHER" ] || { echo "[FAIL] warnings beyond the stock headers':"; echo "$OTHER"; exit 1; }
+python3 "$S/kit/tools/prfcheck.py" $(for f in $CORE; do echo "$S/core/$f.c"; done) "$S/kit/core/plat/amiga.c" \
+	"$S/kit/core/plat/k46/line.c" > "$O/prf.log" || { cat "$O/prf.log"; echo "[FAIL] prfcheck"; exit 1; }
 COREO=$(for f in $CORE sha256 crc32 plat-amiga plat-line dlm_cache dlm_hooksw dlm_spl; do echo "$O/$f.o"; done)
 m68k-cbm-sysv4-ld -r -o "$O/dlm.o" $COREO
-echo "      dlm.o: $(m68k-linux-gnu-size "$O/dlm.o" | awk 'NR==2{print $1 "+" $2 "+" $3}') text+data+bss, no warnings of its own"
+echo "      dlm.o: $(m68k-linux-gnu-size "$O/dlm.o" | awk 'NR==2{print $1 "+" $2 "+" $3}') text+data+bss, no warnings of its own, printf formats %d %x %s only"
 python3 "$S/kit/tools/mkident.py" --asm k46 "$DLM_KABI" "$DLM_ARENA" > "$O/ident.s"
 m68k-cbm-sysv4-as -o "$O/ident.o" "$O/ident.s"
 "$S/mkksym" -a "$S/kit/abi/k46/ddi.list" -a "$S/kit/abi/k46/core.list" > "$O/ksym.s" 2> "$O/ksym.log" \

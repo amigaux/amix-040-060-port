@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """kabi-sidecar.py -- write the kabi sidecar of a finished kernel (docs/contracts/KINFO.md, "The sidecar").
 
-  python3 tools/kabi-sidecar.py KERNEL --family NAME [--pin PIN] [-o OUT]
-  python3 tools/kabi-sidecar.py KERNEL --family NAME [--pin PIN] --stand DIR
+  python3 tools/kabi-sidecar.py KERNEL --family NAME [--pin PIN] [--abi HEX] [-o OUT]
+  python3 tools/kabi-sidecar.py KERNEL --family NAME [--pin PIN] [--abi HEX] --stand DIR
   python3 tools/kabi-sidecar.py --check KERNEL SIDECAR
 
 One key=value per line, in this order: kabi, family, line, pin, build, size, sha256, loader-min,
@@ -20,22 +20,26 @@ sidecar and /dev/kinfo cannot disagree:
 No timestamps: the same image gives the same bytes.
 
 A module kernel (kinfo_kabi not "static", relink-040-dlm.sh) gets the sidecar of C2-3 version 5
-(amix-dlm C3-3 section 3) instead: family must be generic; loader-min=2; root and rootfs as for a
-static kernel (through stage 3 the floor's SCSI drivers and filesystems stay built in, and kbootset's
-gate 3 reads them); and last, from the image's own AXK1 record (dlm_ident, filled by
-relink-040-dlm.sh --fill):
+(amix-dlm C3-3 section 3, in its order) instead: family must be generic; loader-min=2; then from the
+image's own AXK1 record (dlm_ident, filled by relink-040-dlm.sh --fill):
   ident    the record's image offset (from the bind address: .text, .rodata, .data, no padding)
   arena    the arena's image offset and capacity, as the record gives them
   ksym     the symbol block's image offset and size, as the record gives them
 The record is checked first: magic, version and length, the check, its kabi tag = kinfo's, line 46,
-and the arena and block offsets those of dlm_arena and dlm_ksym in the image.
+and the arena and block offsets those of dlm_arena and dlm_ksym in the image.  Then
+  abi      the fingerprint, --abi: what relink-040-dlm.sh --fill's mkabi.py printed (KERNEL.abi);
+           it needs the kit's lists and dlm_offs.h, so it is the one value not read from the image
+and last root and rootfs as for a static kernel (through stage 3 the floor's SCSI drivers and
+filesystems stay built in, and kbootset's gate 3 reads them).
 
 -o OUT writes the sidecar there (default: KERNEL's directory/kabi when KERNEL is named unix, else
 KERNEL.kabi).  --stand DIR lays out the package's files instead: DIR/stand/k46/unix (a copy of
-KERNEL) and DIR/stand/k46/kabi.  --check exits 0 when SIDECAR is what this tool writes for KERNEL.
+KERNEL) and DIR/stand/k46/kabi.  --check exits 0 when SIDECAR is what this tool writes for KERNEL
+(with SIDECAR's family, pin and abi).
 """
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -113,7 +117,7 @@ def default_pin():
     return "gcc-2.7.2.3-" + head
 
 
-def sidecar(kernel, family, pin):
+def sidecar(kernel, family, pin, abi=None):
     e = rows.Elf(kernel)
     e.path = kernel
     syms = symbols(e)
@@ -136,6 +140,11 @@ def sidecar(kernel, family, pin):
         if family != "generic":
             die("a module kernel (kabi %s) is family generic, not %r" % (kabi, family))
         axk = axk1(e, syms, kabi)
+        if not re.fullmatch(r"[0-9a-f]{64}", abi or ""):
+            die("a module kernel needs --abi, the 64 hex digits of mkabi.py (relink-040-dlm.sh --fill)")
+        axk.append(("abi", abi))
+    elif abi:
+        die("--abi is for a module kernel; %s is static" % kernel)
     tname, bound, table, _ = rows.read_table(e)
     keys = []
     for ident, _q, _n in table:
@@ -150,11 +159,10 @@ def sidecar(kernel, family, pin):
     fs = [n for n, s in ROOTFS if s in syms]
     if not fs:
         die("no root filesystem in %s" % kernel)
-    lines = head + [
-        ("loader-min", str(LOADER_MIN if axk is None else LOADER_MIN_DLM)),
+    lines = head + [("loader-min", str(LOADER_MIN if axk is None else LOADER_MIN_DLM))] + (axk or []) + [
         ("root", ",".join(keys)),
         ("rootfs", ",".join(fs)),
-    ] + (axk or [])
+    ]
     return "".join("%s=%s\n" % kv for kv in lines)
 
 
@@ -165,16 +173,18 @@ def main():
             die("usage: --check KERNEL SIDECAR")
         have = open(a[2]).read()
         fam = dict(l.split("=", 1) for l in have.splitlines() if "=" in l)
-        want = sidecar(a[1], fam.get("family", ""), fam.get("pin", ""))
+        want = sidecar(a[1], fam.get("family", ""), fam.get("pin", ""), fam.get("abi"))
         print("[ok] %s matches %s" % (a[2], a[1]) if have == want else "[FAIL] %s is not the sidecar of %s" % (a[2], a[1]))
         sys.exit(0 if have == want else 1)
-    kernel, family, pin, out, stand = None, None, None, None, None
+    kernel, family, pin, abi, out, stand = None, None, None, None, None, None
     while a:
         x = a.pop(0)
         if x == "--family":
             family = a.pop(0)
         elif x == "--pin":
             pin = a.pop(0)
+        elif x == "--abi":
+            abi = a.pop(0)
         elif x == "-o":
             out = a.pop(0)
         elif x == "--stand":
@@ -185,7 +195,7 @@ def main():
             die("unknown argument %s" % x)
     if not kernel or not family:
         raise SystemExit(__doc__)
-    text = sidecar(kernel, family, pin or default_pin())
+    text = sidecar(kernel, family, pin or default_pin(), abi)
     if stand:
         d = os.path.join(stand, "stand", "k46")
         os.makedirs(d, exist_ok=True)
