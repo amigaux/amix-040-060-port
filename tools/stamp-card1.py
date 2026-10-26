@@ -77,10 +77,12 @@ def compose_dev(unit, slice_, card):
 
 
 def decode(dev):
+    # amix-dlm C4-1 section 2.1: the card's high bit is minor bit 7 (0 on cards 0-1)
     minor = dev & L_MAXMIN
+    card = (minor >> 3) & 1 | (minor >> 6) & 2
     return dict(major=(dev >> L_BITSMINOR) & 0xFF, minor=minor,
-                unit=minor & 0o7, card=(minor >> 3) & 0o1, slice=(minor >> 4) & 0o7,
-                controller=minor & 0x0F, drive=(minor >> 7) & 1)
+                unit=minor & 0o7, card=card, slice=(minor >> 4) & 0o7,
+                controller=(card << 3) | (minor & 0o7))
 
 
 def node(unit, slice_, card):
@@ -227,10 +229,10 @@ def main():
         bad.append("bo_name %r != %r" % (name, new_swap))
     if raw[len(name):].strip(b"\0"):
         bad.append("bo_name field is not NUL-padded past the string")
-    # THE CONSISTENCY CHECK, in hex: the controller digit must equal rootdev's minor & 0x0F
+    # THE CONSISTENCY CHECK, in hex: the controller digit must equal rootdev's 8 * card + unit
     ctrl_digit = name[len("/dev/dsk/c")]
     if int(ctrl_digit, 16) != g["controller"]:
-        bad.append("bo_name controller digit '%s' (=%d) != rootdev minor&0x0F (=%d)"
+        bad.append("bo_name controller digit '%s' (=%d) != rootdev's 8 * card + unit (=%d)"
                    % (ctrl_digit, int(ctrl_digit, 16), g["controller"]))
     if int(name[-1]) != 2:
         bad.append("swap slice in bo_name is not 2")
@@ -275,7 +277,7 @@ def main():
         return 1
     print("   ok  rootdev 0x%08x major %d minor %d -> card %d target %d slice %d (%s)"
           % (got_dev, g["major"], g["minor"], g["card"], g["unit"], g["slice"], node(6, 1, 1)))
-    print("   ok  bo_name %r; controller digit '%s' == rootdev minor&0x0F (%d) [CONSISTENCY]"
+    print("   ok  bo_name %r; controller digit '%s' == rootdev 8 * card + unit (%d) [CONSISTENCY]"
           % (name, ctrl_digit, g["controller"]))
     print("   ok  bo_size %d, bo_fstype/bo_flags/bo_offset/bo_vp untouched; rootfstype empty")
     print("   ok  ET_REL preserved; anchor unique at 0x%x; 0 relocations over either range"

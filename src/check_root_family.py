@@ -16,7 +16,9 @@
 # WHAT IT READS, all from the artifact and none of it from the build recipe:
 #
 #   rootdev      .data OBJECT -> major/minor -> card, target, slice, /dev node.
-#                minor is (slice << 4) | (card << 3) | unit; amiga/alien/sd.h, SDCARDS 2.
+#                minor is (slice << 4) | (card << 3) | unit; amiga/alien/sd.h, SDCARDS 2.  On a
+#                relink-040-sd4card.sh kernel (four cards, amix-dlm C4-1) the card's high bit is
+#                minor bit 7, and the node is c<8 * card + unit>, one hex digit or two.
 #   bo_name      the swap node, found by the `/dev/dsk/c` anchor, which occurs exactly once.
 #   scsicard[]   the table `sd`'s init() walks, taken from the symbol the `lea ...,%a3`
 #                relocation at .text+0xD74C actually names -- so a retargeted table
@@ -28,13 +30,13 @@
 #
 # WHAT IT ASSERTS, and fails closed on:
 #
-#   1. bo_name's controller digit == rootdev minor & 0x0F.  The same consistency rule
+#   1. bo_name's controller (one hex digit, or two from card 2 on) == 8 * card + unit.  The same consistency rule
 #      tools/stamp-card1.py:230-234 enforces at stamp time, re-checked wherever this runs.
 #   2. loop bound + 1 == the number of rows the named table actually has, where the table
 #      symbol carries a size.  src/patch_z3660.py writes both; a stale bound against a
 #      retargeted table would walk off the end of one or ignore a row of the other.
 #   3. every row the loop will scan resolves to a DEFINED controller-queue function.
-#   4. rootdev's card < SDCARDS.
+#   4. rootdev's card < SDCARDS (4 when the image carries sd4_insert).
 #   5. the root is a SCSI disk (sd, block major 18) or the contract's floppy root (amix-kerntools
 #      contracts/bootchain-v1.json rootdev.floppy, KT-34): rootdev FD0P 0x00400008 (major 16)
 #      with bo_name "/dev/fakeswap", the miniroot's dummydisk.  A floppy root has no card, so
@@ -180,14 +182,16 @@ class Elf(object):
 
 
 def decode_dev(dev):
+    # C4-1 section 2.1: the card's low bit is minor bit 3, its high bit minor bit 7 (0 on cards 0-1)
     minor = dev & L_MAXMIN
+    card = (minor >> 3) & 1 | (minor >> 6) & 2
     return dict(major=(dev >> L_BITSMINOR) & 0xFF, minor=minor,
-                unit=minor & 0o7, card=(minor >> 3) & 1, slice=(minor >> 4) & 0o7,
-                controller=minor & 0x0F)
+                unit=minor & 0o7, card=card, slice=(minor >> 4) & 0o7,
+                controller=(card << 3) | (minor & 0o7))
 
 
 def node(card, unit, sl):
-    # The controller is (card<<3)|unit rendered as ONE HEX digit: the /dev grid is c0..cf.
+    # The controller is (card<<3)|unit in hex: c0..cf for cards 0-1, c10..c1f for cards 2-3.
     return "/dev/dsk/c%xd0s%d" % ((card << 3) | unit, sl)
 
 
@@ -294,16 +298,17 @@ def main():
         bad.append("loop bound %d scans %d rows but %s is %d bytes = %d rows"
                    % (bound, nrows, tname, tsize, tsize // ROW))
     if not floppy and (swap or "").startswith(ANCHOR.decode()):
-        digit = swap[len("/dev/dsk/c")]
+        digit = swap[len("/dev/dsk/c"):].split("d", 1)[0]
         try:
-            if int(digit, 16) != g["controller"]:
-                bad.append("bo_name controller digit %r (=%d) != rootdev minor&0x0F (=%d)"
+            if len(digit) not in (1, 2) or int(digit, 16) != g["controller"]:
+                bad.append("bo_name controller %r (=%d) != rootdev's 8 * card + unit (=%d)"
                            % (digit, int(digit, 16), g["controller"]))
         except ValueError:
-            bad.append("bo_name controller digit %r is not hex" % digit)
-    if not floppy and g["card"] >= SDCARDS:
+            bad.append("bo_name controller %r is not hex" % digit)
+    sdcards = 4 if e.lookup("sd4_insert") is not None else SDCARDS
+    if not floppy and g["card"] >= sdcards:
         bad.append("rootdev card %d >= SDCARDS %d -- queue[] has no such slot"
-                   % (g["card"], SDCARDS))
+                   % (g["card"], sdcards))
 
     queues = [q for (_, _, q, _) in rows if q]
 
