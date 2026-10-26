@@ -4,6 +4,7 @@
   python3 tools/kabi-sidecar.py KERNEL --family NAME [--pin PIN] [--abi HEX] [-o OUT]
   python3 tools/kabi-sidecar.py KERNEL --family NAME [--pin PIN] [--abi HEX] --stand DIR
   python3 tools/kabi-sidecar.py --check KERNEL SIDECAR
+  python3 tools/kabi-sidecar.py --root KERNEL        the root= list alone (any stage of the chain)
 
 One key=value per line, in this order: kabi, family, line, pin, build, size, sha256, loader-min,
 root, rootfs.  Every value except family and pin is read from the kernel image itself, so the
@@ -31,7 +32,9 @@ and the arena and block offsets those of dlm_arena and dlm_ksym in the image.  T
            it needs the kit's lists and dlm_offs.h, so it is the one value not read from the image
 then sdcards=4 when the image carries the four-card sd (relink-040-sd4card.sh, amix-dlm C4-1;
 absent means two cards), and last root and rootfs as for a static kernel (through stage 3 the
-floor's SCSI drivers and filesystems stay built in, and kbootset's gate 3 reads them).
+floor's SCSI drivers and filesystems stay built in, and kbootset's gate 3 reads them).  A core with
+dlm_static_root (core patch 0037) carries the same root list, written by relink-040-dlm.sh from
+--root; the tool refuses a kernel where the two differ.
 
 -o OUT writes the sidecar there (default: KERNEL's directory/kabi when KERNEL is named unix, else
 KERNEL.kabi).  --stand DIR lays out the package's files instead: DIR/stand/k46/unix (a copy of
@@ -118,6 +121,22 @@ def default_pin():
     return "gcc-2.7.2.3-" + head
 
 
+def root_list(e):
+    """The root= keys: the rows of the controller table sd's init() walks, in its order."""
+    tname, bound, table, _ = rows.read_table(e)
+    keys = []
+    for ident, _q, _n in table:
+        if ident in MOBO_ROWS:
+            k = MOBO_ROWS[ident]
+        elif ident >> 16 and ident & 0xFFFF <= 0xFF:
+            k = "zorro:%04x:%02x" % (ident >> 16, ident & 0xFF)
+        else:
+            die("%s row id 0x%08x is neither an AutoConfig id nor a known motherboard row" % (tname, ident))
+        if k not in keys:
+            keys.append(k)
+    return keys
+
+
 def sidecar(kernel, family, pin, abi=None):
     e = rows.Elf(kernel)
     e.path = kernel
@@ -146,17 +165,12 @@ def sidecar(kernel, family, pin, abi=None):
         axk.append(("abi", abi))
     elif abi:
         die("--abi is for a module kernel; %s is static" % kernel)
-    tname, bound, table, _ = rows.read_table(e)
-    keys = []
-    for ident, _q, _n in table:
-        if ident in MOBO_ROWS:
-            k = MOBO_ROWS[ident]
-        elif ident >> 16 and ident & 0xFFFF <= 0xFF:
-            k = "zorro:%04x:%02x" % (ident >> 16, ident & 0xFF)
-        else:
-            die("%s row id 0x%08x is neither an AutoConfig id nor a known motherboard row" % (tname, ident))
-        if k not in keys:
-            keys.append(k)
+    keys = root_list(e)
+    if axk is not None and "dlm_static_root" in syms:
+        # the core's copy of the same list (mkident.py --asm ... ROOT, core patch 0037)
+        sr = cstr(data_bytes(e, syms, "dlm_static_root", 256))
+        if sr != ",".join(keys):
+            die("dlm_static_root %r is not the root= list %r (relink-040-dlm.sh)" % (sr, ",".join(keys)))
     fs = [n for n, s in ROOTFS if s in syms]
     if not fs:
         die("no root filesystem in %s" % kernel)
@@ -171,6 +185,11 @@ def sidecar(kernel, family, pin, abi=None):
 
 def main():
     a = sys.argv[1:]
+    if a[:1] == ["--root"]:
+        if len(a) != 2:
+            die("usage: --root KERNEL")
+        print(",".join(root_list(rows.Elf(a[1]))))
+        return
     if a[:1] == ["--check"]:
         if len(a) != 3:
             die("usage: --check KERNEL SIDECAR")
