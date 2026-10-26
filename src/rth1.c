@@ -11,6 +11,10 @@
  * register its controllers and before anything reads rootdev or swapfile.  The same file and the
  * same hook serve the 68030 line.
  *
+ * Built with -DRTH1_DLM (the module kernel, relink-040-rth1.sh with DLM=1), rth1_mountroot() also
+ * calls the module core's dlm_marc_post() once the root is mounted: the boot-class modules of the
+ * booted generation load there, in process 0 (amix-dlm stage-3 kernel brief, step 8).
+ *
  * Kept free of division and of multiplication by a non-power of two: the 68060 implements neither
  * 64-bit form, and the cross compiler reaches for them (the scan060 gate in the pass checks).
  */
@@ -44,6 +48,9 @@ extern char swapfile[];
 extern unsigned long sdcardbase();
 extern int sdopen();
 extern int vfs_mountroot();
+#ifdef RTH1_DLM
+extern int dlm_marc_post();
+#endif
 extern int printf();
 
 /* Initialised away from 0 so a reader can tell "the hook never ran" from "built-in root". */
@@ -211,5 +218,15 @@ int
 rth1_mountroot()
 {
 	rth1_apply();
+#ifdef RTH1_DLM
+	{
+		int r = vfs_mountroot();
+
+		if (r == 0)
+			dlm_marc_post();
+		return r;
+	}
+#else
 	return vfs_mountroot();
+#endif
 }

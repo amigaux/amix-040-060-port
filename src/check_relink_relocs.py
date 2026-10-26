@@ -6,6 +6,10 @@
 # FILE-LOCAL symbols, which ld -r cannot bind).
 #
 # Usage: python3 check_relink_relocs.py [image]      (default build/unix-040)
+#        python3 check_relink_relocs.py --pending NAME[,NAME...] image
+#   --pending: UND references to these names are counted apart, not as complaints -- a stage file
+#   whose imports a later pass resolves (rth1 and kinfo with DLM=1, before relink-040-dlm.sh).
+#   The finished kernel is always checked without it.
 #
 # Exit status: 0 clean, 1 complaints, 2 could not read the image.
 #
@@ -18,7 +22,12 @@
 # that lasted this long.
 
 import struct,sys
-path = sys.argv[1] if len(sys.argv) > 1 else 'build/unix-040'
+args = sys.argv[1:]
+pending = set()
+if args[:1] == ['--pending']:
+    pending = set(args[1].split(',')); args = args[2:]
+path = args[0] if args else 'build/unix-040'
+npend = 0
 try:
     f=open(path,'rb').read()
 except OSError as e:
@@ -93,6 +102,8 @@ for s in secs:
                 if complaints<=12:
                     print("UNBOUND: reloc in %s off=0x%x -> sym[%d] '%s' in section[%d] '%s'"%(
                         s['nm'],r_off,symidx,symname(sm),shndx,secs[shndx]['nm']))
+        elif shndx==0 and symname(sm) in pending:
+            npend+=1
         else:
             complaints+=1
             if complaints<=12:
@@ -101,5 +112,7 @@ for s in secs:
 # The image is named on the VERDICT line, not only at the top: callers show the last line
 # only, and a verdict that does not say what it was about is what let four scripts validate
 # somebody else's kernel for months.
+if pending:
+    print("pending (a later pass resolves them): %d reference(s) to %s" % (npend, ",".join(sorted(pending))))
 print("TOTAL complaints: %d   [%s]" % (complaints, path))
 sys.exit(1 if complaints else 0)

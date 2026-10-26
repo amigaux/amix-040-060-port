@@ -21,6 +21,9 @@
 #
 # usage: sh relink-040-rth1.sh [base-kernel] [output]
 #   RTH1_BASE_SHA256=<hex>  refuse any base but that one
+#   DLM=1                   the module kernel: -DRTH1_DLM, rth1_mountroot() calls dlm_marc_post()
+#                           after the root is mounted; that one import stays open until
+#                           relink-040-dlm.sh links the core (kinfo comes between them)
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
@@ -56,7 +59,10 @@ echo "      sdcardbase: $([ $SDCB = 1 ] && echo "in the base (the a4091 pass)" |
 echo "[*] cross-compiling src/rth1.c (-m68040 dialect)"
 CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 OBJ="$HERE/build/rth1.o"
-m68k-cbm-sysv4-gcc $CF -c "$HERE/src/rth1.c" -o "$OBJ"
+DLM="${DLM:-0}"
+case $DLM in 0) DCF= PEND= ;; 1) DCF=-DRTH1_DLM PEND=dlm_marc_post ;; *) echo "ERROR: DLM is 0 or 1"; exit 1;; esac
+[ $DLM = 0 ] || echo "      DLM=1: -DRTH1_DLM (dlm_marc_post after vfs_mountroot)"
+m68k-cbm-sysv4-gcc $CF $DCF -c "$HERE/src/rth1.c" -o "$OBJ"
 m68k-linux-gnu-size "$OBJ" | sed 's/^/      /'
 M=$(m68k-linux-gnu-readelf -SW "$OBJ" | awk '{gsub(/[][]/,"")} $2 ~ /^\.rodata/ {print $2}')
 [ -z "$M" ] || { echo "[FAIL] rth1.o carries $M -- the image has .text and .data only"; exit 1; }
@@ -75,7 +81,7 @@ echo "[*] page geometry in the compiled bytes (no 2 KiB shift from the cross hea
 run_step indent sh "$HERE/src/check_page_geometry.sh" "$OBJ"
 
 echo "[*] imports and exports must be exactly these:"
-WANT="bootinfo printf rootdev sdcardbase sdopen swapfile vfs_mountroot"
+WANT=$(echo bootinfo $PEND printf rootdev sdcardbase sdopen swapfile vfs_mountroot | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 GOT=$(m68k-linux-gnu-nm "$OBJ" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 [ "$GOT" = "$WANT" ] || { echo "[FAIL] unresolved set is: $GOT"; echo "       expected:          $WANT"; exit 1; }
 WANTX="rth1_apply rth1_mountroot rth1_used rth1_why"
@@ -108,9 +114,9 @@ NM_OUT=$(m68k-linux-gnu-nm "$OUT")
 for s in $GOTX sdcardbase; do
 	echo "$NM_OUT" | grep -qE " [TD] $s\$" || { echo "[FAIL] $s not a global definition in $OUT"; exit 1; }
 done
-LEAK=$(echo "$NM_OUT" | awk '$1=="U" && $2!="edata" && $2!="end" && $2!="etext" {print $2}')
+LEAK=$(echo "$NM_OUT" | awk -v p="$PEND" '$1=="U" && $2!="edata" && $2!="end" && $2!="etext" && $2!=p {print $2}')
 [ -z "$LEAK" ] || { echo "[FAIL] unresolved symbols:"; echo "$LEAK"; exit 1; }
-echo "[OK] no unresolved symbols"
+[ -z "$PEND" ] && echo "[OK] no unresolved symbols" || echo "[OK] no unresolved symbols but $PEND (the core's)"
 
 # ---------------------------------------------------------------- 3. the hook
 echo "[*] main's jsr vfs_mountroot -> rth1_mountroot"
@@ -134,7 +140,7 @@ DSZ=$(( 0x$(m68k-linux-gnu-readelf -SW "$OUT" | awk '{gsub(/[][]/,"")} $2==".dat
 [ $((DSZ % 4)) -eq 0 ] && echo "[OK] .data size 0x$(printf %x $DSZ) is 4-aligned." \
 	|| { echo "[FAIL] .data size not 4-aligned -> .bss misaligned at runtime"; exit 1; }
 run_step indent python3 "$HERE/src/patch_b2_flip.py" "$OUT" --check
-run_step 1 python3 "$HERE/src/check_relink_relocs.py" "$OUT"
+run_step 1 python3 "$HERE/src/check_relink_relocs.py" ${PEND:+--pending $(echo $PEND | tr ' ' ,)} "$OUT"
 python3 "$HERE/src/stamp_buildid.py" "$OUT"
 
 echo "[OK] built $OUT"

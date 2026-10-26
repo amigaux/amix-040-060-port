@@ -4,8 +4,13 @@
  * One record, built on the first open from the kernel's own copy of bootinfo (config() copies it
  * and nothing writes it afterwards): the CPU and line, the kabi tag, the build id, the loader's
  * AXL1 and RTH1 records as they arrived, the AutoConfig boards, sd's card table, the memory the
- * kernel runs on, and the loaded modules (none: this is a static kernel).  read(2) returns its
+ * kernel runs on, and the loaded modules (none in a static kernel).  read(2) returns its
  * bytes from the file offset on, lseek(2) works as on any character device, write(2) is EPERM.
+ *
+ * The module kernel builds it with -DKINFO_DLM -DKINFO_KABI=\"k46.1.0\" (relink-040-kinfo.sh with
+ * DLM=1): every read then refreshes the module list at 536 from the core's dlm_kinfo_list(), up
+ * to KINFO_MAXMOD entries, with the length and the check to match (amix-dlm C2-1, stage-3 brief
+ * step 8).  Without KINFO_DLM the object is the static kernel's, byte for byte.
  *
  * Linked by relink-040-kinfo.sh, which registers kinfoopen/close/read/write in cdevsw[53]
  * (src/patch_kinfo_cdevsw.py).  The node is `mknod /dev/kinfo c 53 0`, mode 0444.
@@ -74,10 +79,24 @@ extern unsigned long chipmem, VSIZOFMEM;
 extern int sdopen();
 extern int uiomove();
 
-/* The kabi tag; tools/kabi-sidecar.py reads it from the image for the sidecar's kabi=. */
-char kinfo_kabi[24] = "static";
+#ifndef KINFO_KABI
+#define KINFO_KABI	"static"
+#endif
+#ifdef KINFO_DLM
+#define KINFO_MAXMOD	32
+#define KINFO_RECMAX	(KIF1_LENGTH + 32 * KINFO_MAXMOD)
+#define KINFO_LEN	kinfo_len
+extern int dlm_kinfo_list();
+static long kinfo_len = KIF1_LENGTH;
+#else
+#define KINFO_RECMAX	KIF1_LENGTH
+#define KINFO_LEN	KIF1_LENGTH
+#endif
 
-static unsigned long kinfo_rec[KIF1_LENGTH / 4] = { 0 };
+/* The kabi tag; tools/kabi-sidecar.py reads it from the image for the sidecar's kabi=. */
+char kinfo_kabi[24] = KINFO_KABI;
+
+static unsigned long kinfo_rec[KINFO_RECMAX / 4] = { 0 };
 static int kinfo_built = 0;
 
 #define L(p, o)	(*(unsigned long *) ((unsigned char *) (p) + (o)))
@@ -209,6 +228,30 @@ kinfo_build()
 	kinfo_built = 1;
 }
 
+#ifdef KINFO_DLM
+/* The loaded modules into the record from 540 on, and the count, length and check to match. */
+static void
+kinfo_mods()
+{
+	unsigned char *r = (unsigned char *) kinfo_rec;
+	unsigned long s;
+	int i, n;
+
+	n = dlm_kinfo_list(r + KIF1_LENGTH, KINFO_MAXMOD);
+	if (n < 0)
+		n = 0;
+	if (n > KINFO_MAXMOD)
+		n = KINFO_MAXMOD;
+	kinfo_len = KIF1_LENGTH + (n << 5);
+	L(r, 4) = (unsigned long) KIF1_VERSION << 16 | kinfo_len;
+	L(r, K_NMOD) = n;
+	L(r, K_CHECK) = 0;
+	for (s = 0, i = 0; i < kinfo_len >> 2; i++)
+		s += kinfo_rec[i];
+	L(r, K_CHECK) = -s;
+}
+#endif
+
 int
 kinfoopen(dp, oflags, otype, crp)
 dev_t *dp;
@@ -241,9 +284,12 @@ struct cred *crp;
 
 	if (off < 0)
 		return EINVAL;
-	if (off >= KIF1_LENGTH)
+#ifdef KINFO_DLM
+	kinfo_mods();
+#endif
+	if (off >= KINFO_LEN)
 		return 0;
-	n = KIF1_LENGTH - off;
+	n = KINFO_LEN - off;
 	if (n > uiop->uio_resid)
 		n = uiop->uio_resid;
 	return uiomove((caddr_t) kinfo_rec + off, n, UIO_READ, uiop);
