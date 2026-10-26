@@ -17,8 +17,10 @@
 
 	.data
 	.globl	cputype
+	.type	cputype,@object
 cputype:
 	.long	40			| 40 = 68040 (default), 60 = 68060 (loader-poked)
+	.size	cputype,4		| a DDI data name: its st_size is in the module kernel's abi= (amix-dlm C3-3 4)
 | pcr_boot (F1, 2026-08-05): the 68060 Processor Configuration Register as it stood at boot,
 | captured once in pstart040.s behind a cputype==60 gate (movec %pcr is 060-only and traps as
 | illegal on the 040).  The kernel has NEVER read or written PCR -- verified by disassembly on
