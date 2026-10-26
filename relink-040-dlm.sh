@@ -40,10 +40,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
 
-# f5ce731: core patches 0001-0020 (0017: boot-class modules load from the first sysinit entry),
-# the k46.1.0 reference with cputype 4; reviewed 2026-10-26 (b61ab31).
+# 043ca24: core patches 0001-0022 (0022: boot-class drivers register their majors), the k46.1.0
+# reference with cputype 4; reviewed 2026-10-26.
 DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
-DLM_REV="${DLM_REV:-f5ce731}"
+DLM_REV="${DLM_REV:-043ca24}"
 DLM_KABI="${DLM_KABI:-k46.1.0}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
