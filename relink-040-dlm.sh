@@ -56,13 +56,14 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
 
-# bbd20b6: core patches 0001-0041 (0029 no-sleep, 0030 dlm_halt, 0031 block rows, 0032 sd_register,
+# 4acd4a6: core patches 0001-0041 (0029 no-sleep, 0030 dlm_halt, 0031 block rows, 0032 sd_register,
 # 0033 the arena load path, 0034 dlm_marc_root, 0035 match=, 0036 root_defer, 0037 dlm_static_root,
 # 0038 mkmod's rank, 0039 the ramdisk image, 0040 vfs_register, 0041 moddefs block rows), the arena
-# 16-aligned (C3-3 version 5), kabi k46.1.2 with the five DMA names (C4-5 v3: dma_prepare and
-# dma_complete are the base's src/dma_cache040.s); reviewed 2026-10-27.
+# 16-aligned (C3-3 version 5), kabi k46.1.2 with the five DMA names (C4-5 v4: dma_prepare and
+# dma_complete are the base's src/dma_cache040.s; dma_alloc hands out heap pages through their DTT0
+# alias, purged by physical line at alloc and free, and addressed only through it); reviewed 2026-10-27.
 DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
-DLM_REV="${DLM_REV:-bbd20b6}"
+DLM_REV="${DLM_REV:-4acd4a6}"
 DLM_KABI="${DLM_KABI:-k46.1.2}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
