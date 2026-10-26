@@ -4,8 +4,10 @@
   python3 tools/kinfo-decode.py RECORD.bin
   python3 tools/kinfo-decode.py --od OD.txt         the output of `od -X /dev/kinfo` (or `od -x`)
 
-Prints every field by name and exits 0 when the record is well formed: magic KIF1, version 2,
-length 540 + 32 x modules, the longwords summing to zero, counts within bounds, a valid AXL1 or
+Prints every field by name and exits 0 when the record is well formed: magic KIF1, version 3
+(the loader's bootdata block at 536, the module count at 576, the modules from 580; version 2
+records, count at 536 and modules from 540, still decode), length 580 (540) + 32 x modules, the
+longwords summing to zero, counts within bounds, a valid AXL1 or
 RTH1 wherever the flags say one was found and zeros wherever they say none.
 """
 import re
@@ -44,11 +46,12 @@ def main():
     if len(b) < 540 or b[:4] != b"KIF1":
         raise SystemExit("not a KIF1 record (%d bytes)" % len(b))
     ver, length = L(4) >> 16, L(4) & 0xFFFF
-    nmod = L(536)
+    base = 580 if ver >= 3 else 540
+    nmod = L(base - 4)
     print("magic KIF1  version %d  length %d  (%d bytes read)" % (ver, length, len(b)))
-    if ver != 2:
+    if ver not in (2, 3):
         bad.append("version %d" % ver)
-    if length != 540 + 32 * nmod or len(b) < length:
+    if length != base + 32 * nmod or len(b) < length:
         bad.append("length %d for %d modules, %d bytes" % (length, nmod, len(b)))
     b = b[:length]
     tot = sum(struct.unpack(">%dI" % (length // 4), b)) & 0xFFFFFFFF
@@ -58,7 +61,8 @@ def main():
     print("cpu %d  line %d  AttnFlags 0x%04x" % (L(12), L(16), L(20)))
     print("kabi %r  build %r" % (s(24, 24), s(48, 32)))
     fl = L(80)
-    print("flags 0x%x%s%s%s" % (fl, " AXL1" if fl & 1 else "", " RTH1" if fl & 2 else "", " SAFE" if fl & 4 else ""))
+    print("flags 0x%x%s%s%s%s" % (fl, " AXL1" if fl & 1 else "", " RTH1" if fl & 2 else "", " SAFE" if fl & 4 else "",
+                                  " TVADDR(bootdata's text vaddr is not stext)" if fl & 8 else ""))
     axl, rth = b[84:208], b[208:264]
     if fl & 1:
         ok = axl[:4] == b"AXL1" and sum(struct.unpack(">31I", axl)) & 0xFFFFFFFF == 0
@@ -99,9 +103,14 @@ def main():
             key = "zorro:%04x:%02x" % (cid >> 16, cid >> 8 & 0xFF)
         print("  card %d: %s base 0x%08x flags 0x%x  (disks c%x..c%xd0)" % (card, key, base, f, 8 * card, 8 * card + 7))
     print("fast %d bytes (%d MB)  chip %d bytes (%d KB)" % (L(528), L(528) >> 20, L(532), L(532) >> 10))
+    if ver >= 3:
+        bd = struct.unpack(">10I", b[536:576])
+        print("bootdata: entry 0x%08x text 0x%08x +0x%x 0x%x rodata 0x%08x +0x%x 0x%x data 0x%08x +0x%x 0x%x" % bd)
+        if bd[1] == 0:
+            bad.append("bootdata text vaddr 0: no bind address")
     print("modules %d" % nmod)
     for i in range(nmod):
-        o = 540 + 32 * i
+        o = base + 32 * i
         print("  %s at 0x%08x size %d" % (s(o, 24), L(o + 24), L(o + 28)))
     print("VERDICT %s" % ("OK" if not bad else "BAD: " + "; ".join(bad)))
     sys.exit(1 if bad else 0)

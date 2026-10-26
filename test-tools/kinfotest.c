@@ -57,14 +57,15 @@ char **argv;
 		printf("FAIL: a read at the end did not return 0\n");
 		bad++;
 	}
-	if (lseek(fd, 528L, 0) != 528L || read(fd, (char *) part, 12) != 12) {
-		printf("FAIL: lseek 528 + read 12\n");
+	if (lseek(fd, 528L, 0) != 528L || read(fd, (char *) part, 16) != 16) {
+		printf("FAIL: lseek 528 + read 16\n");
 		bad++;
 	} else {
-		for (i = 0; i < 12 && part[i] == rec[528 + i]; i++)
+		for (i = 0; i < 16 && part[i] == rec[528 + i]; i++)
 			;
-		printf("at 528: fast %lu chip %lu modules %lu\n", be32(part), be32(part + 4), be32(part + 8));
-		if (i != 12) {
+		printf("at 528: fast %lu chip %lu entry 0x%lx text vaddr 0x%lx\n", be32(part), be32(part + 4),
+		    be32(part + 8), be32(part + 12));
+		if (i != 16) {
 			printf("FAIL: the bytes at offset 528 differ from the whole read\n");
 			bad++;
 		}

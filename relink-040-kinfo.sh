@@ -89,7 +89,7 @@ echo "$SCAN" | grep -q 'CLEAN -- no candidate found' \
 echo "      [OK]   scan060 CLEAN ($SCANLINES decoded lines)"
 
 echo "[*] imports and exports must be exactly these:"
-WANT=$(echo VSIZOFMEM bootinfo buildid chipmem cputype sd_queue_tbl sdopen uiomove ${DCF:+dlm_kinfo_list} | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
+WANT=$(echo VSIZOFMEM bootinfo buildid chipmem cputype sd_queue_tbl sdopen stext uiomove ${DCF:+dlm_kinfo_list} | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 GOT=$(m68k-linux-gnu-nm "$OBJ" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 [ "$GOT" = "$WANT" ] || { echo "[FAIL] unresolved set is: $GOT"; echo "       expected:          $WANT"; exit 1; }
 WANTX="kinfo_kabi kinfoclose kinfoopen kinforead kinfowrite"

@@ -4,11 +4,12 @@
  * One record, built on the first open from the kernel's own copy of bootinfo (config() copies it
  * and nothing writes it afterwards): the CPU and line, the kabi tag, the build id, the loader's
  * AXL1 and RTH1 records as they arrived, the AutoConfig boards, sd's card table, the memory the
- * kernel runs on, and the loaded modules (none in a static kernel).  read(2) returns its
+ * kernel runs on, the loader's bootdata block (where it bound the kernel, so a namelist can be
+ * bound to it), and the loaded modules (none in a static kernel).  read(2) returns its
  * bytes from the file offset on, lseek(2) works as on any character device, write(2) is EPERM.
  *
  * The module kernel builds it with -DKINFO_DLM -DKINFO_KABI=\"k46.1.0\" (relink-040-kinfo.sh with
- * DLM=1): every read then refreshes the module list at 536 from the core's dlm_kinfo_list(), up
+ * DLM=1): every read then refreshes the module list from the core's dlm_kinfo_list(), up
  * to KINFO_MAXMOD entries, with the length and the check to match (amix-dlm C2-1, stage-3 brief
  * step 8).  Without KINFO_DLM the object is the static kernel's, byte for byte.
  *
@@ -22,8 +23,8 @@
 #include <sys/uio.h>
 
 #define KIF1_MAGIC	0x4B494631	/* "KIF1" */
-#define KIF1_VERSION	2
-#define KIF1_LENGTH	540		/* no modules */
+#define KIF1_VERSION	3
+#define KIF1_LENGTH	580		/* no modules */
 #define KIF1_LINE	46
 
 #define AXL1_MAGIC	0x41584C31	/* "AXL1" */
@@ -35,6 +36,8 @@
 
 #define BI_RTH1		0x678		/* loader reserved[0], kernel bootinfo+0x678 */
 #define BI_AXL1		(BI_RTH1 + 0x38)
+#define BI_BOOTDATA	0x650		/* entry, then text, rodata, data: vaddr, offset, size */
+#define BOOTDATA_LEN	40
 #define NAUTO		16
 #define CD_SIZE		0x44		/* struct ConfigDev */
 #define CD_PRODUCT	0x11		/* er_Product, a byte */
@@ -60,11 +63,13 @@
 #define K_CARD		464
 #define K_FAST		528
 #define K_CHIP		532
-#define K_NMOD		536
+#define K_BOOTDATA	536
+#define K_NMOD		576
 
 #define KF_AXL1		0x1
 #define KF_RTH1		0x2
 #define KF_SAFE		0x4
+#define KF_TVADDR	0x8		/* bootdata's text vaddr is not stext (.text+0 on this line) */
 #define KC_MOBO		0x1
 
 /* motherboard controllers: a zero manufacturer, so never a Zorro id */
@@ -73,7 +78,7 @@
 
 extern unsigned char bootinfo[];
 extern unsigned char sd_queue_tbl[];
-extern char buildid[];
+extern char buildid[], stext[];
 extern long cputype;
 extern unsigned long chipmem, VSIZOFMEM;
 extern int sdopen();
@@ -163,6 +168,9 @@ kinfo_build()
 		kinfo_copy(r + K_RTH1, (unsigned char *) h, RTH1_LONGS * 4);
 		flags |= KF_RTH1;
 	}
+	kinfo_copy(r + K_BOOTDATA, bootinfo + BI_BOOTDATA, BOOTDATA_LEN);
+	if (L(r, K_BOOTDATA + 4) != (unsigned long) stext)
+		flags |= KF_TVADDR;
 	L(r, K_FLAGS) = flags;
 
 	/* the boards in the loader's order; an empty slot has no manufacturer and no base */
@@ -229,7 +237,7 @@ kinfo_build()
 }
 
 #ifdef KINFO_DLM
-/* The loaded modules into the record from 540 on, and the count, length and check to match. */
+/* The loaded modules into the record from KIF1_LENGTH on, and the count, length and check to match. */
 static void
 kinfo_mods()
 {

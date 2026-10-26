@@ -1,7 +1,7 @@
 # `/dev/kinfo` and the kabi sidecar: the kernel half on the 68040/68060 line
 
 **Status:** implemented on the driver line, 2026-10-25. The record is defined by the kernel-modules project's
-contract C2-1, version 2 (`amix-dlm`, `docs/contracts/C2-1-kinfo.md`), and the sidecar by its C2-3
+contract C2-1, version 3 (`amix-dlm`, `docs/contracts/C2-1-kinfo.md`), and the sidecar by its C2-3
 (`docs/contracts/C2-3-packages.md`). This file says how a kernel of this line fills them. Where the two disagree,
 C2-1 and C2-3 win.
 
@@ -24,28 +24,29 @@ all three. A read-only character device gives them one record, the same on every
   - Before it reads sd's card table it calls `sdopen(0)`, because sd's `init()` is lazy (as in `src/rth1.c`).
   - On a static kernel nothing in the record changes after that.
 
-## The record, version 2: how this line fills each field
+## The record, version 3: how this line fills each field
 
-The layout is C2-1 §2: big-endian, 540 bytes with no modules.
+The layout is C2-1 §2: big-endian, 580 bytes with no modules.
 
 | Offset | Field | Source on this line |
 |---|---|---|
 | 0 | magic `KIF1` | |
-| 4 | `2 << 16 \| length` | length = 540 + 32 × modules = 540 |
-| 8 | check | set last, so all 135 longwords sum to zero |
+| 4 | `3 << 16 \| length` | length = 580 + 32 × modules = 580 |
+| 8 | check | set last, so all 145 longwords sum to zero |
 | 12 | CPU | the kernel's `cputype` global: 40, or 60 on a 68060 |
 | 16 | line | 46 |
 | 20 | `AttnFlags` | from the AXL1 record (its offset 24) when one arrived, else 0. The kernel has no other copy |
 | 24 | kabi tag | `kinfo_kabi` in `kinfo.o`'s `.data`: `static`. The sidecar's `kabi=` is read from the same bytes |
 | 48 | build id | `inituname040`'s `buildid` without its leading space, as `uname -m` ends: `68060-261025-50` |
-| 80 | flags | 0x1 AXL1 found, 0x2 RTH1 found, 0x4 safe mode (AXL1 flag 0x01) |
+| 80 | flags | 0x1 AXL1 found, 0x2 RTH1 found, 0x4 safe mode (AXL1 flag 0x01), 0x8 the bootdata's text vaddr is not the kernel's own `stext` (a loader fault: `stext` is `.text`+0 on this line) |
 | 84 | AXL1 | `bootinfo + 0x6b0`, 124 bytes, copied only when it has magic, version 1, length ≥ 124 and its 31 longwords sum to zero; else zeros and flag 0x1 clear |
 | 208 | RTH1 | `bootinfo + 0x678`, 0x38 bytes, under the checks `src/rth1.c` applies; else zeros |
 | 264, 268 | boards | `bootinfo.autocon[]` in order, every slot that has a manufacturer or a board address |
 | 460, 464 | sd cards | sd's controller array (`sd_queue_tbl`), slot k = card k (see below) |
 | 528 | fast memory | `VSIZOFMEM`: the size of the contiguous region the kernel runs in, as `config()` sized it |
 | 532 | chip memory | `chipmem` |
-| 536 | modules | 0 |
+| 536 | bootdata | `bootinfo + 0x650`, 40 bytes verbatim: entry, then text, rodata and data vaddr, offset, size. boot2 and stock `unix_boot`'s `rel()` both fill it; it says where the kernel was bound, so a namelist bound to it gives `nlist` the running kernel's addresses |
+| 576 | modules | 0 |
 
 **The sd card table.**
 - sd's `init()` keeps up to two controllers, sorted by the address it recorded. Slot k is card k, and a disk's
@@ -112,8 +113,8 @@ The k46 module kernel (amix-dlm stage-3 kernel brief, S3-20) carries the module 
 `relink-040-dlm.sh`. kinfo and rth1 are built for it with `DLM=1`:
 
 - **kinfo** (`-DKINFO_DLM`). The kabi tag is `k46.1.0` (`KINFO_KABI` overrides). Every `read(2)` refreshes
-  the module list at 536 from the core's `dlm_kinfo_list()`, with up to 32 entries, and sets the length
-  (540 + 32 × n) and the check to match. Without `KINFO_DLM` the object is the static kernel's, byte for byte.
+  the module list (count at 576, entries from 580) from the core's `dlm_kinfo_list()`, with up to 32 entries,
+  and sets the length (580 + 32 × n) and the check to match. Without `KINFO_DLM` the object is the static kernel's, byte for byte.
 - **rth1** (`-DRTH1_DLM`). `rth1_mountroot()` calls `dlm_marc_post()` once `vfs_mountroot()` has returned 0,
   so the boot-class modules load in process 0 once the root is mounted.
 - Between the two passes and the splice, `dlm_kinfo_list` and `dlm_marc_post` stay open. Each pass names them
