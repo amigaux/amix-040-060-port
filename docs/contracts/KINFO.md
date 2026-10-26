@@ -127,5 +127,6 @@ The chain leaves z3660eth, zz9000 and monsw out (majors 49, 51 and 52 belong to 
 - `--fill` runs after the W-D7 inject, which grows `.text`, and before emit, which only patches `.data` words.
 - `tools/kabi-sidecar.py` writes the sidecar of C2-3 version 5 for such an image:
   - `family=generic` and `loader-min=2`;
-  - `ident`, `arena` and `ksym` from the image's own AXK1 record, after checking it;
-  - no `root` or `rootfs`.
+  - `root` and `rootfs` as for a static kernel. Through stage 3 the root controllers and filesystems stay
+    built in, and kbootset's gate 3 needs them;
+  - last, `ident`, `arena` and `ksym` from the image's own AXK1 record, after checking it.

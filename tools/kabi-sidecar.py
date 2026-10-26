@@ -20,8 +20,10 @@ sidecar and /dev/kinfo cannot disagree:
 No timestamps: the same image gives the same bytes.
 
 A module kernel (kinfo_kabi not "static", relink-040-dlm.sh) gets the sidecar of C2-3 version 5
-(amix-dlm C3-3 section 3) instead: family must be generic; loader-min=2; no root or rootfs; and
-after sha256, from the image's own AXK1 record (dlm_ident, filled by relink-040-dlm.sh --fill):
+(amix-dlm C3-3 section 3) instead: family must be generic; loader-min=2; root and rootfs as for a
+static kernel (through stage 3 the floor's SCSI drivers and filesystems stay built in, and kbootset's
+gate 3 reads them); and last, from the image's own AXK1 record (dlm_ident, filled by
+relink-040-dlm.sh --fill):
   ident    the record's image offset (from the bind address: .text, .rodata, .data, no padding)
   arena    the arena's image offset and capacity, as the record gives them
   ksym     the symbol block's image offset and size, as the record gives them
@@ -129,11 +131,11 @@ def sidecar(kernel, family, pin):
     raw = open(kernel, "rb").read()
     head = [("kabi", kabi), ("family", family), ("line", "k46"), ("pin", pin), ("build", build),
             ("size", str(len(raw))), ("sha256", hashlib.sha256(raw).hexdigest())]
+    axk = None
     if kabi != "static":
         if family != "generic":
             die("a module kernel (kabi %s) is family generic, not %r" % (kabi, family))
-        lines = head + [("loader-min", str(LOADER_MIN_DLM))] + axk1(e, syms, kabi)
-        return "".join("%s=%s\n" % kv for kv in lines)
+        axk = axk1(e, syms, kabi)
     tname, bound, table, _ = rows.read_table(e)
     keys = []
     for ident, _q, _n in table:
@@ -149,10 +151,10 @@ def sidecar(kernel, family, pin):
     if not fs:
         die("no root filesystem in %s" % kernel)
     lines = head + [
-        ("loader-min", str(LOADER_MIN)),
+        ("loader-min", str(LOADER_MIN if axk is None else LOADER_MIN_DLM)),
         ("root", ",".join(keys)),
         ("rootfs", ",".join(fs)),
-    ]
+    ] + (axk or [])
     return "".join("%s=%s\n" % kv for kv in lines)
 
 
