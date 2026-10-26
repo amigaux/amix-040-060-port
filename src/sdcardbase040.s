@@ -13,7 +13,8 @@
 | address from the relocation sdhardwarename's `lea` carries and exposes it as sd_queue_tbl.
 |
 | card >= SDCARDS (2) answers 0, as a card autocon() never found does: the driver treats 0 as
-| "no board" and maps nothing.
+| "no board" and maps nothing.  Assembled with --defsym SD4=1 (relink-040-sd4card.sh) it serves
+| the four-card table of src/sd4card.c instead: card >= 4 answers 0 (amix-dlm C4-1).
 |
 | Assemble: m68k-cbm-sysv4-gcc -m68040 -c src/sdcardbase040.s -o build/sdcardbase040.o
 | Linked LAST in its pass: it carries the .balign 4 that closes both sections.
@@ -22,7 +23,11 @@
 	.globl	sdcardbase
 sdcardbase:
 	movel	%sp@(4),%d0		| card
+	.ifdef	SD4
+	moveq	&3,%d1			| SDCARDS - 1, four cards
+	.else
 	moveq	&1,%d1			| SDCARDS - 1
+	.endif
 	cmpl	%d0,%d1
 	bcss	Lsdcb_none		| card > 1 (unsigned): not a slot
 	asll	&4,%d0			| 16-byte records
