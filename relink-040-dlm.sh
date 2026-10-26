@@ -35,6 +35,8 @@
 #   DLM_ARENA=<n>    the arena's capacity (default 0x60000, M-MOD1)
 #   DLM_ABI_NEW=1    --fill: a fingerprint that moved is written (KERNEL.abi.txt) and taken instead of
 #                    failing -- only for the one rewrite of a tag's reference C3-3 allows
+#   DLM_U1=1         compile the core with -DDLM_U1 (core patch 0023's U1 probe): a measurement build
+#                    only, never shipped; without it the core is unchanged
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
@@ -167,9 +169,10 @@ echo "      mkoffs: $(grep -c '^#define' "$S/core/dlm_offs.h") layouts"
 sh "$S/core/tools/mkreg" "$S/kit/abi/registry/majors" > "$S/core/dlmreg.c" || { echo "[FAIL] mkreg"; exit 1; }
 KCC="m68k-cbm-sysv4-gcc $AMIX_KERNEL_CFLAGS -Wall -I$S/core/include -I$S/core"
 LCC="m68k-cbm-sysv4-gcc -O2 -m68020 -fno-builtin -fomit-frame-pointer -Wall -I$S/kit/loader/common"
+U1=; [ "${DLM_U1:-0}" = 1 ] && { U1=1; echo "      DLM_U1=1: the core carries the U1 probe -- a measurement build, never shipped"; }
 CORE="dlm_core dlm_ld dlm_sym dlm_slot dlm_str dlmconf dlmreg dlm_arena dlm_post dlm_ddi dlm_intr"
 for f in $CORE; do
-	$KCC -DDLM_KABI=\"$DLM_KABI\" -DDLM_PIN=\"$PIN\" -c "$S/core/$f.c" -o "$O/$f.o" 2>> "$O/kobj.warn"
+	$KCC ${U1:+-DDLM_U1} -DDLM_KABI=\"$DLM_KABI\" -DDLM_PIN=\"$PIN\" -c "$S/core/$f.c" -o "$O/$f.o" 2>> "$O/kobj.warn"
 done
 for f in sha256 crc32; do $LCC -c "$S/kit/loader/common/$f.c" -o "$O/$f.o" 2>> "$O/kobj.warn"; done
 $LCC -c "$S/kit/core/plat/amiga.c" -o "$O/plat-amiga.o" 2>> "$O/kobj.warn"
