@@ -29,8 +29,9 @@ The record is checked first: magic, version and length, the check, its kabi tag 
 and the arena and block offsets those of dlm_arena and dlm_ksym in the image.  Then
   abi      the fingerprint, --abi: what relink-040-dlm.sh --fill's mkabi.py printed (KERNEL.abi);
            it needs the kit's lists and dlm_offs.h, so it is the one value not read from the image
-and last root and rootfs as for a static kernel (through stage 3 the floor's SCSI drivers and
-filesystems stay built in, and kbootset's gate 3 reads them).
+then sdcards=4 when the image carries the four-card sd (relink-040-sd4card.sh, amix-dlm C4-1;
+absent means two cards), and last root and rootfs as for a static kernel (through stage 3 the
+floor's SCSI drivers and filesystems stay built in, and kbootset's gate 3 reads them).
 
 -o OUT writes the sidecar there (default: KERNEL's directory/kabi when KERNEL is named unix, else
 KERNEL.kabi).  --stand DIR lays out the package's files instead: DIR/stand/k46/unix (a copy of
@@ -159,7 +160,9 @@ def sidecar(kernel, family, pin, abi=None):
     fs = [n for n, s in ROOTFS if s in syms]
     if not fs:
         die("no root filesystem in %s" % kernel)
-    lines = head + [("loader-min", str(LOADER_MIN if axk is None else LOADER_MIN_DLM))] + (axk or []) + [
+    # a four-card sd (relink-040-sd4card.sh, amix-dlm C4-1): sdcards=4; absent means two
+    sd4 = [("sdcards", "4")] if "sd4_insert" in syms else []
+    lines = head + [("loader-min", str(LOADER_MIN if axk is None else LOADER_MIN_DLM))] + (axk or []) + sd4 + [
         ("root", ",".join(keys)),
         ("rootfs", ",".join(fs)),
     ]
