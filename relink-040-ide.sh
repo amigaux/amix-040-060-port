@@ -32,7 +32,8 @@
 #   IDE_REPO=<dir>     the amix-gayle-ide checkout (default: ../amix-gayle-ide beside this repository)
 #   IDE_REV=<rev>      take ide.c from that revision.  Default: the pin below; IDE_REV= (empty)
 #                      takes the checkout's working tree instead
-#   IDE_ORDER=after|address   the card-order rule (default after; see src/ide_sd_glue040.s)
+#   IDE_ORDER=after|address   the card-order rule (default after, address on a relink-040-sd4card.sh
+#                             base; see src/ide_sd_glue040.s)
 #   IDE_BASE_SHA256=<hex>     refuse any base but that one
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -65,6 +66,12 @@ for s in autocon printf timeout; do
 	echo "$NM_IN" | grep -qE " T $s\$" || { echo "[FAIL] $s is not a global T in $IN"; exit 1; }
 done
 echo "$NM_IN" | grep -qE " D int2_tbl\$" || { echo "[FAIL] int2_tbl is not a global D in $IN"; exit 1; }
+# A relink-040-sd4card.sh base ranks controllers by class (amix-dlm C4-1 section 4.2): IDE is class 4
+# whatever its key, and sorts by its task-file base, so the default there is address.
+if echo "$NM_IN" | grep -qE " T sd4_insert\$" && [ -z "$IDE_ORDER" ]; then
+	ORDER=address
+	echo "      sd4card: four cards, ranked by class -- IDE_ORDER=address (its task-file base)"
+fi
 echo "[*] the base's root-storage family"
 run_step indent python3 "$HERE/src/check_root_family.py" "$IN"
 

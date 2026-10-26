@@ -63,8 +63,17 @@ echo "$NM_IN" | grep -qE " [Tt] fpsp_vec11\$" \
 	|| { echo "[FAIL] base does NOT carry FPSP -- not a finished relink-040.sh output"; exit 1; }
 echo "$NM_IN" | grep -qE " [Tt] fpe_vec11\$" \
 	&& { echo "[FAIL] base already carries the FPE -- this pass runs BEFORE relink-040-fpe.sh"; exit 1; }
-echo "$NM_IN" | grep -qE " [Tt] (a4091queue|sdcardbase)\$" \
-	&& { echo "[FAIL] base already has a4091queue or sdcardbase -- use a base without this pass"; exit 1; }
+echo "$NM_IN" | grep -qE " [Tt] a4091queue\$" \
+	&& { echo "[FAIL] base already has a4091queue -- use a base without this pass"; exit 1; }
+# A relink-040-sd4card.sh base carries sdcardbase and sd_queue_tbl (four cards) itself.
+SD4=0
+echo "$NM_IN" | grep -qE " T sd4_insert\$" && SD4=1
+if [ $SD4 = 1 ]; then
+	echo "      sd4card: four cards; sdcardbase and sd_queue_tbl are the base's"
+else
+	echo "$NM_IN" | grep -qE " [Tt] sdcardbase\$" \
+		&& { echo "[FAIL] base already has sdcardbase -- use a base without this pass"; exit 1; }
+fi
 WEAK=$(echo "$NM_IN" | awk '$2 ~ /^[WwVv]$/ {print $3}')
 [ -z "$WEAK" ] || { echo "[FAIL] $IN carries weak symbols -- a stage file, not a finished base:"; echo "$WEAK" | sed 's/^/      /'; exit 1; }
 echo "[*] the base's root-storage family"
@@ -196,9 +205,16 @@ run_step all python3 "$HERE/src/a4091_sd_rows.py" gen "$IN" "$HERE/build/a4091_s
 OLDTABLE=$(m68k-linux-gnu-readelf -rW "$IN" | awk '/^Relocation section '"'"'\.rela\.text'"'"' /{t=1;next} /^Relocation section/{t=0} t && $1=="0000d74c" {print $5}')
 [ -n "$OLDTABLE" ] || { echo "[FAIL] no relocation at .text+0xd74c in $IN"; exit 1; }
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/build/a4091_scsicard.s" -o "$HERE/build/a4091_scsicard.o"
-m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/sdcardbase040.s" -o "$HERE/build/sdcardbase040.o"
+if [ $SD4 = 1 ]; then
+	# the closing object only: rth1_tail040.s carries nothing but the .balign 4 of both sections
+	TAIL="$HERE/build/a4091_tail040.o" NEW="a4091_scsicard"
+	m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/rth1_tail040.s" -o "$TAIL"
+else
+	TAIL="$HERE/build/sdcardbase040.o" NEW="sd_queue_tbl a4091_scsicard"
+	m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/sdcardbase040.s" -o "$TAIL"
+fi
 [ -z "$DEVKV" ] || m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/devkvmap040.s" -o "$DEVKV"
-for s in sd_queue_tbl a4091_scsicard; do
+for s in $NEW; do
 	echo "$NM_IN" | awk 'NF==3{print $3}' | grep -qx "$s" && { echo "[FAIL] $s already exists in $IN"; exit 1; }
 done
 
@@ -206,17 +222,23 @@ done
 STAGE="$HERE/build/unix-stage-a4091"
 cp "$IN" "$STAGE"
 m68k-linux-gnu-objcopy $(cat "$HERE/build/a4091_scsicard.syms") "$STAGE"
-echo "[*] ld -r: base + a4091_040.o${DEVKV:+ + devkvmap040.o} + a4091_scsicard.o + sdcardbase040.o (LAST: .balign 4)"
-m68k-cbm-sysv4-ld -r -o "$OUT" "$STAGE" "$OBJ" $DEVKV "$HERE/build/a4091_scsicard.o" "$HERE/build/sdcardbase040.o"
+echo "[*] ld -r: base + a4091_040.o${DEVKV:+ + devkvmap040.o} + a4091_scsicard.o + $(basename "$TAIL") (LAST: .balign 4)"
+m68k-cbm-sysv4-ld -r -o "$OUT" "$STAGE" "$OBJ" $DEVKV "$HERE/build/a4091_scsicard.o" "$TAIL"
 
 NM_OUT=$(m68k-linux-gnu-nm "$OUT")
 for s in a4091queue sdcardbase a4091_scsicard dev_kvmap dev_kvunmap; do
 	echo "$NM_OUT" | grep -qE " [TD] $s\$" || { echo "[FAIL] $s is not a global definition in $OUT"; exit 1; }
 done
 Q=$(echo "$NM_OUT" | awk '$3=="sd_queue_tbl"{print $1}')
-QS=$(echo "$NM_IN" | awk '$3=="queue" && $2=="b"{print $1}')
-[ -n "$Q" ] && [ "$QS" = "$Q" ] || { echo "[FAIL] sd_queue_tbl @0x$Q is not sd's static queue[] (@0x$QS)"; exit 1; }
-echo "      sdcardbase -> sd_queue_tbl @.bss 0x$Q (sd.o's controller array)"
+if [ $SD4 = 1 ]; then
+	QS=$(echo "$NM_IN" | awk '$3=="sd_queue_tbl" && $2=="D"{print $1}')
+	[ -n "$Q" ] && [ "$QS" = "$Q" ] || { echo "[FAIL] sd_queue_tbl @0x$Q is not the base's four-card table (@0x$QS)"; exit 1; }
+	echo "      sdcardbase -> sd_queue_tbl @.data 0x$Q (the base's four-card table)"
+else
+	QS=$(echo "$NM_IN" | awk '$3=="queue" && $2=="b"{print $1}')
+	[ -n "$Q" ] && [ "$QS" = "$Q" ] || { echo "[FAIL] sd_queue_tbl @0x$Q is not sd's static queue[] (@0x$QS)"; exit 1; }
+	echo "      sdcardbase -> sd_queue_tbl @.bss 0x$Q (sd.o's controller array)"
+fi
 LEAK=$(echo "$NM_OUT" | awk '$1=="U" && $2!="edata" && $2!="end" && $2!="etext" {print $2}')
 [ -z "$LEAK" ] || { echo "[FAIL] unresolved symbols:"; echo "$LEAK"; exit 1; }
 echo "[OK] no unresolved symbols"
