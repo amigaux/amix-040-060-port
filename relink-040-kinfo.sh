@@ -64,6 +64,10 @@ for s in bootinfo buildid chipmem cputype VSIZOFMEM; do
 done
 echo "$NM_IN" | grep -qE " [BD] sd_queue_tbl\$" \
 	|| { echo "[FAIL] base does not expose sd_queue_tbl -- run relink-040-rth1.sh first"; exit 1; }
+# a relink-040-sd4card.sh base: the card table has four slots (kinfo.c's SDCARDS)
+SD4=
+echo "$NM_IN" | grep -qE " T sd4_insert\$" && SD4=-DSDCARDS=4
+[ -z "$SD4" ] || echo "      sd4card: four cards in the base -- kinfo.c with -DSDCARDS=4"
 RC=0
 python3 "$HERE/src/patch_kinfo_cdevsw.py" --check "$IN" "$MAJOR" > "$HERE/build/kinfo-row.log" 2>&1 || RC=$?
 sed 's/^/      /' "$HERE/build/kinfo-row.log"
@@ -73,7 +77,7 @@ sed 's/^/      /' "$HERE/build/kinfo-row.log"
 echo "[*] cross-compiling src/kinfo.c (-m68040 dialect)"
 CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 OBJ="$HERE/build/kinfo.o"
-m68k-cbm-sysv4-gcc $CF $DCF -DKINFO_KABI=\"$KINFO_KABI\" -c "$HERE/src/kinfo.c" -o "$OBJ"
+m68k-cbm-sysv4-gcc $CF $DCF $SD4 -DKINFO_KABI=\"$KINFO_KABI\" -c "$HERE/src/kinfo.c" -o "$OBJ"
 m68k-linux-gnu-size "$OBJ" | sed 's/^/      /'
 M=$(m68k-linux-gnu-readelf -SW "$OBJ" | awk '{gsub(/[][]/,"")} $2 ~ /^\.rodata/ {print $2}')
 [ -z "$M" ] || { echo "[FAIL] kinfo.o carries $M -- the image has .text and .data only"; exit 1; }

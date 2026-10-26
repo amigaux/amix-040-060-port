@@ -44,7 +44,9 @@
 #define CD_MANUF	0x14		/* er_Manufacturer, a word */
 #define CD_BOARDADDR	0x20
 #define CD_BOARDSIZE	0x24
-#define SDCARDS		2		/* sd.o's queue[] */
+#ifndef SDCARDS
+#define SDCARDS		2		/* sd.o's queue[]; -DSDCARDS=4 on a relink-040-sd4card.sh base */
+#endif
 #define SDQ_SIZE	16		/* f +0, c +4, a +8, hardware name +12 */
 
 /* record offsets */

@@ -32,7 +32,9 @@
 #define CD_MANUF	0x14		/* er_Manufacturer, a word */
 #define CD_BOARDADDR	0x20
 #define BO_NAME		0x10		/* swapfile.bo_name, after bo_fstype[16] */
-#define SDCARDS		2
+#ifndef SDCARDS
+#define SDCARDS		2		/* -DSDCARDS=4 on a relink-040-sd4card.sh base (amix-dlm C4-1) */
+#endif
 
 #define RTH_BOOT	0x01
 #define RTH_BCDEV	0x02
@@ -155,6 +157,26 @@ rth1_disk_rooted()
 	return 1;
 }
 
+#if SDCARDS > 2
+/* swapfile.bo_name's controller, one hex digit or two, then "d0s2" and its NUL. */
+static void
+rth1_swapname(v)
+unsigned long v;
+{
+	char *nm = swapfile + BO_NAME + 10;
+	static char tail[] = "d0s2";
+	int i;
+
+	if (v >= 16) {
+		*nm++ = '1';
+		v -= 16;
+	}
+	*nm++ = v < 10 ? '0' + v : 'a' + v - 10;
+	for (i = 0; i < 5; i++)
+		*nm++ = tail[i];
+}
+
+#endif
 void
 rth1_apply()
 {
@@ -200,16 +222,32 @@ rth1_apply()
 
 	if (why == 0) {
 		v = (unsigned long) card << 3 | unit;
+#if SDCARDS > 2
+		/*
+		 * Four cards (C4-1 section 2): the card's high bit is minor bit 7, and the name is
+		 * c<8 * card + unit> in hexadecimal, two digits from card 2 on.
+		 */
+		rootdev = (rootdev & ~0xFFUL) | ((unsigned long) (card & 1) << 3 | (unsigned long) (card >> 1) << 7
+						 | 0x10 | unit);	/* slice 1 */
+		rth1_swapname(v);
+#else
 		rootdev = (rootdev & ~0xFFUL) | 0x10 | v;	/* slice 1 */
 		swapfile[BO_NAME + 10] = v < 10 ? '0' + v : 'a' + v - 10;	/* slice 2 */
+#endif
 		printf("RTH1: root c%xd0s1 from the %s (board %x id %x unit %d = card %d)\n",
 		       (int) v, used == 2 ? "root record" : "boot disk",
 		       sdcardbase(card), id >> 8, (int) unit, card);
 	} else if (why == 7)
 		printf("RTH1: root %x built in (%s)\n", rootdev, rth1_reason[why]);
 	else
+#if SDCARDS > 2
+		printf("RTH1: root c%xd0s%d built in (%s)\n",
+		       (int) (((rootdev >> 3 & 1) | (rootdev >> 6 & 2)) << 3 | (rootdev & 7)),
+		       (int) (rootdev >> 4 & 0x7), rth1_reason[why]);
+#else
 		printf("RTH1: root c%xd0s%d built in (%s)\n", (int) (rootdev & 0xF),
 		       (int) (rootdev >> 4 & 0xF), rth1_reason[why]);
+#endif
 	rth1_used = why == 0 ? used : 0;
 	rth1_why = why;
 }

@@ -51,6 +51,9 @@ The layout is C2-1 §2: big-endian, 580 bytes with no modules.
 **The sd card table.**
 - sd's `init()` keeps up to two controllers, sorted by the address it recorded. Slot k is card k, and a disk's
   device name is `c<8k + unit>d0s<slice>`.
+- On a kernel built with `relink-040-sd4card.sh` (amix-dlm C4-1) sd keeps four, in rank order: the Z3660, Zorro
+  boards by address, the motherboard controller, IDE. Cards 2–3 name their disks `c10`–`c1f`, and the table
+  lists up to four cards.
 - A card whose address is an AutoConfig board's `cd_BoardAddr` gets the id `er_Manufacturer << 16 |
   er_Product << 8` and that base, with flags 0.
 - Any other card is a motherboard controller: base 0, flags 0x1, and an id with a zero manufacturer:

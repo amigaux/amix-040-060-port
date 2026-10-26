@@ -6,8 +6,9 @@
 #                         controller digit of swapfile.bo_name together, or leaves both as linked;
 #                         rth1_mountroot() = rth1_apply(); vfs_mountroot()
 #   src/patch_rth1_hook.py  the one relocation of main's `jsr vfs_mountroot` -> rth1_mountroot
-#   src/sdcardbase040.s   linked only when the base lacks sdcardbase (no a4091 pass), with sd's
-#                         controller array exposed as sd_queue_tbl
+#   src/sdcardbase040.s   linked only when the base lacks sdcardbase (no a4091 or sd4card pass),
+#                         with sd's controller array exposed as sd_queue_tbl.  On a
+#                         relink-040-sd4card.sh base rth1.c is built with -DSDCARDS=4
 #   src/rth1_tail040.s    the closing .balign 4
 #
 # Order: after every pass that registers a controller or adds sdcardbase (a4091, ide), before
@@ -51,9 +52,12 @@ WEAK=$(echo "$NM_IN" | awk '$2 ~ /^[WwVv]$/ {print $3}')
 for s in bootinfo rootdev swapfile; do
 	echo "$NM_IN" | grep -qE " D $s\$" || { echo "[FAIL] base has no global .data $s"; exit 1; }
 done
-SDCB=0
+SDCB=0 SD4=
 echo "$NM_IN" | grep -qE " T sdcardbase\$" && SDCB=1
-echo "      sdcardbase: $([ $SDCB = 1 ] && echo "in the base (the a4091 pass)" || echo "absent -- linked here")"
+echo "      sdcardbase: $([ $SDCB = 1 ] && echo "in the base (the a4091 or sd4card pass)" || echo "absent -- linked here")"
+# a relink-040-sd4card.sh base: four cards and the C4-1 root minor (rth1.c's SDCARDS > 2 form)
+echo "$NM_IN" | grep -qE " T sd4_insert\$" && SD4=-DSDCARDS=4
+[ -z "$SD4" ] || echo "      sd4card: four cards in the base -- rth1.c with -DSDCARDS=4"
 
 # ---------------------------------------------------------------- 1. the compile and its gates
 echo "[*] cross-compiling src/rth1.c (-m68040 dialect)"
@@ -62,7 +66,7 @@ OBJ="$HERE/build/rth1.o"
 DLM="${DLM:-0}"
 case $DLM in 0) DCF= PEND= ;; 1) DCF=-DRTH1_DLM PEND=dlm_marc_post ;; *) echo "ERROR: DLM is 0 or 1"; exit 1;; esac
 [ $DLM = 0 ] || echo "      DLM=1: -DRTH1_DLM (dlm_marc_post after vfs_mountroot)"
-m68k-cbm-sysv4-gcc $CF $DCF -c "$HERE/src/rth1.c" -o "$OBJ"
+m68k-cbm-sysv4-gcc $CF $DCF $SD4 -c "$HERE/src/rth1.c" -o "$OBJ"
 m68k-linux-gnu-size "$OBJ" | sed 's/^/      /'
 M=$(m68k-linux-gnu-readelf -SW "$OBJ" | awk '{gsub(/[][]/,"")} $2 ~ /^\.rodata/ {print $2}')
 [ -z "$M" ] || { echo "[FAIL] rth1.o carries $M -- the image has .text and .data only"; exit 1; }
