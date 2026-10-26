@@ -5,7 +5,8 @@
   python3 src/check_dlm_splice.py --free-rows MAJOR[,MAJOR...] KERNEL
 
 BASE is the kernel before the splice, OUT the ld -r of the weakened base with the core.  For each
-object the core replaces (dmainit, execsw, fmodsw, scrcon_put, aciabintr):
+object the core replaces (dmainit, execsw, fmodsw, scrcon_put, aciabintr; vfssw and nfstype too when
+OUT carries __amix_vfssw, a core with core patch 0040):
   - OUT has one definition of the name, global, and it lies past BASE's own section (the core's);
   - __amix_<name>, where the core keeps the stock one, is at the stock address in BASE;
   - no relocation in OUT reaches the stock object but through __amix_<name>: every reference the
@@ -88,6 +89,10 @@ if sys.argv[1] == "--free-rows":
 
 base, out = Elf(sys.argv[1]), Elf(sys.argv[2])
 bt, ot = table(base), table(out)
+if any(n == "__amix_vfssw" for n, s, v, b in ot):
+    # a core with vfs_register (core patch 0040) replaces vfssw and nfstype as well
+    REPLACED += (("vfssw", ".data"), ("nfstype", ".data"))
+    ALIASED += ("vfssw", "nfstype")
 for name, sec in REPLACED:
     stock = [v for n, s, v, b in bt if n == name and s == sec]
     if len(stock) != 1:

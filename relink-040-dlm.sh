@@ -41,6 +41,8 @@
 # from the four-card sd's sd4_init (src/patch_dlm_call.py); it needs a relink-040-sd4card.sh base.
 # A core that defines dlm_marc_root (core patch 0034, spec 30 section 3) gets rth1_mountroot's call
 # before rth1_apply (rth1_nomarc, relink-040-rth1.sh DLM=1): the arena's root modules link there.
+# A core that defines vfssw and nfstype (core patch 0040, C4-6 section 2) replaces them as it does
+# execsw and fmodsw: the stock ones weakened and kept as __amix_vfssw / __amix_nfstype.
 # A core that reads dlm_static_root (core patch 0037, C4-4 version 4) gets the base's root= list
 # (tools/kabi-sidecar.py --root) in ident.o: marc_root skips a root module for a controller the
 # kernel drives itself.
@@ -242,13 +244,23 @@ echo "[*] the base weakened where the core replaces it; the stock kept as __amix
 sym() { echo "$NM_IN" | awk -v n="$1" -v t="$2" '$3==n && $2==t {print $1}'; }
 STAGE="$HERE/build/unix-stage-dlm"
 cp "$IN" "$STAGE"
+# a core that defines vfssw (core patch 0040, C4-6 section 2) replaces vfssw and nfstype too
+VFSW=
+if m68k-linux-gnu-nm "$O/add.o" | grep -qE " D vfssw\$"; then
+	m68k-linux-gnu-nm "$O/add.o" | grep -qE " D nfstype\$" \
+		|| { echo "[FAIL] the core defines vfssw but not nfstype"; exit 1; }
+	VFSW="--weaken-symbol vfssw --weaken-symbol nfstype
+	--add-symbol __amix_vfssw=.data:0x$(sym vfssw D),global,object
+	--add-symbol __amix_nfstype=.data:0x$(sym nfstype D),global,object"
+fi
 m68k-linux-gnu-objcopy --weaken-symbol dmainit --weaken-symbol execsw --weaken-symbol fmodsw \
 	--weaken-symbol scrcon_put --weaken-symbol aciabintr \
 	--add-symbol __amix_execsw=.data:0x$(sym execsw D),global,object \
 	--add-symbol __amix_fmodsw=.data:0x$(sym fmodsw D),global,object \
 	--add-symbol __amix_scrcon_put=.text:0x$(sym scrcon_put T),global,function \
-	--add-symbol __amix_aciabintr=.text:0x$(sym aciabintr T),global,function "$STAGE"
+	--add-symbol __amix_aciabintr=.text:0x$(sym aciabintr T),global,function $VFSW "$STAGE"
 echo "      execsw .data 0x$(sym execsw D), fmodsw .data 0x$(sym fmodsw D), scrcon_put .text 0x$(sym scrcon_put T), aciabintr .text 0x$(sym aciabintr T)"
+[ -z "$VFSW" ] || echo "      vfssw .data 0x$(sym vfssw D), nfstype .data 0x$(sym nfstype D) (the core's grown vfssw, core patch 0040)"
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/dlm_tail040.s" -o "$O/dlm_tail040.o"
 # the halt pass (core patch 0030): a core that defines dlm_halt gets mdboot's two calls through it
 SDSEAM=0
