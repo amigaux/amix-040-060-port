@@ -41,6 +41,9 @@
 # from the four-card sd's sd4_init (src/patch_dlm_call.py); it needs a relink-040-sd4card.sh base.
 # A core that defines dlm_marc_root (core patch 0034, spec 30 section 3) gets rth1_mountroot's call
 # before rth1_apply (rth1_nomarc, relink-040-rth1.sh DLM=1): the arena's root modules link there.
+# A core that reads dlm_static_root (core patch 0037, C4-4 version 4) gets the base's root= list
+# (tools/kabi-sidecar.py --root) in ident.o: marc_root skips a root module for a controller the
+# kernel drives itself.
 # From kabi k46.1.1 on, bdevsw[20] -- the stock RAM disk's block row -- is freed for the module
 # ramdisk (src/patch_free_brow.py): every routine nodev, d_flag &nullflag (0).
 #
@@ -51,11 +54,11 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
 
-# 4c1acd0: core patches 0001-0035 (0029 no-sleep, 0030 dlm_halt, 0031 block rows, 0032 sd_register,
-# 0033 the arena load path, 0034 dlm_marc_root, 0035 match= at marc_root), kabi k46.1.1; reviewed
-# 2026-10-26.
+# 05f700a: core patches 0001-0038 (0029 no-sleep, 0030 dlm_halt, 0031 block rows, 0032 sd_register,
+# 0033 the arena load path, 0034 dlm_marc_root, 0035 match=, 0036 root_defer, 0037 dlm_static_root,
+# 0038 mkmod's rank), kabi k46.1.1; reviewed 2026-10-26.
 DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
-DLM_REV="${DLM_REV:-4c1acd0}"
+DLM_REV="${DLM_REV:-05f700a}"
 DLM_KABI="${DLM_KABI:-k46.1.1}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
@@ -195,7 +198,16 @@ python3 "$S/kit/tools/prfcheck.py" $(for f in $CORE; do echo "$S/core/$f.c"; don
 COREO=$(for f in $CORE sha256 crc32 plat-amiga plat-line dlm_cache dlm_hooksw dlm_spl; do echo "$O/$f.o"; done)
 m68k-cbm-sysv4-ld -r -o "$O/dlm.o" $COREO
 echo "      dlm.o: $(m68k-linux-gnu-size "$O/dlm.o" | awk 'NR==2{print $1 "+" $2 "+" $3}') text+data+bss, no warnings of its own, printf formats %d %x %s only"
-python3 "$S/kit/tools/mkident.py" --asm k46 "$DLM_KABI" "$DLM_ARENA" > "$O/ident.s"
+# a core that reads dlm_static_root (core patch 0037) gets the kernel's built-in root controllers,
+# the sidecar's root= list, beside the identity record: marc_root skips a module for one of them
+SROOT=
+if m68k-linux-gnu-nm "$O/dlm.o" | grep -qE " U dlm_static_root\$"; then
+	SROOT=$(python3 "$HERE/tools/kabi-sidecar.py" --root "$IN")
+	echo "      dlm_static_root: \"$SROOT\" (the controllers sd's table drives)"
+	python3 "$S/kit/tools/mkident.py" --asm k46 "$DLM_KABI" "$DLM_ARENA" "$SROOT" > "$O/ident.s"
+else
+	python3 "$S/kit/tools/mkident.py" --asm k46 "$DLM_KABI" "$DLM_ARENA" > "$O/ident.s"
+fi
 m68k-cbm-sysv4-as -o "$O/ident.o" "$O/ident.s"
 "$S/mkksym" -a "$S/kit/abi/k46/ddi.list" -a "$S/kit/abi/k46/core.list" > "$O/ksym.s" 2> "$O/ksym.log" \
 	|| { echo "[FAIL] mkksym -a: $(cat "$O/ksym.log")"; exit 1; }
