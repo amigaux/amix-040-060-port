@@ -31,12 +31,16 @@
 #        sh relink-040-dlm.sh --fill <kernel>
 #   DLM_REPO=<dir>   amix-dlm (default: the sibling checkout)
 #   DLM_REV=<rev>    the amix-dlm revision the core and tools come from (default: the pin below)
-#   DLM_KABI=<tag>   default k46.1.0; must equal the base's kinfo_kabi
+#   DLM_KABI=<tag>   default k46.1.1; must equal the base's kinfo_kabi
 #   DLM_ARENA=<n>    the arena's capacity (default 0x60000, M-MOD1)
 #   DLM_ABI_NEW=1    --fill: a fingerprint that moved is written (KERNEL.abi.txt) and taken instead of
 #                    failing -- only for the one rewrite of a tag's reference C3-3 allows
 # A core that defines dlm_halt (core patch 0030) gets mdboot's haltsys and rtnfirm calls through
 # src/dlm_halt040.s (src/patch_dlm_halt.py): the halt pass runs on halt and reboot, never on panic.
+# A core that defines dlm_sd_close (core patch 0032, C4-1 section 3) takes sd's module registrations
+# from the four-card sd's sd4_init (src/patch_dlm_sd.py); it needs a relink-040-sd4card.sh base.
+# From kabi k46.1.1 on, bdevsw[20] -- the stock RAM disk's block row -- is freed for the module
+# ramdisk (src/patch_free_brow.py): every routine nodev, d_flag &nullflag (0).
 #
 #   DLM_U1=1         compile the core with -DDLM_U1 (core patch 0023's U1 probe): a measurement build
 #                    only, never shipped; without it the core is unchanged
@@ -45,11 +49,11 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
 
-# 4b7eb3d: core patches 0001-0028 (0027: dlm_maximage 256 KiB, an oversized file is ENOLOAD), the
-# k46.1.0 reference with cputype 4; reviewed 2026-10-26.
+# a15104e: core patches 0001-0032 (0029 no-sleep, 0030 dlm_halt, 0031 block rows, 0032 sd_register),
+# kabi k46.1.1 (block rows add an ABI name); reviewed 2026-10-26.
 DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
-DLM_REV="${DLM_REV:-4b7eb3d}"
-DLM_KABI="${DLM_KABI:-k46.1.0}"
+DLM_REV="${DLM_REV:-a15104e}"
+DLM_KABI="${DLM_KABI:-k46.1.1}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
 REV=$(git -C "$DLM_REPO" rev-parse --verify "$DLM_REV^{commit}") \
@@ -232,6 +236,15 @@ m68k-linux-gnu-objcopy --weaken-symbol dmainit --weaken-symbol execsw --weaken-s
 echo "      execsw .data 0x$(sym execsw D), fmodsw .data 0x$(sym fmodsw D), scrcon_put .text 0x$(sym scrcon_put T), aciabintr .text 0x$(sym aciabintr T)"
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/dlm_tail040.s" -o "$O/dlm_tail040.o"
 # the halt pass (core patch 0030): a core that defines dlm_halt gets mdboot's two calls through it
+SDSEAM=0
+if m68k-linux-gnu-nm "$O/add.o" | grep -qE " T dlm_sd_close\$"; then
+	echo "$NM_IN" | grep -qE " T sd4_noclose\$" \
+		|| { echo "[FAIL] the core has sd_register (dlm_sd_close) but the base has no four-card sd -- run relink-040-sd4card.sh"; exit 1; }
+	SDSEAM=1
+	echo "      dlm_sd_close: in the core -- sd4_init takes the module registrations through it"
+fi
+FREEB20=0
+case "$DLM_KABI" in k46.1.0) ;; *) FREEB20=1; echo "      $DLM_KABI: bdevsw[20] (the stock RAM disk) freed for the module ramdisk";; esac
 HALTO=
 if m68k-linux-gnu-nm "$O/add.o" | grep -qE " T dlm_halt\$"; then
 	HALTO="$O/dlm_halt040.o"
@@ -252,6 +265,14 @@ run_step indent python3 "$HERE/src/check_dlm_splice.py" --free-rows 49,51,52 "$O
 if [ -n "$HALTO" ]; then
 	run_step indent python3 "$HERE/src/patch_dlm_halt.py" "$OUT"
 	run_step indent python3 "$HERE/src/patch_dlm_halt.py" --check "$OUT"
+fi
+if [ $SDSEAM = 1 ]; then
+	run_step indent python3 "$HERE/src/patch_dlm_sd.py" "$OUT"
+	run_step indent python3 "$HERE/src/patch_dlm_sd.py" --check "$OUT"
+fi
+if [ $FREEB20 = 1 ]; then
+	run_step indent python3 "$HERE/src/patch_free_brow.py" "$OUT"
+	run_step indent python3 "$HERE/src/patch_free_brow.py" --check "$OUT"
 fi
 
 # ---------------------------------------------------------------- 4. packaging guards
