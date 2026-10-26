@@ -68,6 +68,7 @@ def symbols(e):
     for i in range(e.syn):
         s = e.sym(i)
         if s["shndx"] != 0:
+            s["size"] = int.from_bytes(e.b[e.syo + i * e.sye + 8:e.syo + i * e.sye + 12], "big")
             out.setdefault(s["name"], s)
     return out
 
@@ -98,10 +99,22 @@ def axk1(e, syms, kabi):
         die("AXK1 check fails: is the image filled (relink-040-dlm.sh --fill)?")
     if cstr(rec[12:36]) != kabi or w[9] != 46:
         die("AXK1 says kabi %r line %d; kinfo says %r on line 46" % (cstr(rec[12:36]), w[9], kabi))
-    if w[10] != image_offset(e, syms, "dlm_arena") or w[12] != image_offset(e, syms, "dlm_ksym"):
-        die("AXK1's arena/ksym offsets are not dlm_arena's/dlm_ksym's in this image")
     if not w[11] or w[11] & 0xFFFF or not w[13]:
         die("AXK1 arena capacity 0x%x / block size 0x%x" % (w[11], w[13]))
+    # The arena (C3-3 version 5, amix-dlm a829c44): dlm_arena is capacity + 16 bytes and AXK1 names
+    # its first 16-aligned byte, since .data follows .text unaligned in the image.  An earlier core's
+    # dlm_arena is the capacity exactly and AXK1 names its start.
+    ao, asz = image_offset(e, syms, "dlm_arena"), syms["dlm_arena"]["size"]
+    if asz == w[11] + 16:
+        if w[10] != (ao + 15) & ~15 or w[10] % 16:
+            die("AXK1's arena 0x%x is not dlm_arena's first 16-aligned byte (0x%x)" % (w[10], (ao + 15) & ~15))
+    elif asz == w[11]:
+        if w[10] != ao:
+            die("AXK1's arena 0x%x is not dlm_arena's offset 0x%x" % (w[10], ao))
+    else:
+        die("dlm_arena is %d bytes for an AXK1 capacity of 0x%x" % (asz, w[11]))
+    if w[12] != image_offset(e, syms, "dlm_ksym"):
+        die("AXK1's ksym offset is not dlm_ksym's in this image")
     return [("ident", "0x%08x" % image_offset(e, syms, "dlm_ident")),
             ("arena", "0x%08x 0x%08x" % (w[10], w[11])),
             ("ksym", "0x%08x 0x%08x" % (w[12], w[13]))]
