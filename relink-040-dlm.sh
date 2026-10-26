@@ -35,6 +35,9 @@
 #   DLM_ARENA=<n>    the arena's capacity (default 0x60000, M-MOD1)
 #   DLM_ABI_NEW=1    --fill: a fingerprint that moved is written (KERNEL.abi.txt) and taken instead of
 #                    failing -- only for the one rewrite of a tag's reference C3-3 allows
+# A core that defines dlm_halt (core patch 0030) gets mdboot's haltsys and rtnfirm calls through
+# src/dlm_halt040.s (src/patch_dlm_halt.py): the halt pass runs on halt and reboot, never on panic.
+#
 #   DLM_U1=1         compile the core with -DDLM_U1 (core patch 0023's U1 probe): a measurement build
 #                    only, never shipped; without it the core is unchanged
 set -e
@@ -228,8 +231,15 @@ m68k-linux-gnu-objcopy --weaken-symbol dmainit --weaken-symbol execsw --weaken-s
 	--add-symbol __amix_aciabintr=.text:0x$(sym aciabintr T),global,function "$STAGE"
 echo "      execsw .data 0x$(sym execsw D), fmodsw .data 0x$(sym fmodsw D), scrcon_put .text 0x$(sym scrcon_put T), aciabintr .text 0x$(sym aciabintr T)"
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/dlm_tail040.s" -o "$O/dlm_tail040.o"
-echo "[*] ld -r: base + the core + dlm_tail040.o (LAST: the .balign 4)"
-m68k-cbm-sysv4-ld -r -o "$OUT" "$STAGE" "$O/add.o" "$O/dlm_tail040.o"
+# the halt pass (core patch 0030): a core that defines dlm_halt gets mdboot's two calls through it
+HALTO=
+if m68k-linux-gnu-nm "$O/add.o" | grep -qE " T dlm_halt\$"; then
+	HALTO="$O/dlm_halt040.o"
+	m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/dlm_halt040.s" -o "$HALTO"
+	echo "      dlm_halt: in the core -- mdboot's haltsys and rtnfirm calls go through it (dlm_halt040.o)"
+fi
+echo "[*] ld -r: base + the core${HALTO:+ + dlm_halt040.o} + dlm_tail040.o (LAST: the .balign 4)"
+m68k-cbm-sysv4-ld -r -o "$OUT" "$STAGE" "$O/add.o" $HALTO "$O/dlm_tail040.o"
 NM_OUT=$(m68k-linux-gnu-nm "$OUT")
 LEAK=$(echo "$NM_OUT" | awk '$1=="U" && $2!="edata" && $2!="end" && $2!="etext" {print $2}')
 [ -z "$LEAK" ] || { echo "[FAIL] unresolved symbols:"; echo "$LEAK"; exit 1; }
@@ -239,6 +249,10 @@ WEAK=$(echo "$NM_OUT" | awk '$2 ~ /^[WwVv]$/ {print $3}')
 echo "[OK] no weak symbol"
 run_step indent python3 "$HERE/src/check_dlm_splice.py" "$IN" "$OUT"
 run_step indent python3 "$HERE/src/check_dlm_splice.py" --free-rows 49,51,52 "$OUT"
+if [ -n "$HALTO" ]; then
+	run_step indent python3 "$HERE/src/patch_dlm_halt.py" "$OUT"
+	run_step indent python3 "$HERE/src/patch_dlm_halt.py" --check "$OUT"
+fi
 
 # ---------------------------------------------------------------- 4. packaging guards
 CONTIG=$(m68k-linux-gnu-readelf -SW "$OUT" | awk '
