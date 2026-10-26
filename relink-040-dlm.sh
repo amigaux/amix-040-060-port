@@ -51,10 +51,11 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
 
-# a15104e: core patches 0001-0032 (0029 no-sleep, 0030 dlm_halt, 0031 block rows, 0032 sd_register),
-# kabi k46.1.1 (block rows add an ABI name); reviewed 2026-10-26.
+# 4c1acd0: core patches 0001-0035 (0029 no-sleep, 0030 dlm_halt, 0031 block rows, 0032 sd_register,
+# 0033 the arena load path, 0034 dlm_marc_root, 0035 match= at marc_root), kabi k46.1.1; reviewed
+# 2026-10-26.
 DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
-DLM_REV="${DLM_REV:-a15104e}"
+DLM_REV="${DLM_REV:-4c1acd0}"
 DLM_KABI="${DLM_KABI:-k46.1.1}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
