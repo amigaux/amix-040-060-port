@@ -31,7 +31,7 @@
 #        sh relink-040-dlm.sh --fill <kernel>
 #   DLM_REPO=<dir>   amix-dlm (default: the sibling checkout)
 #   DLM_REV=<rev>    the amix-dlm revision the core and tools come from (default: the pin below)
-#   DLM_KABI=<tag>   default k46.1.1; must equal the base's kinfo_kabi
+#   DLM_KABI=<tag>   default k46.1.2; must equal the base's kinfo_kabi
 #   DLM_ARENA=<n>    the arena's capacity (default 0x60000, M-MOD1)
 #   DLM_ABI_NEW=1    --fill: a fingerprint that moved is written (KERNEL.abi.txt) and taken instead of
 #                    failing -- only for the one rewrite of a tag's reference C3-3 allows
@@ -56,12 +56,13 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
 
-# 05f700a: core patches 0001-0038 (0029 no-sleep, 0030 dlm_halt, 0031 block rows, 0032 sd_register,
+# 49239b1: core patches 0001-0041 (0029 no-sleep, 0030 dlm_halt, 0031 block rows, 0032 sd_register,
 # 0033 the arena load path, 0034 dlm_marc_root, 0035 match=, 0036 root_defer, 0037 dlm_static_root,
-# 0038 mkmod's rank), kabi k46.1.1; reviewed 2026-10-26.
+# 0038 mkmod's rank, 0039 the ramdisk image, 0040 vfs_register, 0041 moddefs block rows), the arena
+# 16-aligned (C3-3 version 5), kabi k46.1.2; reviewed 2026-10-26.
 DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
-DLM_REV="${DLM_REV:-05f700a}"
-DLM_KABI="${DLM_KABI:-k46.1.1}"
+DLM_REV="${DLM_REV:-49239b1}"
+DLM_KABI="${DLM_KABI:-k46.1.2}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
 REV=$(git -C "$DLM_REPO" rev-parse --verify "$DLM_REV^{commit}") \
@@ -209,6 +210,17 @@ if m68k-linux-gnu-nm "$O/dlm.o" | grep -qE " U dlm_static_root\$"; then
 	python3 "$S/kit/tools/mkident.py" --asm k46 "$DLM_KABI" "$DLM_ARENA" "$SROOT" > "$O/ident.s"
 else
 	python3 "$S/kit/tools/mkident.py" --asm k46 "$DLM_KABI" "$DLM_ARENA" > "$O/ident.s"
+fi
+# C3-3 version 5 (core a829c44): dlm_arena is capacity + 16 and --fill records its first 16-aligned
+# image offset, so the arena's alignment comes from the record, not the section.  mkident's
+# `.balign 16` before dlm_arena would make the core's .data 16-aligned, and .data follows .text
+# unpadded in this image (the gate below): it becomes `.balign 4` here, the one change.
+if grep -q '^	\.balign	16$' "$O/ident.s"; then
+	awk '/^\t\.balign\t16$/ {getline nx; if (nx != "\t.globl\tdlm_arena") exit 1; print "\t.balign\t4"; print nx; n++; next}
+	     {print} END {if (n != 1) exit 1}' "$O/ident.s" > "$O/ident.s.4" \
+		|| { echo "[FAIL] ident.s: the .balign 16 is not the one before dlm_arena"; exit 1; }
+	mv "$O/ident.s.4" "$O/ident.s"
+	echo "      ident.s: dlm_arena's .balign 16 -> 4 (the record rounds the arena to 16, C3-3 v5)"
 fi
 m68k-cbm-sysv4-as -o "$O/ident.o" "$O/ident.s"
 "$S/mkksym" -a "$S/kit/abi/k46/ddi.list" -a "$S/kit/abi/k46/core.list" > "$O/ksym.s" 2> "$O/ksym.log" \

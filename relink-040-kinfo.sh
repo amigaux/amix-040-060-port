@@ -20,7 +20,7 @@
 #                            dlm_kinfo_list() on every read) and kabi $KINFO_KABI; the base is
 #                            relink-040-rth1.sh's DLM=1 output.  dlm_kinfo_list and dlm_marc_post
 #                            stay open until relink-040-dlm.sh links the core, the next pass
-#   KINFO_KABI=<tag>         the kabi tag (default: static, or k46.1.1 with DLM=1)
+#   KINFO_KABI=<tag>         the kabi tag (default: static, or k46.1.2 with DLM=1)
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
@@ -40,7 +40,7 @@ echo "[*] base: $(basename "$IN")  (sha256 $BASESHA)"
 DLM="${DLM:-0}"
 case $DLM in
 0) KINFO_KABI="${KINFO_KABI:-static}" DCF= PEND= ;;
-1) KINFO_KABI="${KINFO_KABI:-k46.1.1}" DCF=-DKINFO_DLM PEND="dlm_kinfo_list dlm_marc_post" ;;
+1) KINFO_KABI="${KINFO_KABI:-k46.1.2}" DCF=-DKINFO_DLM PEND="dlm_kinfo_list dlm_marc_post" ;;
 *) echo "ERROR: DLM is 0 or 1"; exit 1 ;;
 esac
 case $KINFO_KABI in ""|*[!a-z0-9.]*) echo "ERROR: KINFO_KABI '$KINFO_KABI' (a-z 0-9 . only)"; exit 1;; esac

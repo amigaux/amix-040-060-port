@@ -115,7 +115,7 @@ Its gates:
 The k46 module kernel (amix-dlm stage-3 kernel brief, S3-20) carries the module core, spliced in by
 `relink-040-dlm.sh`. kinfo and rth1 are built for it with `DLM=1`:
 
-- **kinfo** (`-DKINFO_DLM`). The kabi tag is `k46.1.1` (`k46.1.0` before stage 4) (`KINFO_KABI` overrides). Every `read(2)` refreshes
+- **kinfo** (`-DKINFO_DLM`). The kabi tag is `k46.1.2` (`k46.1.0` before stage 4, `k46.1.1` at S4-21/S4-22) (`KINFO_KABI` overrides). Every `read(2)` refreshes
   the module list (count at 576, entries from 580) from the core's `dlm_kinfo_list()`, with up to 32 entries,
   and sets the length (580 + 32 × n) and the check to match. Without `KINFO_DLM` the object is the static kernel's, byte for byte.
 - **rth1** (`-DRTH1_DLM`). `rth1_mountroot()` calls `dlm_marc_post()` once `vfs_mountroot()` has returned 0,
