@@ -20,7 +20,8 @@
  * (sd4_init_tbl and sd4_init_bound, exposed by the pass), so a pass that extends the table
  * before or after this one is followed.  A queue function no row names ranks as zorro.
  *
- * A fifth controller drops the lowest-ranked one, with one console line naming it.
+ * A fifth controller drops the lowest-ranked one, with one console line naming it, and a controller
+ * at a base that is a card already (a module for a board sd's table drives) is dropped likewise.
  *
  * Module controllers (C4-1 section 3): sdopen()'s call of init() goes to sd4_init(), which runs the
  * stock init() and then, once, takes the module core's pending registrations and places them by
@@ -93,6 +94,18 @@ char *name;
 	unsigned char *q;
 	int k, j, b;
 
+	/*
+	 * One card per board: a controller at a base that is a card already (a root module for a board
+	 * the kernel also drives from sd's own table) is dropped, and the card keeps its driver.
+	 */
+	for (k = 0; k < SD4CARDS; k++) {
+		q = sd_queue_tbl + k * SDQ_SIZE;
+		if (L(q, 0) != 0 && a != 0 && L(q, 8) == a) {
+			printf("sd: %s at 0x%x is card %d (%s) already; dropped\n", name, (int) a, k,
+			       *(char **) (q + 12));
+			return;
+		}
+	}
 	for (k = 0; k < SD4CARDS; k++) {
 		q = sd_queue_tbl + k * SDQ_SIZE;
 		if (L(q, 0) == 0 || r < sd4_rank[k] || (r == sd4_rank[k] && a < L(q, 8)))
