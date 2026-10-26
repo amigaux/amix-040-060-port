@@ -22,7 +22,8 @@
 #
 # usage: sh relink-040-rth1.sh [base-kernel] [output]
 #   RTH1_BASE_SHA256=<hex>  refuse any base but that one
-#   DLM=1                   the module kernel: -DRTH1_DLM, rth1_mountroot() calls dlm_marc_post()
+#   DLM=1                   the module kernel: -DRTH1_DLM, rth1_mountroot() calls dlm_marc_post(), and
+#                           rth1_nomarc() before rth1_apply (dlm_marc_root once relink-040-dlm.sh retargets it)
 #                           after the root is mounted; that one import stays open until
 #                           relink-040-dlm.sh links the core (kinfo comes between them)
 set -e
@@ -64,8 +65,8 @@ echo "[*] cross-compiling src/rth1.c (-m68040 dialect)"
 CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 OBJ="$HERE/build/rth1.o"
 DLM="${DLM:-0}"
-case $DLM in 0) DCF= PEND= ;; 1) DCF=-DRTH1_DLM PEND=dlm_marc_post ;; *) echo "ERROR: DLM is 0 or 1"; exit 1;; esac
-[ $DLM = 0 ] || echo "      DLM=1: -DRTH1_DLM (dlm_marc_post after vfs_mountroot)"
+case $DLM in 0) DCF= PEND= NOMARC= TAF= ;; 1) DCF=-DRTH1_DLM PEND=dlm_marc_post NOMARC=rth1_nomarc TAF=-Wa,--defsym,RTH1_DLM=1 ;; *) echo "ERROR: DLM is 0 or 1"; exit 1;; esac
+[ $DLM = 0 ] || echo "      DLM=1: -DRTH1_DLM (rth1_nomarc before rth1_apply, dlm_marc_post after vfs_mountroot)"
 m68k-cbm-sysv4-gcc $CF $DCF $SD4 -c "$HERE/src/rth1.c" -o "$OBJ"
 m68k-linux-gnu-size "$OBJ" | sed 's/^/      /'
 M=$(m68k-linux-gnu-readelf -SW "$OBJ" | awk '{gsub(/[][]/,"")} $2 ~ /^\.rodata/ {print $2}')
@@ -85,7 +86,7 @@ echo "[*] page geometry in the compiled bytes (no 2 KiB shift from the cross hea
 run_step indent sh "$HERE/src/check_page_geometry.sh" "$OBJ"
 
 echo "[*] imports and exports must be exactly these:"
-WANT=$(echo bootinfo $PEND printf rootdev sdcardbase sdopen swapfile vfs_mountroot | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
+WANT=$(echo bootinfo $PEND printf $NOMARC rootdev sdcardbase sdopen swapfile vfs_mountroot | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 GOT=$(m68k-linux-gnu-nm "$OBJ" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 [ "$GOT" = "$WANT" ] || { echo "[FAIL] unresolved set is: $GOT"; echo "       expected:          $WANT"; exit 1; }
 WANTX="rth1_apply rth1_mountroot rth1_used rth1_why"
@@ -99,7 +100,7 @@ DUP=$(for s in $GOTX; do echo "$NM_IN" | awk -v s="$s" 'NF==3 && $3==s{print s}'
 [ -z "$DUP" ] || { echo "[FAIL] rth1.o defines names the base already has: $DUP"; exit 1; }
 
 echo "[*] assembling the closing object$([ $SDCB = 0 ] && echo " and sdcardbase")"
-m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/rth1_tail040.s" -o "$HERE/build/rth1_tail040.o"
+m68k-cbm-sysv4-gcc -m68040 $TAF -c "$HERE/src/rth1_tail040.s" -o "$HERE/build/rth1_tail040.o"
 OBJS="$OBJ"
 STAGE="$HERE/build/unix-stage-rth1"
 cp "$IN" "$STAGE"

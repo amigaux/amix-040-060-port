@@ -13,7 +13,10 @@
  *
  * Built with -DRTH1_DLM (the module kernel, relink-040-rth1.sh with DLM=1), rth1_mountroot() also
  * calls the module core's dlm_marc_post() once the root is mounted: the boot-class modules of the
- * booted generation load there, in process 0 (amix-dlm stage-3 kernel brief, step 8).
+ * booted generation load there, in process 0 (amix-dlm stage-3 kernel brief, step 8).  Before
+ * rth1_apply() it calls rth1_nomarc() (src/rth1_tail040.s, empty): relink-040-dlm.sh retargets that
+ * call to the core's dlm_marc_root() when the core has it (spec 30 section 3), so the arena's root
+ * modules link, and their controllers register with sd, before sd's first open.
  *
  * Kept free of division and of multiplication by a non-power of two: the 68060 implements neither
  * 64-bit form, and the cross compiler reaches for them (the scan060 gate in the pass checks).
@@ -52,6 +55,7 @@ extern int sdopen();
 extern int vfs_mountroot();
 #ifdef RTH1_DLM
 extern int dlm_marc_post();
+extern void rth1_nomarc();	/* dlm_marc_root() once relink-040-dlm.sh has retargeted it */
 #endif
 extern int printf();
 
@@ -255,6 +259,9 @@ rth1_apply()
 int
 rth1_mountroot()
 {
+#ifdef RTH1_DLM
+	rth1_nomarc();
+#endif
 	rth1_apply();
 #ifdef RTH1_DLM
 	{
