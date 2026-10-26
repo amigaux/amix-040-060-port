@@ -22,6 +22,12 @@
  *
  * A fifth controller drops the lowest-ranked one, with one console line naming it.
  *
+ * Module controllers (C4-1 section 3): sdopen()'s call of init() goes to sd4_init(), which runs the
+ * stock init() and then, once, takes the module core's pending registrations and places them by
+ * their class beside the table's rows.  The take is a call of sd4_noclose(), which answers none;
+ * on a module kernel whose core has sd_register, relink-040-dlm.sh retargets that one call to the
+ * core's dlm_sd_close(), which hands over its table and closes registration.
+ *
  * Kept free of division and of multiplication by a non-power of two, as src/rth1.c is.
  */
 
@@ -39,10 +45,22 @@
 extern unsigned long sd4_init_tbl;	/* init()'s lea operand: the table's address */
 extern unsigned char sd4_init_bound;	/* init()'s moveq operand: the last row's index */
 extern int printf();
+extern void sd4_stock_init();		/* sd.o's static init() */
+extern int sd4_noclose();		/* dlm_sd_close() on a module kernel with sd_register */
+
+/* the core's struct dlm_sdreg (C4-1 section 3), one pending registration */
+struct sd4reg {
+	unsigned long	r_f;		/* queue function */
+	unsigned long	r_c;		/* board index, handed back to it */
+	unsigned long	r_base;		/* sdcardbase() */
+	char		*r_name;	/* sdhardwarename() */
+	unsigned long	r_rank;		/* class, 1-4 */
+};
 
 /* Initialised, so it is .data: the image has .text and .data only. */
 unsigned char sd_queue_tbl[SD4CARDS * SDQ_SIZE] = { 0 };
 unsigned long sd4_rank[SD4CARDS] = { 0 };
+unsigned long sd4_closed = 0;		/* the module registrations have been taken */
 
 static unsigned long
 sd4_class(f)
@@ -66,14 +84,13 @@ unsigned long f;
 	return RANK_ZORRO;
 }
 
-/* insert(f, c, a, name) as sd's init() calls it: one controller, its place by rank. */
-void
-sd4_insert(f, c, a, name)
-unsigned long f, c, a;
+/* one controller, its place by class r and then by base */
+static void
+sd4_place(f, c, a, name, r)
+unsigned long f, c, a, r;
 char *name;
 {
 	unsigned char *q;
-	unsigned long r = sd4_class(f);
 	int k, j, b;
 
 	for (k = 0; k < SD4CARDS; k++) {
@@ -99,4 +116,29 @@ char *name;
 	L(q, 8) = a;
 	L(q, 12) = (unsigned long) name;
 	sd4_rank[k] = r;
+}
+
+/* insert(f, c, a, name) as sd's init() calls it: a row of the table, ranked by its product. */
+void
+sd4_insert(f, c, a, name)
+unsigned long f, c, a;
+char *name;
+{
+	sd4_place(f, c, a, name, sd4_class(f));
+}
+
+/* init() as sdopen() calls it: the table's controllers, then once the modules' (C4-1 3.1). */
+void
+sd4_init()
+{
+	struct sd4reg *t, *e;
+	int n, i;
+
+	sd4_stock_init();
+	if (sd4_closed)
+		return;
+	sd4_closed = 1;
+	n = sd4_noclose(&t);
+	for (i = 0, e = t; i < n && i < SD4CARDS; i++, e++)
+		sd4_place(e->r_f, e->r_c, e->r_base, e->r_name, e->r_rank);
 }

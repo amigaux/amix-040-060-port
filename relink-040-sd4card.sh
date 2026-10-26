@@ -10,7 +10,7 @@
 #   src/sd4card.c        sd_queue_tbl, four slots, and sd4_insert(), the ranked insert
 #   src/sdcardbase040.s  sdcardbase() over four cards (--defsym SD4=1)
 #   src/sd4card040.s     dd's and ct's four-row tables and the card decodes (LAST: .balign 4)
-#   src/patch_sd4card.py the in-place edits: 13 relocations retargeted, sdopen's bound to card < 4,
+#   src/patch_sd4card.py the in-place edits: 14 relocations retargeted, sdopen's bound to card < 4,
 #                        11 inline decodes replaced by calls of the same length
 #
 # The rank of a controller comes from the row of sd's table it was found by.  init() hands insert()
@@ -48,7 +48,7 @@ echo "$NM_IN" | grep -qE " [Tt] fpsp_vec11\$" \
 	|| { echo "[FAIL] base does NOT carry FPSP -- not a finished relink-040.sh output"; exit 1; }
 echo "$NM_IN" | grep -qE " T sd4_insert\$" \
 	&& { echo "[FAIL] base already carries sd4_insert -- use a base without this pass"; exit 1; }
-for s in sdcardbase sd_queue_tbl sd4_init_tbl sd4_init_bound; do
+for s in sdcardbase sd_queue_tbl sd4_init_tbl sd4_init_bound sd4_stock_init; do
 	echo "$NM_IN" | awk 'NF==3{print $3}' | grep -qx "$s" \
 		&& { echo "[FAIL] base already has $s -- this pass runs before the a4091 and rth1 passes"; exit 1; }
 done
@@ -58,7 +58,9 @@ WEAK=$(echo "$NM_IN" | awk '$2 ~ /^[WwVv]$/ {print $3}')
 OPS=$(m68k-linux-gnu-objdump -d --start-address=0xd74a --stop-address=0xd7a0 "$IN" \
 	| awk '$1=="d74a:" || $1=="d79e:" {print $2 $3}' | tr '\n' ' ')
 case "$OPS" in "47f90000 72"*) ;; *) echo "[FAIL] init's lea/moveq are not at 0xd74a/0xd79e: $OPS"; exit 1;; esac
-echo "      sd: init's lea @0xd74a and moveq @0xd79e in place; no sdcardbase, no sd_queue_tbl yet"
+INIT=$(m68k-linux-gnu-readelf -sW "$IN" | awk '$8=="init" && $4=="FUNC" && $5=="LOCAL" && $2=="0000d736" && $3==124')
+[ -n "$INIT" ] || { echo "[FAIL] sd's init() is not the 124-byte local at .text 0xd736"; exit 1; }
+echo "      sd: init() @0xd736, its lea @0xd74a and moveq @0xd79e in place; no sdcardbase, no sd_queue_tbl yet"
 
 # ---------------------------------------------------------------- 1. the objects
 CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
@@ -70,17 +72,18 @@ OBJS="$HERE/build/sd4card.o $HERE/build/sdcardbase040-sd4.o $HERE/build/sd4card0
 for o in $OBJS; do m68k-linux-gnu-size "$o" | sed -n 2p | sed 's/^/      /'; done
 
 echo "[*] imports and exports must be exactly these:"
-WANT="printf sd4_init_bound sd4_init_tbl"
-GOT=$(m68k-linux-gnu-nm $OBJS | awk '$1=="U"{print $2}' | grep -vx 'sd_queue_tbl' | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//')
+WANT="printf sd4_init_bound sd4_init_tbl sd4_stock_init"
+DEF=$(m68k-linux-gnu-nm $OBJS | awk '$2 ~ /^[TDBC]$/{print $3}')
+GOT=$(m68k-linux-gnu-nm $OBJS | awk '$1=="U"{print $2}' | grep -vxF "$DEF" | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//')
 [ "$GOT" = "$WANT" ] || { echo "[FAIL] unresolved set is: $GOT"; echo "       expected:          $WANT"; exit 1; }
-WANTX="sd4_cttab sd4_ddtab sd4_dev_d0d1 sd4_dev_d0d2 sd4_dev_d0d5 sd4_dev_d1d2 sd4_dev_d1d3 sd4_dev_d1d4 sd4_idx_d1d2 sd4_insert sd4_rank sd_queue_tbl sdcardbase"
+WANTX="sd4_closed sd4_cttab sd4_ddtab sd4_dev_d0d1 sd4_dev_d0d2 sd4_dev_d0d5 sd4_dev_d1d2 sd4_dev_d1d3 sd4_dev_d1d4 sd4_idx_d1d2 sd4_init sd4_insert sd4_noclose sd4_rank sd_queue_tbl sdcardbase"
 GOTX=$(m68k-linux-gnu-nm $OBJS | awk '$2 ~ /^[TDBC]$/{print $3}' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 [ "$GOTX" = "$WANTX" ] || { echo "[FAIL] exported set is: $GOTX"; echo "       expected:        $WANTX"; exit 1; }
 M=$(m68k-linux-gnu-nm $OBJS | awk '$2 ~ /^[BbCc]$/{print $3}')
 [ -z "$M" ] || { echo "[FAIL] .bss or COMMON in the objects: $M -- the image has .text and .data only"; exit 1; }
 DUP=$(for s in $GOTX; do echo "$NM_IN" | awk -v s="$s" 'NF==3 && $3==s'; done)
 [ -z "$DUP" ] || { echo "[FAIL] the objects define names the base already has: $DUP"; exit 1; }
-echo "      imports: $GOT (+ sd_queue_tbl, sdcardbase's, from sd4card.o)"
+echo "      imports: $GOT (the objects' own cross references aside)"
 echo "      exports: $GOTX"
 
 echo "[*] 68060 instruction census of the objects"
@@ -96,9 +99,11 @@ done
 # ---------------------------------------------------------------- 2. the link
 STAGE="$HERE/build/unix-stage-sd4card"
 cp "$IN" "$STAGE"
-echo "[*] expose init's operands: sd4_init_tbl = .text 0xd74c (the lea's table), sd4_init_bound = .text 0xd79f"
+echo "[*] expose sd's init(): sd4_stock_init = .text 0xd736, its operands sd4_init_tbl = .text 0xd74c (the lea's"
+echo "    table) and sd4_init_bound = .text 0xd79f"
 m68k-linux-gnu-objcopy --add-symbol sd4_init_tbl=.text:0xd74c,object,global \
-	--add-symbol sd4_init_bound=.text:0xd79f,object,global "$STAGE"
+	--add-symbol sd4_init_bound=.text:0xd79f,object,global \
+	--add-symbol sd4_stock_init=.text:0xd736,function,global "$STAGE"
 echo "[*] ld -r: base + sd4card.o + sdcardbase040-sd4.o + sd4card040.o (LAST: the .balign 4)"
 m68k-cbm-sysv4-ld -r -o "$OUT" "$STAGE" $OBJS
 LEAK=$(m68k-linux-gnu-nm "$OUT" | awk '$1=="U" && $2!="edata" && $2!="end" && $2!="etext" {print $2}')

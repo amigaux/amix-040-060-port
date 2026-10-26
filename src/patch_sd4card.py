@@ -5,6 +5,7 @@
 #
 #   sd.o   the four relocations of sd's static queue[] (sdopen, sdqueue, sdhardwarename, init)
 #          -> sd_queue_tbl, four slots (src/sd4card.c); init()'s `jsr insert` -> sd4_insert;
+#          sdopen()'s `jsr init` -> sd4_init (the table, then the module registrations);
 #          sdopen()'s bound `moveq #1,%d1` -> `moveq #3,%d1` (card < 4).  The stock insert() and
 #          queue[] stay in the image, unreferenced.
 #   dd.o   the two relocations of ddtab -> sd4_ddtab, four rows; the five inline sdcard()
@@ -27,13 +28,13 @@ SD_BOUND = (0xD6CA, b"\x72\x01", b"\x72\x03")       # sdopen: moveq #1,%d1 -> #3
 RELOCS = {
     0xD6D4: ("queue", "sd_queue_tbl"), 0xD700: ("queue", "sd_queue_tbl"),
     0xD722: ("queue", "sd_queue_tbl"), 0xD740: ("queue", "sd_queue_tbl"),
-    0xD776: ("insert", "sd4_insert"),
+    0xD776: ("insert", "sd4_insert"), 0xD6C6: ("init", "sd4_init"),
     0xBECA: ("ddtab", "sd4_ddtab"), 0xBFDC: ("ddtab", "sd4_ddtab"),
     0xADA2: ("cttab", "sd4_cttab"), 0xAEDC: ("cttab", "sd4_cttab"), 0xAFFE: ("cttab", "sd4_cttab"),
     0xB076: ("cttab", "sd4_cttab"), 0xB1E2: ("cttab", "sd4_cttab"), 0xB9BE: ("cttab", "sd4_cttab"),
 }
-# the stock symbols by kind: ct.o also has a local FUNC named queue
-OLD_KIND = {"queue": (1, ".bss", 32), "insert": (2, ".text", None),
+# the stock symbols by kind: ct.o also has a local FUNC named queue, and an init of 130 bytes
+OLD_KIND = {"queue": (1, ".bss", 32), "insert": (2, ".text", None), "init": (2, ".text", 124),
             "ddtab": (1, ".bss", 1088), "cttab": (1, ".bss", 1152)}
 SITES = {
     0xBCC4: ("e6887201c081", "sd4_dev_d0d1", "dd ddopen"),

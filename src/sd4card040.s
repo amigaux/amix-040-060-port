@@ -87,6 +87,15 @@ sd4_dev_d0d5:				| ct ctopen (two)
 	tstl	%d0
 	rts
 
+| sd4_noclose(&t): no module registrations (sd4card.c's sd4_init calls it; relink-040-dlm.sh
+| retargets that call to the core's dlm_sd_close when the core has sd_register)
+	.globl	sd4_noclose
+sd4_noclose:
+	moveal	%sp@(4),%a0
+	clrl	%a0@
+	moveq	&0,%d0
+	rts
+
 | ct: the card of a cttab index (8 * card + unit) in %d1 -> card in %d1, 1 in %d2
 	.globl	sd4_idx_d1d2
 sd4_idx_d1d2:
