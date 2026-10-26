@@ -40,10 +40,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
 
-# e86c9c4: core patches 0001-0014 (the printf formats), tools/mkabi.py and the k46.1.0 reference,
-# reviewed 2026-10-26.
+# f5ce731: core patches 0001-0020 (0017: boot-class modules load from the first sysinit entry),
+# the k46.1.0 reference with cputype 4; reviewed 2026-10-26 (b61ab31).
 DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
-DLM_REV="${DLM_REV:-e86c9c4}"
+DLM_REV="${DLM_REV:-f5ce731}"
 DLM_KABI="${DLM_KABI:-k46.1.0}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
