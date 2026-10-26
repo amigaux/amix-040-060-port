@@ -61,10 +61,12 @@
 | same reason (io_init[] = { parinit, 0 } has no spare terminator relocation).
 | Runs before falling through to the stock parallel-port init, which is
 | unchanged.  parinit takes no arguments and its return value is unused.
+	.ifndef	Z3660_NONET
 	.globl	parinit
 parinit:
 	movel	&z3660ethinfo,cdevsw+2696	| cdevsw[51].d_str  (51*52 + 44)
 	jmp	parinit_orig			| stock parallel-port init, untouched
+	.endif
 
 | ---------------------------------------------------------------------------
 | dd.c ordering island (see 3. above).  Entry: sp@(4) = bp (pushed by dd.c),

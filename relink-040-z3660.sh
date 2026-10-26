@@ -23,6 +23,8 @@
 #                          checkout's working tree does not matter).  Default: the pin below.
 #                          Z3660_SCSI_REV= (empty) takes $Z3660_SCSI_SRC as it stands instead.
 #   Z3660_NET_REV=<rev>    the same for amix-z3660net's src/ (z3660eth.c and its headers).
+#   Z3660_NET=off          the SCSI driver alone: no z3660eth, no parinit hook, cdevsw[51] stays
+#                          nodev (the module kernel, where z3660eth is a module).  Default: on.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$(cd "$(dirname "$0")" && pwd)/tools/config-load.sh"
@@ -66,8 +68,14 @@ sha256sum "$Z3660_SCSI_SRC" | sed 's/^/      /'
 # The ethernet driver's revision is pinned the same way (PO-12): 8449d53 is the source of 586ba6f
 # (real spl masks, and a failed MAC probe frees both sptalloc windows -- 47092ee leaked them), plus
 # notes.  Through this pass it gives z3660eth_040.o sha256 a1f49c54... (was b93ce42d at 47092ee).
+Z3660_NET="${Z3660_NET-on}"
+case $Z3660_NET in on|off) ;; *) echo "ERROR: Z3660_NET is on or off, not '$Z3660_NET'"; exit 1;; esac
+NETO="$HERE/build/z3660eth_040.o"
+[ $Z3660_NET = on ] || NETO=
 Z3660_NET_REV="${Z3660_NET_REV-8449d53}"
-if [ -n "$Z3660_NET_REV" ]; then
+if [ $Z3660_NET = off ]; then
+	echo "[*] z3660net: off (Z3660_NET=off): the SCSI driver alone"
+elif [ -n "$Z3660_NET_REV" ]; then
 	REPO=$(git -C "$Z3660_NET_SRC" rev-parse --show-toplevel)
 	REL=$(git -C "$Z3660_NET_SRC" rev-parse --show-prefix)
 	git -C "$REPO" cat-file -e "$Z3660_NET_REV:${REL}z3660eth.c" \
@@ -80,7 +88,7 @@ if [ -n "$Z3660_NET_REV" ]; then
 else
 	echo "[*] z3660net source: working tree $Z3660_NET_SRC (Z3660_NET_REV empty: not pinned)"
 fi
-sha256sum "$Z3660_NET_SRC"/z3660eth.c "$Z3660_NET_SRC"/z3660eth.h | sed 's/^/      /'
+[ -z "$NETO" ] || sha256sum "$Z3660_NET_SRC"/z3660eth.c "$Z3660_NET_SRC"/z3660eth.h | sed 's/^/      /'
 
 echo "[*] Model-B source copies (phystopfn 2 KiB -> 4 KiB; page counts halved, bytes unchanged)"
 python3 "$HERE/src/z3660_modelb.py"
@@ -103,8 +111,8 @@ echo "[*] cross-compiling both drivers"
 CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 m68k-cbm-sysv4-gcc $CF -I"$ALIEN" -I"$HERE/build" \
 	-c "$HERE/build/z3660_040.c"    -o "$HERE/build/z3660_040.o"
-m68k-cbm-sysv4-gcc $CF -I"$ALIEN" -I"$HERE/build" \
-	-c "$HERE/build/z3660eth_040.c" -o "$HERE/build/z3660eth_040.o"
+[ -z "$NETO" ] || m68k-cbm-sysv4-gcc $CF -I"$ALIEN" -I"$HERE/build" \
+	-c "$HERE/build/z3660eth_040.c" -o "$NETO"
 
 # Guard the conversion at the OBJECT level, not at the source level: the whole
 # point of the geometry defect is that it is invisible in behaviour until it
@@ -117,9 +125,8 @@ m68k-cbm-sysv4-gcc $CF -I"$ALIEN" -I"$HERE/build" \
 # Moved into src/check_page_geometry.sh (2026-08-01) so every compiled-in
 # object gets the same check, and widened there to `asrl` as well as `lsrl` -- a
 # SIGNED `>> 11` compiles to asrl and the old check here could not see it.
-sh "$HERE/src/check_page_geometry.sh" \
-	"$HERE/build/z3660_040.o" "$HERE/build/z3660eth_040.o"
-for o in z3660_040 z3660eth_040; do
+sh "$HERE/src/check_page_geometry.sh" "$HERE/build/z3660_040.o" $NETO
+for o in z3660_040 ${NETO:+z3660eth_040}; do
 	m68k-linux-gnu-objdump -d "$HERE/build/$o.o" | grep -A1 "moveq #12," | grep -q "lsrl" \
 		|| { echo "[FAIL] $o.o has no 4 KiB page shift at all -- phystopfn override missing?"; exit 1; }
 done
@@ -134,22 +141,27 @@ echo "[OK] both driver objects shift by 12 (4 KiB PFN), none by 11"
 echo "[*] T-9 gates G1/G2 (spl masks and MMIO volatile survived -traditional)"
 run_step all python3 "$HERE/tools/spl-gate.py" --object "$HERE/build/z3660_040.o" \
 	--source "$HERE/build/z3660_040.c" --cflags "$CF" -- -I"$ALIEN" -I"$HERE/build"
-run_step all python3 "$HERE/tools/spl-gate.py" --object "$HERE/build/z3660eth_040.o" \
+[ -z "$NETO" ] || run_step all python3 "$HERE/tools/spl-gate.py" --object "$NETO" \
 	--source "$HERE/build/z3660eth_040.c" --cflags "$CF" -- -I"$ALIEN" -I"$HERE/build"
 
 echo "[*] assembling the registration glue"
-m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/z3660_glue040.s" -o "$HERE/build/z3660_glue040.o"
+m68k-cbm-sysv4-gcc -m68040 ${NETO:-"-Wa,--defsym,Z3660_NONET=1"} -c "$HERE/src/z3660_glue040.s" \
+	-o "$HERE/build/z3660_glue040.o"
 
 # parinit is the io_init[] hook (same one the VA2000 driver uses, and for the same
 # reason).  Weaken the stock one and expose it as parinit_orig so the glue can
 # tail-jump to it.  PARINIT_ADDR is asserted, not assumed.
 PARINIT_ADDR=0xfe6c
 cp "$IN" "$HERE/build/unix-stage-z3660"
-m68k-linux-gnu-objcopy \
-	--weaken-symbol parinit \
-	--add-symbol parinit_orig=.text:${PARINIT_ADDR},function,global \
-	--globalize-symbol startio \
-	"$HERE/build/unix-stage-z3660"
+if [ -n "$NETO" ]; then
+	m68k-linux-gnu-objcopy \
+		--weaken-symbol parinit \
+		--add-symbol parinit_orig=.text:${PARINIT_ADDR},function,global \
+		--globalize-symbol startio \
+		"$HERE/build/unix-stage-z3660"
+else
+	m68k-linux-gnu-objcopy --globalize-symbol startio "$HERE/build/unix-stage-z3660"
+fi
 
 # ORDER MATTERS.  z3660eth_040.o's .text is 0x10f2 bytes -- not a multiple of 4,
 # because the C compiler pads to 2 -- and the loader copies text+data as ONE block,
@@ -160,10 +172,12 @@ m68k-linux-gnu-objcopy \
 # .balign 4 closes the gap.
 echo "[*] ld -r: base + both drivers + glue (glue LAST: it carries the .balign 4)"
 m68k-cbm-sysv4-ld -r -o "$OUT" "$HERE/build/unix-stage-z3660" \
-	"$HERE/build/z3660_040.o" "$HERE/build/z3660eth_040.o" "$HERE/build/z3660_glue040.o"
+	"$HERE/build/z3660_040.o" $NETO "$HERE/build/z3660_glue040.o"
 
 echo "[*] symbols that must be defined:"
-for s in z3660queue z3660present z3660ethinfo z3660_scsicard dd_startio_first parinit parinit_orig; do
+SYMS="z3660queue z3660present z3660_scsicard dd_startio_first"
+[ -z "$NETO" ] || SYMS="$SYMS z3660ethinfo parinit parinit_orig"
+for s in $SYMS; do
 	m68k-linux-gnu-nm "$OUT" | grep -E " [TtDdBb] $s\$" | sed "s/^/      /" \
 		|| { echo "[FAIL] $s not defined"; exit 1; }
 done
@@ -195,6 +209,6 @@ python3 "$HERE/src/stamp_buildid.py" "$OUT"
 
 echo "[OK] built $OUT"
 echo "     boot: unix_boot040 $(basename "$OUT")   <- unix_boot040 is MANDATORY"
-echo "     nodes: mknod /dev/zen0 c 51 0     (ethernet; then slink + ifconfig)"
+[ -z "$NETO" ] || echo "     nodes: mknod /dev/zen0 c 51 0     (ethernet; then slink + ifconfig)"
 echo "     NOTE: with no Z3660 present, autocon() misses the board and z3660queue is"
 echo "           never called -- the kernel is safe to boot on this A3000."
