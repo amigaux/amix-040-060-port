@@ -80,7 +80,7 @@ card 0.
 | `family` | the argument |
 | `line` | `k46` |
 | `pin` | `gcc-2.7.2.3-<gcc-cross-amix HEAD>`. Refused unless the installed `m68k-cbm-sysv4-gcc` is that commit's wrapper; `--pin` overrides |
-| `build` | `buildid`, with `68060-` when the image's `cputype` is 60, as the kernel itself rewrites it at boot |
+| `build` | `buildid`, with `68060-` when the image's `cputype` is 60, as the kernel itself rewrites it at boot. A module kernel's image must already carry the stamped CPU's prefix (`STAMP_BUILDID_CPU=60` at the FPE pass), so `build=` is its own string byte for byte |
 | `size`, `sha256` | of the kernel file |
 | `loader-min` | 1 |
 | `root` | the rows of the controller table sd's `init()` walks: `zorro:<mmmm>:<pp>`, `mobo:a3000-wd`, `mobo:gayle` |

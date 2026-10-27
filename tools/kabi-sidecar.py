@@ -11,7 +11,8 @@ root, rootfs.  Every value except family and pin is read from the kernel image i
 sidecar and /dev/kinfo cannot disagree:
   kabi     kinfo's kinfo_kabi string ("static" on a static kernel; the image must carry kinfo)
   build    inituname040's buildid, as uname -m and kinfo show it on the CPU the image is stamped
-           for (cputype 60 turns "68040-" into "68060-")
+           for (cputype 60 turns "68040-" into "68060-").  On a module kernel it is the image's
+           own string, which must already name the stamped CPU (STAMP_BUILDID_CPU=60)
   root     the rows of the controller table sd's init() walks (the relocation of its
            `lea <table>,%a3` and its loop bound): zorro:<mmmm>:<pp> for an AutoConfig id,
            mobo:a3000-wd for the stock A3000 row, mobo:gayle for the Gayle IDE row
@@ -159,8 +160,13 @@ def sidecar(kernel, family, pin, abi=None):
     kabi = cstr(data_bytes(e, syms, "kinfo_kabi", 24))
     build = cstr(data_bytes(e, syms, "buildid", 17)).strip()
     cpu = int.from_bytes(data_bytes(e, syms, "cputype", 4), "big")
-    if not build.startswith("68040-") or cpu not in (40, 60):
+    if build[:6] not in ("68040-", "68060-") or cpu not in (40, 60):
         die("buildid %r / cputype %d is not a stamped image of this line" % (build, cpu))
+    if kabi != "static" and build[:6] != "680%d-" % cpu:
+        die("buildid %r is not the cputype %d kernel's own string: stamp it with STAMP_BUILDID_CPU=%d"
+            % (build, cpu, cpu))
+    if build[:6] == "68060-" and cpu != 60:
+        die("buildid %r on a cputype %d image" % (build, cpu))
     if cpu == 60:
         build = "68060-" + build[6:]
     if build.endswith("000000-00"):

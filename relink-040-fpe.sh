@@ -22,6 +22,10 @@
 #   FPE_REQUIRE_QUEUE=z3660queue FPE_REQUIRE_CARD=1 sh relink-040-fpe.sh ...
 #                                         refuse a base whose root-storage family is not the
 #                                         target rig's (see step 0.5)
+#   STAMP_BUILDID_CPU=60 sh relink-040-fpe.sh ...
+#                                         stamp the build id " 68060-..." for an image emitted only
+#                                         as cputype 60 (the module kernel): its sidecar's build=
+#                                         is then the kernel's own string (src/stamp_buildid.py)
 #
 # WHAT GOES IN
 #   build/fpe-src/      20 NetBSD C files + 4 machine-ABI headers, EXTRACTED at build time

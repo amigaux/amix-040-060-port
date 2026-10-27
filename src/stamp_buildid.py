@@ -25,6 +25,10 @@ script overwrites those 16 chars in place (the trailing NUL is left intact), so
 the field length never changes.  It resolves the `buildid` symbol and the .data
 file offset from the ELF at stamp time -- no hardcoded offsets -- and refuses to
 write unless the current content starts with " 68040-".
+
+STAMP_BUILDID_CPU=60 writes " 68060-..." instead (2026-10-27): the module kernel is emitted for the
+68060 only, and its sidecar's build= must be the kernel's own string, byte for byte.  inituname's
+boot-time '4' -> '6' flip is then a no-op.  Default 40, so the static families are unchanged.
 """
 import struct, subprocess, sys, os, re, datetime
 
@@ -104,7 +108,10 @@ def main():
     path = sys.argv[1]
     today = datetime.date.today().strftime('%y%m%d')
     seq = next_seq(os.path.dirname(path) or '.', today)
-    field = f" 68040-{today}-{seq:02d}".encode()
+    cpu = os.environ.get('STAMP_BUILDID_CPU', '40')
+    if cpu not in ('40', '60'):
+        die(f"STAMP_BUILDID_CPU={cpu!r}: 40 or 60")
+    field = f" 680{cpu}-{today}-{seq:02d}".encode()
     if len(field) != FIELD_LEN:
         die(f"stamp too long: {field!r} ({len(field)} != {FIELD_LEN})")
 
