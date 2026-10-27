@@ -152,6 +152,10 @@ The chain leaves z3660eth, zz9000 and monsw out (majors 49, 51 and 52 belong to 
 zeroed in place, so no address moves: `vfssw` loses their rows (`nfstype` 10), `init_tbl` loses
 `inoinit`, the relocations inside the ranges go, and every symbol defined there leaves the symbol table
 with the COMMONs only they use. ufs then comes from a core-tier module (`tools/fsobj-patch.py`, wrapped by
-amix-dlm `tools/carve.py` with the cut's build id); s5 has none on this line.
+amix-dlm `tools/carve.py` with the cut's build id); s5 has none on this line. The module's inputs are
+the cross sysroot's stock objects: `fsobj-patch.py --stock <stand/unix> --base build/b-new
+usr/sys/fs/ufs/exp` (a439e68f), and `carve.py wrap --filesys usr/sys/master.d/filesys.o` (1c7a3ca6).
+It is built with amix-dlm's k46 ABI kit at the core's revision, made with `PORT` = this tree and
+`MONSW_H` = its `src/sys/monsw.h`.
 
     carve -> dd -> sd4card -> f4arms -> f6 -> rth1 (DLM=1) -> kinfo (DLM=1) -> dlm -> fpe -> ...

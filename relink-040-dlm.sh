@@ -68,8 +68,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # dma_complete are the base's src/dma_cache040.s; dma_alloc hands out heap pages through their DTT0
 # alias, purged by physical line at alloc and free, and addressed only through it); abi 2ab48658;
 # reviewed 2026-10-27.
+# 7b07bce: plat_dmainit skips the leading blank of the stamped buildid (" 68060-..."), so the core's
+# build id equals a core-tier module's build= (before it, ufs was refused: EBADVER); abi unchanged.
 DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
-DLM_REV="${DLM_REV:-76f83d8}"
+DLM_REV="${DLM_REV:-7b07bce}"
 DLM_KABI="${DLM_KABI:-k46.1.2}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
