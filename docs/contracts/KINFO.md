@@ -140,3 +140,13 @@ The chain leaves z3660eth, zz9000 and monsw out (majors 49, 51 and 52 belong to 
   - `abi` as `--fill` printed it (`--abi`);
   - last, `root` and `rootfs` as for a static kernel. Through stage 3 the root controllers and filesystems
     stay built in, and kbootset's gate 3 needs them.
+    `rootfs` lists only what is linked in (amix-dlm C3-3 version 6), so a cut without ufs and s5 has none.
+
+**The cut without ufs and s5 (2026-10-27, amix-dlm S5-11).** `relink-040-carve.sh` runs first, on
+`relink-040.sh`'s output, before any pass that branches across the ranges. ufs and s5 become dead and
+zeroed in place, so no address moves: `vfssw` loses their rows (`nfstype` 10), `init_tbl` loses
+`inoinit`, the relocations inside the ranges go, and every symbol defined there leaves the symbol table
+with the COMMONs only they use. ufs then comes from a core-tier module (`tools/fsobj-patch.py`, wrapped by
+amix-dlm `tools/carve.py` with the cut's build id); s5 has none on this line.
+
+    carve -> dd -> sd4card -> f4arms -> f6 -> rth1 (DLM=1) -> kinfo (DLM=1) -> dlm -> fpe -> ...

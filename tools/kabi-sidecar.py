@@ -33,7 +33,9 @@ and the arena and block offsets those of dlm_arena and dlm_ksym in the image.  T
            it needs the kit's lists and dlm_offs.h, so it is the one value not read from the image
 then sdcards=4 when the image carries the four-card sd (relink-040-sd4card.sh, amix-dlm C4-1;
 absent means two cards), and last root and rootfs as for a static kernel (through stage 3 the
-floor's SCSI drivers and filesystems stay built in, and kbootset's gate 3 reads them).  A core with
+floor's SCSI drivers and filesystems stay built in, and kbootset's gate 3 reads them).  rootfs= lists
+only what is linked in (C3-3 version 6): a module kernel cut without ufs and s5
+(relink-040-carve.sh, whose filesystems are modules) has no rootfs= line.  A core with
 dlm_static_root (core patch 0037) carries the same root list, written by relink-040-dlm.sh from
 --root; the tool refuses a kernel where the two differ.
 
@@ -191,14 +193,13 @@ def sidecar(kernel, family, pin, abi=None):
         if sr != ",".join(keys):
             die("dlm_static_root %r is not the root= list %r (relink-040-dlm.sh)" % (sr, ",".join(keys)))
     fs = [n for n, s in ROOTFS if s in syms]
-    if not fs:
+    if not fs and axk is None:
         die("no root filesystem in %s" % kernel)
     # a four-card sd (relink-040-sd4card.sh, amix-dlm C4-1): sdcards=4; absent means two
     sd4 = [("sdcards", "4")] if "sd4_insert" in syms else []
     lines = head + [("loader-min", str(LOADER_MIN if axk is None else LOADER_MIN_DLM))] + (axk or []) + sd4 + [
         ("root", ",".join(keys)),
-        ("rootfs", ",".join(fs)),
-    ]
+    ] + ([("rootfs", ",".join(fs))] if fs else [])
     return "".join("%s=%s\n" % kv for kv in lines)
 
 
