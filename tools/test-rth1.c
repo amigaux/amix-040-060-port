@@ -159,6 +159,11 @@ static void expect(const char *name, unsigned long dev, const char *swap, unsign
 	do { int ok_ = strcmp(rootfstype, want) == 0; \
 	     fprintf(stdout, "%s   rootfstype '%s'%s\n", ok_ ? "PASS" : "FAIL", rootfstype, ok_ ? "" : " (want it)"); \
 	     if (!ok_) fails++; } while (0)
+/* bo_name past "/dev/fakeswap" and its NUL: nothing of the linked name ("/dev/dsk/c6d0s2") is left */
+#define CHECKPAD() \
+	do { int i_, ok_ = 1; for (i_ = 14; i_ < 32; i_++) if (swapfile[0x10 + i_]) ok_ = 0; \
+	     fprintf(stdout, "%s   bo_name padded with NULs to 32 bytes\n", ok_ ? "PASS" : "FAIL"); \
+	     if (!ok_) fails++; } while (0)
 #endif
 
 #define CASE(name, setup, dev, swap, used, why, text) \
@@ -230,13 +235,16 @@ int main(void)
 #ifdef TEST_DLM
 	/* the loader record (C4-3 section 3): the RAM-disk root, rootfstype, and the disk kinds as before */
 	CASE("AXL1 ramdisk, swap none", (two_cards(), boot(0x10, 0, 0, 0), axl1(2, 0, "s5")),
-	     0x00500000, "", 3, 0, "RTH1: root ramdisk (b 20,0) from the loader record, no swap, rootfstype s5");
+	     0x00500000, "/dev/fakeswap", 3, 0,
+	     "RTH1: root ramdisk (b 20,0) from the loader record, swap /dev/fakeswap, rootfstype s5");
 	CHECKFS("s5");
+	CHECKPAD();
 	CASE("AXL1 ramdisk, swap on a disk", (two_cards(), boot(0x10, 0, 0, 0), axl1(2, 1, "s5")),
 	     0x00500000, "/dev/dsk/c6d0s2", 3, 0, "RTH1: root ramdisk (b 20,0) from the loader record, rootfstype s5");
 	CASE("AXL1 ramdisk, no RTH1 at all", axl1(2, 0, "ufs"),
-	     0x00500000, "", 3, 0, "root ramdisk (b 20,0)");
+	     0x00500000, "/dev/fakeswap", 3, 0, "root ramdisk (b 20,0) from the loader record, swap /dev/fakeswap");
 	CHECKFS("ufs");
+	CHECKPAD();
 	CASE("AXL1 disk kind: RTH1/RTO1 as before", (two_cards(), boot(3, 3, 0x40000000, 0x144b0100), axl1(1, 1, "ufs")),
 	     0x00480013, "/dev/dsk/c3d0s2", 1, 0, "root c3d0s1 from the boot disk");
 	CHECKFS("ufs");

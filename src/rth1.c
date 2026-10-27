@@ -20,8 +20,10 @@
  *
  * On a module kernel rth1_apply() also reads the loader's AXL1 record (amix-dlm C4-3 section 3):
  * its rootfs name becomes rootfstype, so vfs_mountroot tries only that type, and a root selector of
- * kind ramdisk makes the root the ramdisk module's unit 0 (block major 20, minor 0) -- with no swap
- * device when the swap selector is none.  A disk root still comes from RTH1/RTO1 as before.
+ * kind ramdisk makes the root the ramdisk module's unit 0 (block major 20, minor 0).  A swap selector
+ * of none then names /dev/fakeswap, the stock miniroot's dummydisk (block major 19), as the floppy
+ * install kernel does: swapconf needs a node to look up, anon_resv a swap size to reserve from, and
+ * the installer swaps its target's slice in for the fake.  A disk root comes from RTH1/RTO1 as before.
  *
  * Kept free of division and of multiplication by a non-power of two: the 68060 implements neither
  * 64-bit form, and the cross compiler reaches for them (the scan060 gate in the pass checks).
@@ -61,6 +63,7 @@
 #define AXS_RAMDISK	2
 #define RD_ROOTDEV	0x00500000	/* makedevice(20, 0): the ramdisk module's unit 0 */
 #define ROOTFSTYPE_LEN	15		/* rootfstype's size in this kernel, with its NUL */
+#define FAKESWAP_PAD	32		/* bo_name bytes written: the name, then NULs over the linked one */
 #endif
 #define DEV_MAJOR	0xFFFC0000
 
@@ -229,13 +232,16 @@ rth1_apply()
 			rootfstype[i] = ((unsigned char *) a)[AXL_ROOTFS + i];
 		rootfstype[i] = 0;
 	}
-	/* a RAM-disk root: the ramdisk module's unit 0, and no swap device for `swap none' */
+	/* a RAM-disk root: the ramdisk module's unit 0, and the dummydisk swap for `swap none' */
 	if (a && (a[AXL_ROOTSEL] & 0xFF) == AXS_RAMDISK) {
+		static char fakeswap[] = "/dev/fakeswap";
+
 		rootdev = RD_ROOTDEV;
 		if ((a[AXL_SWAPSEL] & 0xFF) == AXS_NONE)
-			swapfile[BO_NAME] = 0;
+			for (i = 0; i < FAKESWAP_PAD; i++)
+				swapfile[BO_NAME + i] = i < sizeof fakeswap ? fakeswap[i] : 0;
 		printf("RTH1: root ramdisk (b 20,0) from the loader record%s, rootfstype %s\n",
-		       (a[AXL_SWAPSEL] & 0xFF) == AXS_NONE ? ", no swap" : "", rootfstype);
+		       (a[AXL_SWAPSEL] & 0xFF) == AXS_NONE ? ", swap /dev/fakeswap" : "", rootfstype);
 		rth1_used = 3;
 		rth1_why = 0;
 		return;
