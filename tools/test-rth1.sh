@@ -17,4 +17,12 @@ CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 m68k-cbm-sysv4-gcc $CF -c "$HERE/src/rth1.c" -o "$HERE/build/rth1-host.o"
 m68k-linux-gnu-gcc -static -O1 -Wall -Werror "$HERE/tools/test-rth1.c" "$HERE/build/rth1-host.o" \
 	-o "$HERE/build/test-rth1"
+echo "== the static form"
 qemu-m68k "$HERE/build/test-rth1"
+# the module form (relink-040-rth1.sh DLM=1 on a relink-040-sd4card.sh base): every case above, then
+# the loader record's root selector and rootfstype (amix-dlm C4-3 section 3)
+m68k-cbm-sysv4-gcc $CF -DRTH1_DLM -DSDCARDS=4 -c "$HERE/src/rth1.c" -o "$HERE/build/rth1-host-dlm.o"
+m68k-linux-gnu-gcc -static -O1 -Wall -Werror -DTEST_DLM "$HERE/tools/test-rth1.c" "$HERE/build/rth1-host-dlm.o" \
+	-o "$HERE/build/test-rth1-dlm"
+echo "== the module form"
+qemu-m68k "$HERE/build/test-rth1-dlm"

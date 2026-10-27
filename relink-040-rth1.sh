@@ -65,8 +65,8 @@ echo "[*] cross-compiling src/rth1.c (-m68040 dialect)"
 CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 OBJ="$HERE/build/rth1.o"
 DLM="${DLM:-0}"
-case $DLM in 0) DCF= PEND= NOMARC= TAF= ;; 1) DCF=-DRTH1_DLM PEND=dlm_marc_post NOMARC=rth1_nomarc TAF=-Wa,--defsym,RTH1_DLM=1 ;; *) echo "ERROR: DLM is 0 or 1"; exit 1;; esac
-[ $DLM = 0 ] || echo "      DLM=1: -DRTH1_DLM (rth1_nomarc before rth1_apply, dlm_marc_post after vfs_mountroot)"
+case $DLM in 0) DCF= PEND= NOMARC= TAF= ;; 1) DCF=-DRTH1_DLM PEND=dlm_marc_post NOMARC="rootfstype rth1_nomarc" TAF=-Wa,--defsym,RTH1_DLM=1 ;; *) echo "ERROR: DLM is 0 or 1"; exit 1;; esac
+[ $DLM = 0 ] || echo "      DLM=1: -DRTH1_DLM (AXL1's root selector and rootfstype, rth1_nomarc before rth1_apply, dlm_marc_post after vfs_mountroot)"
 m68k-cbm-sysv4-gcc $CF $DCF $SD4 -c "$HERE/src/rth1.c" -o "$OBJ"
 m68k-linux-gnu-size "$OBJ" | sed 's/^/      /'
 M=$(m68k-linux-gnu-readelf -SW "$OBJ" | awk '{gsub(/[][]/,"")} $2 ~ /^\.rodata/ {print $2}')

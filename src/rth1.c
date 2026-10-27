@@ -18,6 +18,11 @@
  * call to the core's dlm_marc_root() when the core has it (spec 30 section 3), so the arena's root
  * modules link, and their controllers register with sd, before sd's first open.
  *
+ * On a module kernel rth1_apply() also reads the loader's AXL1 record (amix-dlm C4-3 section 3):
+ * its rootfs name becomes rootfstype, so vfs_mountroot tries only that type, and a root selector of
+ * kind ramdisk makes the root the ramdisk module's unit 0 (block major 20, minor 0) -- with no swap
+ * device when the swap selector is none.  A disk root still comes from RTH1/RTO1 as before.
+ *
  * Kept free of division and of multiplication by a non-power of two: the 68060 implements neither
  * 64-bit form, and the cross compiler reaches for them (the scan060 gate in the pass checks).
  */
@@ -45,6 +50,18 @@
 #define RTO_MOBO	0x01
 
 #define SD_ROOTDEV	0x00480000	/* makedevice(18, 0) */
+#ifdef RTH1_DLM
+#define BI_AXL1		(BI_RTH1 + 0x38)	/* the loader record, bootinfo+0x6b0 (C4-3) */
+#define AXL1_MAGIC	0x41584C31	/* "AXL1" */
+#define AXL1_LONGS	31		/* 124 bytes, all summed */
+#define AXL_ROOTSEL	15		/* +60: kind | 0x100 mobo, id, base, unit, slice */
+#define AXL_SWAPSEL	20		/* +80: the same shape */
+#define AXL_ROOTFS	100		/* the root filesystem's name, NUL-padded */
+#define AXS_NONE	0
+#define AXS_RAMDISK	2
+#define RD_ROOTDEV	0x00500000	/* makedevice(20, 0): the ramdisk module's unit 0 */
+#define ROOTFSTYPE_LEN	15		/* rootfstype's size in this kernel, with its NUL */
+#endif
 #define DEV_MAJOR	0xFFFC0000
 
 extern unsigned char bootinfo[];
@@ -54,13 +71,14 @@ extern unsigned long sdcardbase();
 extern int sdopen();
 extern int vfs_mountroot();
 #ifdef RTH1_DLM
+extern char rootfstype[];
 extern int dlm_marc_post();
 extern void rth1_nomarc();	/* dlm_marc_root() once relink-040-dlm.sh has retargeted it */
 #endif
 extern int printf();
 
 /* Initialised away from 0 so a reader can tell "the hook never ran" from "built-in root". */
-unsigned long rth1_used = 0xFFFFFFFF;	/* 0 built in, 1 boot disk, 2 root record */
+unsigned long rth1_used = 0xFFFFFFFF;	/* 0 built in, 1 boot disk, 2 root record, 3 RAM disk */
 unsigned long rth1_why = 0xFFFFFFFF;	/* 0 used; else the reason the built-in root was kept */
 
 static char *rth1_reason[] = {
@@ -87,6 +105,20 @@ int n;
 		s += *p++;
 	return s == 0;
 }
+
+#ifdef RTH1_DLM
+/* The loader's AXL1 record, or 0: magic, version 1, length >= 124, the 31 longs summing to zero. */
+static unsigned long *
+rth1_axl1()
+{
+	unsigned long *a = (unsigned long *) (bootinfo + BI_AXL1);
+
+	if (a[0] != AXL1_MAGIC || (a[1] >> 16) != 1 || (a[1] & 0xFFFF) < AXL1_LONGS * 4
+	    || !rth1_sum0(a, AXL1_LONGS))
+		return 0;
+	return a;
+}
+#endif
 
 /*
  * The Amix card whose controller matches, or -1 unless exactly one does.  By board base when
@@ -187,6 +219,28 @@ rth1_apply()
 	unsigned long *r = (unsigned long *) (bootinfo + BI_RTH1);
 	unsigned long unit = 0, base = 0, id = 0, v;
 	int mobo = 0, used = 0, why = 0, card = -1;
+#ifdef RTH1_DLM
+	unsigned long *a = rth1_axl1();
+	int i;
+
+	/* rootfstype from the loader record: vfs_mountroot then tries only that type */
+	if (a && ((unsigned char *) a)[AXL_ROOTFS]) {
+		for (i = 0; i < ROOTFSTYPE_LEN - 1 && ((unsigned char *) a)[AXL_ROOTFS + i]; i++)
+			rootfstype[i] = ((unsigned char *) a)[AXL_ROOTFS + i];
+		rootfstype[i] = 0;
+	}
+	/* a RAM-disk root: the ramdisk module's unit 0, and no swap device for `swap none' */
+	if (a && (a[AXL_ROOTSEL] & 0xFF) == AXS_RAMDISK) {
+		rootdev = RD_ROOTDEV;
+		if ((a[AXL_SWAPSEL] & 0xFF) == AXS_NONE)
+			swapfile[BO_NAME] = 0;
+		printf("RTH1: root ramdisk (b 20,0) from the loader record%s, rootfstype %s\n",
+		       (a[AXL_SWAPSEL] & 0xFF) == AXS_NONE ? ", no swap" : "", rootfstype);
+		rth1_used = 3;
+		rth1_why = 0;
+		return;
+	}
+#endif
 
 	if (!rth1_disk_rooted())
 		why = 7;

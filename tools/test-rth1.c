@@ -12,14 +12,14 @@
 unsigned char bootinfo[0x780] __attribute__((aligned(4)));
 unsigned long rootdev;
 char swapfile[160];
-static unsigned long cardbase[2];
+static unsigned long cardbase[4];	/* the four-card form reads cards 2-3 too */
 static int sd_inited;		/* sd registers its controllers lazily, in sdopen() */
 static int mounted, applied_before_mount;
 static char line[256];
 
-unsigned long sdcardbase(int c) { return (sd_inited && c >= 0 && c < 2) ? cardbase[c] : 0; }
+unsigned long sdcardbase(int c) { return (sd_inited && c >= 0 && c < 4) ? cardbase[c] : 0; }
 
-int sdopen(int c) { sd_inited = 1; return (c >= 0 && c < 2 && cardbase[c]) ? 0 : 6; }
+int sdopen(int c) { sd_inited = 1; return (c >= 0 && c < 4 && cardbase[c]) ? 0 : 6; }
 
 int printf(const char *spec, ...)
 {
@@ -30,6 +30,12 @@ int printf(const char *spec, ...)
 	va_end(rest);
 	return 0;
 }
+
+#ifdef TEST_DLM
+char rootfstype[15];
+int dlm_marc_post(void) { return 0; }
+void rth1_nomarc(void) { }
+#endif
 
 /* what rth1.o exports */
 extern void rth1_apply(void);
@@ -52,11 +58,14 @@ static void reset(void)
 	memset(swapfile, 0, sizeof swapfile);
 	strcpy(swapfile + 0x10, "/dev/dsk/c6d0s2");
 	rootdev = 0x00480016;			/* c6d0s1, as stamped */
-	cardbase[0] = cardbase[1] = 0;
+	memset(cardbase, 0, sizeof cardbase);
 	sd_inited = 0;
 	rth1_used = rth1_why = 0xFFFFFFFF;
 	line[0] = 0;
 	mounted = 0;
+#ifdef TEST_DLM
+	memset(rootfstype, 0, sizeof rootfstype);
+#endif
 }
 
 static void configdev(int i, unsigned long base, unsigned short mfr, unsigned char prod)
@@ -102,6 +111,23 @@ static void rootrec(unsigned long unit, unsigned long base, unsigned long id, un
 	seal(RTH1, 7);
 }
 
+#ifdef TEST_DLM
+/* the loader's AXL1 record at bootinfo+0x6b0 (amix-dlm loader/common/bootinfo.c ax_axl1_build) */
+#define AXL1 ((unsigned long *) (bootinfo + 0x6b0))
+static void axl1(unsigned long rootkind, unsigned long swapkind, const char *rootfs)
+{
+	memset(AXL1, 0, 124);
+	AXL1[0] = 0x41584c31;
+	AXL1[1] = 0x0001007c;
+	AXL1[15] = rootkind;			/* +60 the root selector's kind */
+	AXL1[20] = swapkind;			/* +80 the swap selector's kind */
+	strncpy((char *) AXL1 + 100, rootfs, 15);
+	AXL1[29] = 0x0fe00000;			/* +116 the image's address and size */
+	AXL1[30] = 0x00100000;
+	seal(AXL1, 31);
+}
+#endif
+
 /* the machine of most cases: Z3660 card 0, A4092 card 1, both AutoConfig boards */
 static void two_cards(void)
 {
@@ -127,6 +153,13 @@ static void expect(const char *name, unsigned long dev, const char *swap, unsign
 		fails++;
 	}
 }
+
+#ifdef TEST_DLM
+#define CHECKFS(want) \
+	do { int ok_ = strcmp(rootfstype, want) == 0; \
+	     fprintf(stdout, "%s   rootfstype '%s'%s\n", ok_ ? "PASS" : "FAIL", rootfstype, ok_ ? "" : " (want it)"); \
+	     if (!ok_) fails++; } while (0)
+#endif
 
 #define CASE(name, setup, dev, swap, used, why, text) \
 	do { reset(); setup; rth1_apply(); expect(name, dev, swap, used, why, text); \
@@ -193,6 +226,33 @@ int main(void)
 	     0x00480016, "/dev/dsk/c6d0s2", 0, 6, "built in (controller not present)");
 	CASE("rootdev upper bits kept", (two_cards(), rootdev = 0x00480026, boot(3, 3, 0x40000000, 0x144b0100)),
 	     0x00480013, "/dev/dsk/c3d0s2", 1, 0, "root c3d0s1");
+
+#ifdef TEST_DLM
+	/* the loader record (C4-3 section 3): the RAM-disk root, rootfstype, and the disk kinds as before */
+	CASE("AXL1 ramdisk, swap none", (two_cards(), boot(0x10, 0, 0, 0), axl1(2, 0, "s5")),
+	     0x00500000, "", 3, 0, "RTH1: root ramdisk (b 20,0) from the loader record, no swap, rootfstype s5");
+	CHECKFS("s5");
+	CASE("AXL1 ramdisk, swap on a disk", (two_cards(), boot(0x10, 0, 0, 0), axl1(2, 1, "s5")),
+	     0x00500000, "/dev/dsk/c6d0s2", 3, 0, "RTH1: root ramdisk (b 20,0) from the loader record, rootfstype s5");
+	CASE("AXL1 ramdisk, no RTH1 at all", axl1(2, 0, "ufs"),
+	     0x00500000, "", 3, 0, "root ramdisk (b 20,0)");
+	CHECKFS("ufs");
+	CASE("AXL1 disk kind: RTH1/RTO1 as before", (two_cards(), boot(3, 3, 0x40000000, 0x144b0100), axl1(1, 1, "ufs")),
+	     0x00480013, "/dev/dsk/c3d0s2", 1, 0, "root c3d0s1 from the boot disk");
+	CHECKFS("ufs");
+	CASE("AXL1 none: the fallback", (two_cards(), axl1(0, 0, "")),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 1, "root c6d0s1 built in (no record)");
+	CHECKFS("");
+	CASE("AXL1 bad checksum: ignored", (two_cards(), boot(0x10, 0, 0, 0), axl1(2, 0, "s5"), AXL1[15] ^= 0x100),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 4, "built in (no boot node)");
+	CHECKFS("");
+	CASE("AXL1 wrong magic: ignored", (two_cards(), axl1(2, 0, "s5"), AXL1[0] = 0x41584c32),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 1, "built in (no record)");
+	CHECKFS("");
+	CASE("card 2 root record (four cards)", (two_cards(), cardbase[2] = 0xdd2020, boot(3, 6, 0x40000000, 0x144b0100),
+	     rootrec(6, 0xdd2020, 0, 1)),
+	     0x00480096, "/dev/dsk/c16d0s2", 2, 0, "root c16d0s1 from the root record");
+#endif
 
 	/* the wrapper */
 	reset();
