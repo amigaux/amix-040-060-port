@@ -46,6 +46,8 @@
 # A core that reads dlm_static_root (core patch 0037, C4-4 version 4) gets the base's root= list
 # (tools/kabi-sidecar.py --root) in ident.o: marc_root skips a root module for a controller the
 # kernel drives itself.
+# The fault resolver's "DBG krnxflt FAILEXIT" console line goes behind krnx_fail_print (0 here; the
+# base and static families keep it): src/krnx_quiet040.s, src/patch_krnx_quiet.py.
 # From kabi k46.1.1 on, bdevsw[20] -- the stock RAM disk's block row -- is freed for the module
 # ramdisk (src/patch_free_brow.py): every routine nodev, d_flag &nullflag (0).
 #
@@ -301,8 +303,10 @@ if m68k-linux-gnu-nm "$O/add.o" | grep -qE " T dlm_halt\$"; then
 	m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/dlm_halt040.s" -o "$HALTO"
 	echo "      dlm_halt: in the core -- mdboot's haltsys and rtnfirm calls go through it (dlm_halt040.o)"
 fi
-echo "[*] ld -r: base + the core${HALTO:+ + dlm_halt040.o} + dlm_tail040.o (LAST: the .balign 4)"
-m68k-cbm-sysv4-ld -r -o "$OUT" "$STAGE" "$O/add.o" $HALTO "$O/dlm_tail040.o"
+# a release edit of the module kernel: the fault resolver's FAILEXIT line behind krnx_fail_print (0)
+m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/krnx_quiet040.s" -o "$O/krnx_quiet040.o"
+echo "[*] ld -r: base + the core${HALTO:+ + dlm_halt040.o} + krnx_quiet040.o + dlm_tail040.o (LAST: the .balign 4)"
+m68k-cbm-sysv4-ld -r -o "$OUT" "$STAGE" "$O/add.o" $HALTO "$O/krnx_quiet040.o" "$O/dlm_tail040.o"
 NM_OUT=$(m68k-linux-gnu-nm "$OUT")
 LEAK=$(echo "$NM_OUT" | awk '$1=="U" && $2!="edata" && $2!="end" && $2!="etext" {print $2}')
 [ -z "$LEAK" ] || { echo "[FAIL] unresolved symbols:"; echo "$LEAK"; exit 1; }
@@ -324,6 +328,8 @@ if [ $MARC = 1 ]; then
 	run_step indent python3 "$HERE/src/patch_dlm_call.py" "$OUT" rth1_mountroot rth1_nomarc dlm_marc_root
 	run_step indent python3 "$HERE/src/patch_dlm_call.py" --check "$OUT" rth1_mountroot rth1_nomarc dlm_marc_root
 fi
+run_step indent python3 "$HERE/src/patch_krnx_quiet.py" "$OUT"
+run_step indent python3 "$HERE/src/patch_krnx_quiet.py" --check "$OUT"
 if [ $FREEB20 = 1 ]; then
 	run_step indent python3 "$HERE/src/patch_free_brow.py" "$OUT"
 	run_step indent python3 "$HERE/src/patch_free_brow.py" --check "$OUT"
