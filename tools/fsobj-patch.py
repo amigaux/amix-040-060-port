@@ -23,9 +23,17 @@ What is checked, and refused:
 The sites are the scripts' own tables (P / TEXT; CANARY / PRODUCER), loaded from their source
 without running them.
 
+Module-only sites (MODULE_ONLY below): 2 KiB-page arithmetic the scripts leave alone, because
+the static kernel is consistent without it, converted in the module body only.  A table applies
+to an object that defines every function it names (ufs/exp; s5/exp has none).  Each site:
+  6. lies inside the function it names, outside every relocated field of OBJ, and overlaps no
+     site of the scripts;
+  7. reads its old bytes in OBJ, in UNIX and in BASE (the base does not convert it).
+--static-only leaves them out (the object the scripts' sites alone give).
+
 Output: --triples prints one line per site applied in BASE, `.text <offset> <old> <new>
-<script>:<name>`, the offset relative to OBJ's .text.  -o writes OBJ with those bytes changed and
-nothing else.
+<script>:<name>`, the offset relative to OBJ's .text, then one per module-only site, ending
+`module:<function>`.  -o writes OBJ with those bytes changed and nothing else.
 """
 import ast
 import hashlib
@@ -41,6 +49,28 @@ SCRIPTS = ["patch_modelb.py", "patch_modelb_pager.py", "patch_writeback.py", "pa
            "patch_pagecreate.py"]
 STT_SECTION = 3
 WIDTH = {1: 4, 2: 2, 3: 1, 4: 4, 5: 2, 6: 1}    # R_68K_32/16/8, PC32/16/8
+
+# k46 runs 4 KiB pages: PAGESIZE 4096, PAGEOFFSET 4095, PAGESHIFT 12.  The stock object has
+# them as 2048, 2047 and 11.  (function, offset in OBJ's .text, old, new, why); the source
+# lines are SVR4's fs/ufs/ufs_blklist.c and ufs_vnops.c.
+H = bytes.fromhex
+MODULE_ONLY = {"ufs": [
+    # ufs_allocmap: the map of a file whose blocks are smaller than a page (ufs_blklist.c:94-97)
+    ("ufs_allocmap", 0x388c, H("0c81000007ff"), H("0c8100000fff"), "PAGESIZE > bsize: cmpil #PAGESIZE-1"),
+    ("ufs_allocmap", 0x3896, H("203c00000800"), H("203c00001000"), "bpp = PAGESIZE/bsize: the numerator"),
+    ("ufs_allocmap", 0x38a4, H("068100000800"), H("068100001000"), "npblks: i_size + PAGESIZE"),
+    ("ufs_allocmap", 0x38aa, H("7a0b"), H("7a0c"), "npblks: >> PAGESHIFT"),
+    # ufs_freemap: the same count, so kmem_free gets the size kmem_alloc got (ufs_blklist.c:258-262)
+    ("ufs_freemap", 0x3b0c, H("0c81000007ff"), H("0c8100000fff"), "PAGESIZE > bsize: cmpil #PAGESIZE-1"),
+    ("ufs_freemap", 0x3b16, H("203c00000800"), H("203c00001000"), "bpp = PAGESIZE/bsize: the numerator"),
+    ("ufs_freemap", 0x3b24, H("0681000007ff"), H("068100000fff"), "nblks: i_size + PAGEOFFSET"),
+    ("ufs_freemap", 0x3b2a, H("740b"), H("740c"), "nblks: >> PAGESHIFT"),
+    # ufs_addmap / ufs_delmap: i_mapcnt +=/-= btopr(len), mapped pages (ufs_vnops.c:2313, :2335)
+    ("ufs_addmap", 0xc26c, H("0680000007ff"), H("068000000fff"), "btopr(len): + PAGEOFFSET"),
+    ("ufs_addmap", 0xc272, H("720b"), H("720c"), "btopr(len): >> PAGESHIFT"),
+    ("ufs_delmap", 0xc2a2, H("0680000007ff"), H("068000000fff"), "btopr(len): + PAGEOFFSET"),
+    ("ufs_delmap", 0xc2a8, H("720b"), H("720c"), "btopr(len): >> PAGESHIFT"),
+]}
 
 
 def die(msg):
@@ -115,12 +145,13 @@ def main():
     a = sys.argv[1:]
     try:
         stock, base = a[a.index("--stock") + 1], a[a.index("--base") + 1]
-        rest = [x for i, x in enumerate(a) if x not in ("--stock", "--base", "--triples", "-o")
+        rest = [x for i, x in enumerate(a) if x not in ("--stock", "--base", "--triples", "-o",
+                                                          "--static-only")
                 and (i == 0 or a[i - 1] not in ("--stock", "--base", "-o"))]
         obj, = rest
         out = a[a.index("-o") + 1] if "-o" in a else None
     except (ValueError, IndexError):
-        die("usage: fsobj-patch.py --stock UNIX --base BASE OBJ (--triples | -o OUT)")
+        die("usage: fsobj-patch.py --stock UNIX --base BASE OBJ (--triples | -o OUT) [--static-only]")
     if ("--triples" in a) == (out is not None):
         die("one of --triples and -o")
     U, B, O = rows.Elf(stock), rows.Elf(base), rows.Elf(obj)
@@ -144,6 +175,7 @@ def main():
     if secbytes(U, ".data")[ds:ranges[".data"][1]] != secbytes(B, ".data")[ds:ranges[".data"][1]]:
         die(".data 0x%x-0x%x differs between the stock kernel and the base" % ranges[".data"])
     owner = {}
+    listed = set()      # every byte of every script site in the ranges, applied or not
     applied = []
     canaries = unapplied = 0
     for script in SCRIPTS:
@@ -152,6 +184,7 @@ def main():
             end = vaddr + len(old)
             if end <= lo or vaddr >= hi:
                 continue
+            listed.update(range(vaddr, end))
             if vaddr < lo or end > hi:
                 die("%s:%s @0x%x straddles the object's edge" % (script, name, vaddr))
             if ut[vaddr:end] != old:
@@ -188,27 +221,71 @@ def main():
                 if o in owner:
                     die("@0x%x: a patched byte in the relocated field of %s+%d" % (o, n, add))
 
+    # 6, 7. the module-only sites, on the object (offsets relative to its .text)
+    ot = secbytes(O, ".text")
+    funcs = {}
+    ti = O.names.index(".text")
+    for i in range(O.syn):
+        s = O.sym(i)
+        if s["shndx"] == ti and s["info"] & 0xF == 2:     # STT_FUNC
+            funcs[s["name"]] = (s["value"], s["value"] + rows.u32(O.b, O.syo + i * O.sye + 8))
+    orel = relocs(O, ".text")
+    module = []
+    for fs, table in sorted(MODULE_ONLY.items()):
+        names = {t[0] for t in table}
+        if not names & set(funcs):
+            continue
+        if not names <= set(funcs):
+            die("the object defines %s of the %s module-only table but not %s"
+                % (",".join(sorted(names & set(funcs))), fs, ",".join(sorted(names - set(funcs)))))
+        for func, off, old, new, why in table:
+            end = off + len(old)
+            where = "module %s:%s @0x%x (%s)" % (fs, func, off, why)
+            if len(old) != len(new) or old == new:
+                die("%s: old and new are not two different byte strings of one length" % where)
+            if not funcs[func][0] <= off < end <= funcs[func][1]:
+                die("%s lies outside %s, 0x%x-0x%x" % (where, func, funcs[func][0], funcs[func][1]))
+            for name, have in (("the object", ot), ("the stock kernel", ut[lo:hi]), ("the base", bt[lo:hi])):
+                if have[off:end] != old:
+                    die("%s: %s has %s, the table expects %s" % (where, name, have[off:end].hex(), old.hex()))
+            for r, (t, n, add) in orel.items():
+                if r < end and off < r + WIDTH.get(t, 4):
+                    die("%s overlaps the relocated field of %s+%d @0x%x" % (where, n, add, r))
+            if any(lo + o in listed for o in range(off, end)):
+                die("%s overlaps a site of the patch scripts" % where)
+            module.append((lo + off, old, new, "module", func))
+    if "--static-only" in a:
+        module = []
+    mbytes = sum(1 for _, old, new, _, _ in module for x, y in zip(old, new) if x != y)
+
     applied.sort()
+    module.sort()
     tag = os.path.basename(os.path.dirname(obj)) or obj
     sys.stderr.write("fsobj-patch: %s (sha256 %s): .text 0x%x-0x%x, .data 0x%x-0x%x of the stock kernel; "
-                     "%d sites applied in the base (%d bytes), %d listed but not applied, %d canaries hold\n"
+                     "%d sites applied in the base (%d bytes), %d listed but not applied, %d canaries hold; "
+                     "%d module-only sites (%d bytes)\n"
                      % (tag, hashlib.sha256(open(obj, "rb").read()).hexdigest()[:8], lo, hi, ds,
-                        ranges[".data"][1], len(applied), len(diff), unapplied, canaries))
+                        ranges[".data"][1], len(applied), len(diff), unapplied, canaries, len(module), mbytes))
     if out is None:
-        for vaddr, old, new, script, name in applied:
-            print(".text 0x%05x %s %s %s:%s" % (vaddr - lo, old.hex(), new.hex(), script[:-3], name))
+        for vaddr, old, new, script, name in applied + module:
+            print(".text 0x%05x %s %s %s:%s" % (vaddr - lo, old.hex(), new.hex(),
+                                                script[:-3] if script.endswith(".py") else script, name))
         return
     b = bytearray(O.b)
     to = O.sec[".text"]["offset"]
-    for vaddr, old, new, script, name in applied:
+    want = bytearray(bt[lo:hi])
+    for vaddr, old, new, script, name in applied + module:
         b[to + vaddr - lo:to + vaddr - lo + len(new)] = new
+        want[vaddr - lo:vaddr - lo + len(new)] = new
     open(out, "wb").write(b)
-    # read back: the object differs from OBJ exactly in the changed bytes, and its .text is the base's
+    # read back: the object differs from OBJ exactly in the changed bytes, and its .text is the
+    # base's with the module-only sites converted
     w = rows.Elf(out)
-    if secbytes(w, ".text") != bt[lo:hi] or sum(1 for i in range(len(b)) if b[i] != O.b[i]) != len(diff):
-        die("%s does not read back as the base's bytes" % out)
-    sys.stderr.write("fsobj-patch: wrote %s (sha256 %s), its .text = the base's 0x%x-0x%x\n"
-                     % (out, hashlib.sha256(bytes(b)).hexdigest()[:8], lo, hi))
+    if secbytes(w, ".text") != want or sum(1 for i in range(len(b)) if b[i] != O.b[i]) != len(diff) + mbytes:
+        die("%s does not read back as the base's bytes and the module-only sites" % out)
+    sys.stderr.write("fsobj-patch: wrote %s (sha256 %s), its .text = the base's 0x%x-0x%x%s\n"
+                     % (out, hashlib.sha256(bytes(b)).hexdigest()[:8], lo, hi,
+                        " + %d module-only sites" % len(module) if module else ""))
 
 
 main()
