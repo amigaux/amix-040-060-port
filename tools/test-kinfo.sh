@@ -74,6 +74,8 @@ if command -v m68k-linux-gnu-gcc >/dev/null 2>&1 && command -v qemu-m68k >/dev/n
 		|| { cat "$W/cards.txt"; fail "the card table (test-kinfo-cards.c)"; }
 	grep -q "PASS   card 0: id 00000004 base 00000000 flags 1" "$W/cards.txt" && pass "the Z3660 at its window is mobo id 4" \
 		|| fail "the Z3660 at its window is mobo id 4"
+	qemu-m68k "$W/test-kinfo-cards" a4000t > "$W/cards-a4kt.txt" && pass "the A4000T's 53C710 is mobo id 3 beside Gayle" \
+		|| { cat "$W/cards-a4kt.txt"; fail "the A4000T's 53C710 is mobo id 3 beside Gayle"; }
 else
 	echo "SKIP the card table: no m68k-linux-gnu-gcc or qemu-m68k"
 fi

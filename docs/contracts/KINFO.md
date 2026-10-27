@@ -59,10 +59,11 @@ The layout is C2-1 §2: big-endian, 580 bytes with no modules.
 - Any other card is a motherboard controller: base 0, flags 0x1, and an id with a zero manufacturer:
   - 1 = `a3000-wd`, the row named "A3000 Internal SCSI";
   - 2 = `gayle`, the row named "A4000 IDE";
+  - 3 = `a4000t-710`, the row named "A4000T onboard SCSI" (amix-a4091's A4000T target);
   - 4 = `z3660-window`, the row named "Z3660 SCSI" when no AutoConfig board is at its address (the
     Z3660 at its window, amix-dlm C4-1 section 5.1); with its board it is `zorro:144b:01`;
   - 0 = not known.
-- C2-1 also lists 3 `a4000t-710`. No driver on this line registers it today.
+- src/rth1.c names the motherboard cards by the same rule (amix-dlm C4-1 section 5.2).
 - The Gayle IDE row hands sd a sort key, not a bus address (`src/ide_sd_glue040.s`). That is why a motherboard
   card reports base 0, not what sd recorded.
 
@@ -143,6 +144,8 @@ The chain leaves z3660eth, zz9000 and monsw out (majors 49, 51 and 52 belong to 
   - last, `root` and `rootfs` as for a static kernel. Through stage 3 the root controllers and filesystems
     stay built in, and kbootset's gate 3 needs them.
     `rootfs` lists only what is linked in (amix-dlm C3-3 version 6), so a cut without ufs and s5 has none.
+  - after them, `rth1=2` (C2-3 version 9) when the image's `src/rth1.c` matches a motherboard controller's
+    record by its id (amix-dlm C4-1 section 5.2; the image has `rth1_moboid`), on any kernel.
 
 **The cut without ufs and s5 (2026-10-27, amix-dlm S5-11).** `relink-040-carve.sh` runs first, on
 `relink-040.sh`'s output, before any pass that branches across the ranges. ufs and s5 become dead and

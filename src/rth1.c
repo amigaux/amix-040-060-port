@@ -53,6 +53,12 @@
 
 #define Z3660_ID	0x144B0100	/* the Z3660's AutoConfig id, its one identity (amix-dlm C4-1 5.1) */
 #define Z3660_WINDOW	0x10000000	/* its window when not AutoConfig'd (the 68030 mode) */
+#define MOBO_MAX	3		/* motherboard ids a record names: 1 a3000-wd, 2 gayle, 3 a4000t-710 */
+
+/* rth1_card()'s motherboard rules */
+#define MB_NONE		0		/* a Zorro board, by base or id */
+#define MB_BOOT		1		/* RTH_BMOBO: any card with no AutoConfig board */
+#define MB_RECORD	2		/* an RTO1 `mobo' record: the same, never the Z3660 window */
 
 #define SD_ROOTDEV	0x00480000	/* makedevice(18, 0) */
 #ifdef RTH1_DLM
@@ -74,6 +80,7 @@ extern unsigned char bootinfo[];
 extern unsigned long rootdev;
 extern char swapfile[];
 extern unsigned long sdcardbase();
+extern char *sdhardwarename();
 extern int sdopen();
 extern int vfs_mountroot();
 #ifdef RTH1_DLM
@@ -126,10 +133,46 @@ rth1_axl1()
 }
 #endif
 
+static int
+rth1_streq(a, b)
+char *a, *b;
+{
+	while (*a && *a == *b)
+		a++, b++;
+	return *a == *b;
+}
+
+/*
+ * A card's motherboard id by the name sd holds for it, the rule of kinfo's card table (amix-dlm
+ * C2-1 section 2.1): 1 a3000-wd, 2 gayle, 3 a4000t-710; 0 for any other name.
+ */
+static int
+rth1_moboid(c)
+int c;
+{
+	static char a3000[] = "A3000 Internal SCSI", gayle[] = "A4000 IDE", a4kt[] = "A4000T onboard SCSI";
+	char *nm = sdhardwarename(c);
+
+	if (nm == 0)
+		return 0;
+	if (rth1_streq(nm, a3000))
+		return 1;
+	if (rth1_streq(nm, gayle))
+		return 2;
+	if (rth1_streq(nm, a4kt))
+		return 3;
+	return 0;
+}
+
 /*
  * The Amix card whose controller matches, or -1 unless exactly one does.  By board base when
  * base is nonzero; else by manufacturer/product through the autocon entry at that controller's
  * base; or, for mobo, the controller whose base is no AutoConfig board at all.
+ *
+ * A record whose id is a motherboard id 1-3 (a zero manufacturer, amix-dlm C4-1 section 5.2)
+ * matches the card with no AutoConfig board whose motherboard id (rth1_moboid) is that code.  An
+ * RTO1 `mobo' record (id 0, the form before C4-1 version 6) keeps the any-such-card rule but never
+ * matches the card at the Z3660 window; the boot device's RTH_BMOBO keeps the old rule.
  *
  * The Z3660 is one controller in either of its modes (amix-dlm C4-1 section 5.1): id 144b0100
  * matches the card whose autocon entry is that board, or the card registered at the window
@@ -142,6 +185,7 @@ unsigned long base, id;
 int mobo;
 {
 	int c, i, n = 0, found = -1, z3660 = !mobo && id == Z3660_ID;
+	int code = !mobo && id >= 1 && id <= MOBO_MAX ? (int) id : 0;
 
 	if (!mobo && base == 0 && id == 0)
 		return -1;
@@ -165,7 +209,9 @@ int mobo;
 				break;
 			}
 		if (mobo)
-			match = hit == 0;
+			match = hit == 0 && (mobo == MB_BOOT || b != Z3660_WINDOW);
+		else if (code)
+			match = hit == 0 && rth1_moboid(c) == code;
 		else if (base != 0 && !z3660)
 			match = b == base;
 		else
@@ -274,7 +320,7 @@ rth1_apply()
 			unit = o[2];
 			base = o[3];
 			id = o[4];
-			mobo = (o[5] & RTO_MOBO) != 0;
+			mobo = (o[5] & RTO_MOBO) ? MB_RECORD : MB_NONE;
 			used = 2;
 		}
 	} else if (!(r[2] & RTH_BOOT))
@@ -285,7 +331,7 @@ rth1_apply()
 			base = r[4];
 			id = r[5];
 		} else
-			mobo = (r[2] & RTH_BMOBO) != 0;
+			mobo = (r[2] & RTH_BMOBO) ? MB_BOOT : MB_NONE;
 		used = 1;
 	}
 	if (why == 0 && unit > 7)

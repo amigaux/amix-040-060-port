@@ -13,11 +13,14 @@ unsigned char bootinfo[0x780] __attribute__((aligned(4)));
 unsigned long rootdev;
 char swapfile[160];
 static unsigned long cardbase[4];	/* the four-card form reads cards 2-3 too */
+static char *cardname[4];		/* sd's name for each card (sdhardwarename) */
 static int sd_inited;		/* sd registers its controllers lazily, in sdopen() */
 static int mounted, applied_before_mount;
 static char line[256];
 
 unsigned long sdcardbase(int c) { return (sd_inited && c >= 0 && c < 4) ? cardbase[c] : 0; }
+
+char *sdhardwarename(int c) { return (sd_inited && c >= 0 && c < 4) ? cardname[c] : 0; }
 
 int sdopen(int c) { sd_inited = 1; return (c >= 0 && c < 4 && cardbase[c]) ? 0 : 6; }
 
@@ -59,6 +62,7 @@ static void reset(void)
 	strcpy(swapfile + 0x10, "/dev/dsk/c6d0s2");
 	rootdev = 0x00480016;			/* c6d0s1, as stamped */
 	memset(cardbase, 0, sizeof cardbase);
+	memset(cardname, 0, sizeof cardname);
 	sd_inited = 0;
 	rth1_used = rth1_why = 0xFFFFFFFF;
 	line[0] = 0;
@@ -141,7 +145,16 @@ static void two_cards(void)
 static void window_gayle(void)
 {
 	cardbase[0] = 0x10000000;
+	cardname[0] = "Z3660 SCSI";
 	cardbase[1] = 0xfffffff0;
+	cardname[1] = "A4000 IDE";
+}
+
+/* a motherboard card: its base (no AutoConfig board there) and sd's name for it */
+static void mobocard(int c, unsigned long base, char *name)
+{
+	cardbase[c] = base;
+	cardname[c] = name;
 }
 
 static int fails;
@@ -256,6 +269,32 @@ int main(void)
 	CASE("Z3660 record, no Z3660 card", (window_gayle(), cardbase[0] = 0x00dd0000, boot(0x10, 0, 0, 0),
 	     rootrec(1, 0, 0x144b0100, 0)),
 	     0x00480016, "/dev/dsk/c6d0s2", 0, 6, "built in (controller not present)");
+	/* a motherboard controller's record names it (amix-dlm C4-1 section 5.2): id 1-3, no mobo flag */
+	CASE("mobo id 2 (gayle) beside the window", (window_gayle(), boot(0x10, 0, 0, 0), rootrec(1, 0, 2, 0)),
+	     0x00480019, "/dev/dsk/c9d0s2", 2, 0, "root c9d0s1 from the root record (board fffffff0 id 0 unit 1 = card 1)");
+	CASE("mobo id 1 (a3000-wd)", (configdev(0, 0x40000000, 0x144b, 1), mobocard(0, 0xdd0000, "A3000 Internal SCSI"),
+	     cardbase[1] = 0x40000000, boot(0x10, 0, 0, 0), rootrec(3, 0, 1, 0)),
+	     0x00480013, "/dev/dsk/c3d0s2", 2, 0, "root c3d0s1 from the root record (board dd0000 id 0 unit 3 = card 0)");
+	CASE("mobo id 3 (a4000t-710) beside gayle", (mobocard(0, 0xdd0000, "A4000T onboard SCSI"),
+	     mobocard(1, 0xfffffff0, "A4000 IDE"), boot(0x10, 0, 0, 0), rootrec(2, 0, 3, 0)),
+	     0x00480012, "/dev/dsk/c2d0s2", 2, 0, "root c2d0s1 from the root record (board dd0000 id 0 unit 2 = card 0)");
+	CASE("mobo id 2 (gayle) beside the a4000t-710", (mobocard(0, 0xdd0000, "A4000T onboard SCSI"),
+	     mobocard(1, 0xfffffff0, "A4000 IDE"), boot(0x10, 0, 0, 0), rootrec(0, 0, 2, 0)),
+	     0x00480018, "/dev/dsk/c8d0s2", 2, 0, "root c8d0s1 from the root record (board fffffff0 id 0 unit 0 = card 1)");
+	CASE("old mobo record beside the window", (window_gayle(), boot(0x10, 0, 0, 0), rootrec(1, 0, 0, 1)),
+	     0x00480019, "/dev/dsk/c9d0s2", 2, 0, "root c9d0s1 from the root record (board fffffff0");
+	CASE("mobo id: two cards answer", (mobocard(0, 0xdd2020, "A4000 IDE"), mobocard(1, 0xfffffff0, "A4000 IDE"),
+	     boot(0x10, 0, 0, 0), rootrec(1, 0, 2, 0)),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 6, "built in (controller not present)");
+	CASE("mobo id: no such card", (window_gayle(), boot(0x10, 0, 0, 0), rootrec(1, 0, 3, 0)),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 6, "built in (controller not present)");
+	CASE("mobo id: never an AutoConfig board's card", (configdev(0, 0xdd0000, 0x0202, 1),
+	     mobocard(0, 0xdd0000, "A3000 Internal SCSI"), boot(0x10, 0, 0, 0), rootrec(1, 0, 1, 0)),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 6, "built in (controller not present)");
+	CASE("boot RTH_BMOBO keeps the old rule", (window_gayle(), boot(1 | 4, 2, 0, 0)),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 6, "built in (controller not present)");
+	CASE("boot RTH_BMOBO, the window alone", (cardbase[0] = 0x10000000, boot(1 | 4, 2, 0, 0)),
+	     0x00480012, "/dev/dsk/c2d0s2", 1, 0, "root c2d0s1 from the boot disk (board 10000000");
 	CASE("rootdev upper bits kept", (two_cards(), rootdev = 0x00480026, boot(3, 3, 0x40000000, 0x144b0100)),
 	     0x00480013, "/dev/dsk/c3d0s2", 1, 0, "root c3d0s1");
 
@@ -288,6 +327,9 @@ int main(void)
 	     configdev(1, 0, 0, 0), cardbase[1] = 0xdd0000, cardbase[2] = 0x10000000, boot(0x10, 0, 0, 0),
 	     rootrec(1, 0, 0x144b0100, 0)),
 	     0x00480091, "/dev/dsk/c11d0s2", 2, 0, "root c11d0s1 from the root record (board 10000000 id 144b01 unit 1 = card 2)");
+	CASE("mobo id 2 on card 3 (four cards)", (two_cards(), mobocard(2, 0x10000000, "Z3660 SCSI"),
+	     mobocard(3, 0xfffffff0, "A4000 IDE"), boot(0x10, 0, 0, 0), rootrec(4, 0, 2, 0)),
+	     0x0048009c, "/dev/dsk/c1cd0s2", 2, 0, "root c1cd0s1 from the root record (board fffffff0 id 0 unit 4 = card 3)");
 	CASE("card 2 root record (four cards)", (two_cards(), cardbase[2] = 0xdd2020, boot(3, 6, 0x40000000, 0x144b0100),
 	     rootrec(6, 0xdd2020, 0, 1)),
 	     0x00480096, "/dev/dsk/c16d0s2", 2, 0, "root c16d0s1 from the root record");

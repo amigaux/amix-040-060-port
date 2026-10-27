@@ -39,6 +39,10 @@ only what is linked in (C3-3 version 6): a module kernel cut without ufs and s5
 dlm_static_root (core patch 0037) carries the same root list, written by relink-040-dlm.sh from
 --root; the tool refuses a kernel where the two differ.
 
+Last, on any kernel, rth1=2 (C2-3 version 9) when the image's RTH1 half matches a motherboard
+controller's record by its motherboard id (amix-dlm C4-1 section 5.2): src/rth1.c from S5-46 on,
+whose rth1_moboid is in the image's .text beside rth1_apply.  Absent: the old record forms only.
+
 -o OUT writes the sidecar there (default: KERNEL's directory/kabi when KERNEL is named unix, else
 KERNEL.kabi).  --stand DIR lays out the package's files instead: DIR/stand/k46/unix (a copy of
 KERNEL) and DIR/stand/k46/kabi.  --check exits 0 when SIDECAR is what this tool writes for KERNEL
@@ -197,9 +201,12 @@ def sidecar(kernel, family, pin, abi=None):
         die("no root filesystem in %s" % kernel)
     # a four-card sd (relink-040-sd4card.sh, amix-dlm C4-1): sdcards=4; absent means two
     sd4 = [("sdcards", "4")] if "sd4_insert" in syms else []
+    # an RTH1 half that names a motherboard controller by its id (C4-1 section 5.2): rth1=2
+    rth1 = [("rth1", "2")] if all(n in syms and e.names[syms[n]["shndx"]] == ".text"
+                                  for n in ("rth1_apply", "rth1_moboid")) else []
     lines = head + [("loader-min", str(LOADER_MIN if axk is None else LOADER_MIN_DLM))] + (axk or []) + sd4 + [
         ("root", ",".join(keys)),
-    ] + ([("rootfs", ",".join(fs))] if fs else [])
+    ] + ([("rootfs", ",".join(fs))] if fs else []) + rth1
     return "".join("%s=%s\n" % kv for kv in lines)
 
 

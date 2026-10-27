@@ -145,7 +145,13 @@ the one-kernel families that is `c6d0s1` / `c6d0s2` (unit 6, first controller).
      manufacturer/product equal to `id`.
    - **Motherboard:** the controller whose `sdcardbase(c)` is the base of **no** `bootinfo.autocon[]`
      entry. The A3000 SCSI registers at 0xdd0000; the Gayle IDE glue registers a sort key (0xfffffff0, or
-     its task-file base under `IDE_ORDER=address`). Neither is an AutoConfig board address.
+     its task-file base under `IDE_ORDER=address`). Neither is an AutoConfig board address. A root record
+     with `RTO_MOBO` (id 0) never takes the controller at the Z3660 window, 0x10000000; the boot fields'
+     `RTH_BMOBO` still may.
+   - **A motherboard id** (amix-dlm C4-1 section 5.2): a root record without `RTO_MOBO` whose `id` is 1, 2
+     or 3 takes the controller with no `bootinfo.autocon[]` entry whose motherboard id, by sd's name for it
+     (`sdhardwarename(c)`, kinfo's rule), is that id: 1 "A3000 Internal SCSI", 2 "A4000 IDE", 3 "A4000T
+     onboard SCSI". `base` is not compared. A kernel with this rule says `rth1=2` in its sidecar.
    - **The Z3660, `id` 0x144b0100, either mode** (amix-dlm C4-1 section 5.1): the controller whose
      `bootinfo.autocon[]` entry is that board, or the controller at the window `sdcardbase(c) ==
      0x10000000` (the 68030 mode, where the card is not AutoConfig'd). `base` is not compared. A mode

@@ -66,29 +66,52 @@ static void expect(int k, unsigned long id, unsigned long base, unsigned long fl
 	}
 }
 
-int main(void)
+static int build(void)
 {
-	static char z3660[] = "Z3660 SCSI", a3000[] = "A3000 Internal SCSI", gayle[] = "A4000 IDE", other[] = "A4091";
 	unsigned long dev = 0;
 	struct uio u = { 0, 0, 0, 0, 0, 2048 };
 
-	/* the A4000T in 68030 mode with S5-15's second card: the Z3660 at its window, no board there */
-	configdev(0, 0x40000000, 0xc0de, 1);		/* an A4092 */
-	card(0, 0x10000000, z3660);
-	card(1, 0x40000000, other);
-	card(2, 0x00dd0000, a3000);
-	card(3, 0xfffffff0, gayle);
 	if (kinfoopen(&dev, 0, 0, 0) != 0 || kinforead(0, &u, 0) != 0 || rec == 0) {
 		printf("FAIL kinfo did not open and read\n");
-		return 1;
+		return 0;
 	}
-	printf("%s   %lu cards\n", L(rec, 460) == 4 ? "PASS" : "FAIL", L(rec, 460));
-	if (L(rec, 460) != 4)
+	return 1;
+}
+
+/* the record is built once per boot, so one set of cards per run: argv[1] picks it */
+int main(int argc, char **argv)
+{
+	static char z3660[] = "Z3660 SCSI", a3000[] = "A3000 Internal SCSI", gayle[] = "A4000 IDE", other[] = "A4091",
+		a4kt[] = "A4000T onboard SCSI";
+	int n;
+
+	if (argc > 1 && strcmp(argv[1], "a4000t") == 0) {
+		/* the A4000T: its onboard 53C710 beside Gayle */
+		card(0, 0x00dd0000, a4kt);
+		card(1, 0xfffffff0, gayle);
+		if (!build())
+			return 1;
+		n = 2;
+		expect(0, 3, 0, 1);			/* a4000t-710 */
+		expect(1, 2, 0, 1);			/* gayle */
+	} else {
+		/* the A4000T in 68030 mode with S5-15's second card: the Z3660 at its window, no board there */
+		configdev(0, 0x40000000, 0xc0de, 1);	/* an A4092 */
+		card(0, 0x10000000, z3660);
+		card(1, 0x40000000, other);
+		card(2, 0x00dd0000, a3000);
+		card(3, 0xfffffff0, gayle);
+		if (!build())
+			return 1;
+		n = 4;
+		expect(0, 4, 0, 1);			/* z3660-window: motherboard id 4, never 0 */
+		expect(1, 0xc0de0100, 0x40000000, 0);	/* an AutoConfig board: its id and base */
+		expect(2, 1, 0, 1);			/* a3000-wd */
+		expect(3, 2, 0, 1);			/* gayle */
+	}
+	printf("%s   %lu cards\n", L(rec, 460) == (unsigned long) n ? "PASS" : "FAIL", L(rec, 460));
+	if (L(rec, 460) != (unsigned long) n)
 		fails++;
-	expect(0, 4, 0, 1);			/* z3660-window: motherboard id 4, never 0 */
-	expect(1, 0xc0de0100, 0x40000000, 0);	/* an AutoConfig board: its id and base */
-	expect(2, 1, 0, 1);			/* a3000-wd */
-	expect(3, 2, 0, 1);			/* gayle */
 
 	printf("%s: %d failing\n", fails ? "FAIL" : "PASS", fails);
 	return fails != 0;

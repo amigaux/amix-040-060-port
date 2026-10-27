@@ -86,7 +86,7 @@ echo "[*] page geometry in the compiled bytes (no 2 KiB shift from the cross hea
 run_step indent sh "$HERE/src/check_page_geometry.sh" "$OBJ"
 
 echo "[*] imports and exports must be exactly these:"
-WANT=$(echo bootinfo $PEND printf $NOMARC rootdev sdcardbase sdopen swapfile vfs_mountroot | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
+WANT=$(echo bootinfo $PEND printf $NOMARC rootdev sdcardbase sdhardwarename sdopen swapfile vfs_mountroot | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 GOT=$(m68k-linux-gnu-nm "$OBJ" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
 [ "$GOT" = "$WANT" ] || { echo "[FAIL] unresolved set is: $GOT"; echo "       expected:          $WANT"; exit 1; }
 WANTX="rth1_apply rth1_mountroot rth1_used rth1_why"
