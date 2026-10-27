@@ -51,6 +51,9 @@
 #define RTH_BMOBO	0x04
 #define RTO_MOBO	0x01
 
+#define Z3660_ID	0x144B0100	/* the Z3660's AutoConfig id, its one identity (amix-dlm C4-1 5.1) */
+#define Z3660_WINDOW	0x10000000	/* its window when not AutoConfig'd (the 68030 mode) */
+
 #define SD_ROOTDEV	0x00480000	/* makedevice(18, 0) */
 #ifdef RTH1_DLM
 #define BI_AXL1		(BI_RTH1 + 0x38)	/* the loader record, bootinfo+0x6b0 (C4-3) */
@@ -127,13 +130,18 @@ rth1_axl1()
  * The Amix card whose controller matches, or -1 unless exactly one does.  By board base when
  * base is nonzero; else by manufacturer/product through the autocon entry at that controller's
  * base; or, for mobo, the controller whose base is no AutoConfig board at all.
+ *
+ * The Z3660 is one controller in either of its modes (amix-dlm C4-1 section 5.1): id 144b0100
+ * matches the card whose autocon entry is that board, or the card registered at the window
+ * 0x10000000 (no AutoConfig board in the 68030 mode), and the record's base is not compared.
+ * A mode that showed both is two answers, so the built-in root is kept.
  */
 static int
 rth1_card(base, id, mobo)
 unsigned long base, id;
 int mobo;
 {
-	int c, i, n = 0, found = -1;
+	int c, i, n = 0, found = -1, z3660 = !mobo && id == Z3660_ID;
 
 	if (!mobo && base == 0 && id == 0)
 		return -1;
@@ -158,11 +166,12 @@ int mobo;
 			}
 		if (mobo)
 			match = hit == 0;
-		else if (base != 0)
+		else if (base != 0 && !z3660)
 			match = b == base;
 		else
-			match = hit != 0 && (((unsigned long) *(unsigned short *) (hit + CD_MANUF) << 16)
-					     | ((unsigned long) hit[CD_PRODUCT] << 8)) == id;
+			match = (hit != 0 && (((unsigned long) *(unsigned short *) (hit + CD_MANUF) << 16)
+					      | ((unsigned long) hit[CD_PRODUCT] << 8)) == id)
+				|| (z3660 && b == Z3660_WINDOW);
 		if (match) {
 			found = c;
 			n++;

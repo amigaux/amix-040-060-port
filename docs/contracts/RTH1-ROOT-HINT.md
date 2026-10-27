@@ -146,6 +146,10 @@ the one-kernel families that is `c6d0s1` / `c6d0s2` (unit 6, first controller).
    - **Motherboard:** the controller whose `sdcardbase(c)` is the base of **no** `bootinfo.autocon[]`
      entry. The A3000 SCSI registers at 0xdd0000; the Gayle IDE glue registers a sort key (0xfffffff0, or
      its task-file base under `IDE_ORDER=address`). Neither is an AutoConfig board address.
+   - **The Z3660, `id` 0x144b0100, either mode** (amix-dlm C4-1 section 5.1): the controller whose
+     `bootinfo.autocon[]` entry is that board, or the controller at the window `sdcardbase(c) ==
+     0x10000000` (the 68030 mode, where the card is not AutoConfig'd). `base` is not compared. A mode
+     that shows both is two matches, so the built-in root is kept. The same source serves both lines.
    - The matching controller's index c is the Amix card.
 4. The kernel is disk-rooted: the major of `rootdev` is 18 (sd), and `bo_name` reads `/dev/dsk/c?d0s2`
    ending in NUL. A floppy-rooted family (`FD0P`, `/dev/fakeswap`) is never moved.

@@ -137,6 +137,13 @@ static void two_cards(void)
 	cardbase[1] = 0x48000000;
 }
 
+/* the Z3660 not AutoConfig'd (its 68030 mode): card 0 at the window, no board there; card 1 Gayle IDE */
+static void window_gayle(void)
+{
+	cardbase[0] = 0x10000000;
+	cardbase[1] = 0xfffffff0;
+}
+
 static int fails;
 
 static void expect(const char *name, unsigned long dev, const char *swap, unsigned long used,
@@ -229,6 +236,26 @@ int main(void)
 	     0x00480018, "/dev/dsk/c8d0s2", 2, 0, "root c8d0s1 from the root record");
 	CASE("two motherboard rows", (cardbase[0] = 0x00dd0000, cardbase[1] = 0xfffffff0, boot(1 | 4, 2, 0, 0)),
 	     0x00480016, "/dev/dsk/c6d0s2", 0, 6, "built in (controller not present)");
+	/* the Z3660 in either mode (amix-dlm C4-1 section 5.1): id 144b0100, exactly one card */
+	CASE("Z3660 id form, base 0", (two_cards(), boot(0x10, 0, 0, 0), rootrec(2, 0, 0x144b0100, 0)),
+	     0x00480012, "/dev/dsk/c2d0s2", 2, 0, "root c2d0s1 from the root record (board 40000000 id 144b01 unit 2 = card 0)");
+	CASE("Z3660 id form, base not compared", (two_cards(), boot(0x10, 0, 0, 0), rootrec(2, 0x48000000, 0x144b0100, 0)),
+	     0x00480012, "/dev/dsk/c2d0s2", 2, 0, "root c2d0s1 from the root record (board 40000000");
+	CASE("Z3660 window form, root record", (window_gayle(), boot(0x10, 0, 0, 0), rootrec(2, 0, 0x144b0100, 0)),
+	     0x00480012, "/dev/dsk/c2d0s2", 2, 0, "root c2d0s1 from the root record (board 10000000 id 144b01 unit 2 = card 0)");
+	CASE("Z3660 window form, beside a Zorro card", (configdev(0, 0x48000000, 0xc0de, 1), cardbase[0] = 0x10000000,
+	     cardbase[1] = 0x48000000, boot(0x10, 0, 0, 0), rootrec(3, 0, 0x144b0100, 0)),
+	     0x00480013, "/dev/dsk/c3d0s2", 2, 0, "root c3d0s1 from the root record (board 10000000");
+	CASE("Z3660 window form, boot disk", (window_gayle(), boot(3, 3, 0, 0x144b0100)),
+	     0x00480013, "/dev/dsk/c3d0s2", 1, 0, "root c3d0s1 from the boot disk (board 10000000 id 144b01 unit 3 = card 0)");
+	CASE("Z3660 both forms: not one card", (configdev(0, 0x40000000, 0x144b, 1), cardbase[0] = 0x10000000,
+	     cardbase[1] = 0x40000000, boot(0x10, 0, 0, 0), rootrec(2, 0, 0x144b0100, 0)),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 6, "built in (controller not present)");
+	CASE("the window is the Z3660's only", (window_gayle(), boot(0x10, 0, 0, 0), rootrec(2, 0, 0xc0de0100, 0)),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 6, "built in (controller not present)");
+	CASE("Z3660 record, no Z3660 card", (window_gayle(), cardbase[0] = 0x00dd0000, boot(0x10, 0, 0, 0),
+	     rootrec(1, 0, 0x144b0100, 0)),
+	     0x00480016, "/dev/dsk/c6d0s2", 0, 6, "built in (controller not present)");
 	CASE("rootdev upper bits kept", (two_cards(), rootdev = 0x00480026, boot(3, 3, 0x40000000, 0x144b0100)),
 	     0x00480013, "/dev/dsk/c3d0s2", 1, 0, "root c3d0s1");
 
@@ -257,6 +284,10 @@ int main(void)
 	CASE("AXL1 wrong magic: ignored", (two_cards(), axl1(2, 0, "s5"), AXL1[0] = 0x41584c32),
 	     0x00480016, "/dev/dsk/c6d0s2", 0, 1, "built in (no record)");
 	CHECKFS("");
+	CASE("Z3660 window form on card 2 (four cards)", (two_cards(), cardbase[0] = 0x48000000, configdev(0, 0x48000000, 0xc0de, 1),
+	     configdev(1, 0, 0, 0), cardbase[1] = 0xdd0000, cardbase[2] = 0x10000000, boot(0x10, 0, 0, 0),
+	     rootrec(1, 0, 0x144b0100, 0)),
+	     0x00480091, "/dev/dsk/c11d0s2", 2, 0, "root c11d0s1 from the root record (board 10000000 id 144b01 unit 1 = card 2)");
 	CASE("card 2 root record (four cards)", (two_cards(), cardbase[2] = 0xdd2020, boot(3, 6, 0x40000000, 0x144b0100),
 	     rootrec(6, 0xdd2020, 0, 1)),
 	     0x00480096, "/dev/dsk/c16d0s2", 2, 0, "root c16d0s1 from the root record");

@@ -59,8 +59,10 @@ The layout is C2-1 §2: big-endian, 580 bytes with no modules.
 - Any other card is a motherboard controller: base 0, flags 0x1, and an id with a zero manufacturer:
   - 1 = `a3000-wd`, the row named "A3000 Internal SCSI";
   - 2 = `gayle`, the row named "A4000 IDE";
+  - 4 = `z3660-window`, the row named "Z3660 SCSI" when no AutoConfig board is at its address (the
+    Z3660 at its window, amix-dlm C4-1 section 5.1); with its board it is `zorro:144b:01`;
   - 0 = not known.
-- C2-1 also lists 3 `a4000t-710` and 4 `z3660-window`. No driver on this line registers either today.
+- C2-1 also lists 3 `a4000t-710`. No driver on this line registers it today.
 - The Gayle IDE row hands sd a sort key, not a bus address (`src/ide_sd_glue040.s`). That is why a motherboard
   card reports base 0, not what sd recorded.
 

@@ -77,6 +77,7 @@
 /* motherboard controllers: a zero manufacturer, so never a Zorro id */
 #define MOBO_A3000WD	1
 #define MOBO_GAYLE	2
+#define MOBO_Z3660WIN	4		/* the Z3660 not AutoConfig'd, at its window (amix-dlm C4-1 5.1) */
 
 extern unsigned char bootinfo[];
 extern unsigned char sd_queue_tbl[];
@@ -218,6 +219,8 @@ kinfo_build()
 				id = MOBO_A3000WD;
 			else if (nm && kinfo_streq(nm, "A4000 IDE"))
 				id = MOBO_GAYLE;
+			else if (nm && kinfo_streq(nm, "Z3660 SCSI"))
+				id = MOBO_Z3660WIN;
 		}
 		L(q, 0) = i;
 		L(q, 4) = id;

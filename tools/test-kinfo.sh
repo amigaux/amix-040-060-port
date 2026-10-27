@@ -2,8 +2,8 @@
 # test-kinfo.sh -- host self-test of the /dev/kinfo tools (docs/contracts/KINFO.md).
 # Compiles src/kinfo.c and checks its sections and its symbol sets; builds records in Python and
 # checks that tools/kinfo-decode.py accepts a well-formed one, in binary and as `od -X` text, and
-# refuses a bad check word, a wrong length, a flagged AXL1 that is not one and a zero text vaddr; checks
-# patch_kinfo_cdevsw.py --check on the base kernels in build/ when they are there.
+# refuses a bad check word, a wrong length, a flagged AXL1 that is not one and a zero text vaddr; runs
+# the card table on qemu-m68k (tools/test-kinfo-cards.c); checks patch_kinfo_cdevsw.py --check on the base kernels in build/ when they are there.
 #
 #     sh tools/test-kinfo.sh          # exits 0 if every case passes
 set -e
@@ -64,6 +64,19 @@ python3 "$D" "$W/v2.bin" > /dev/null && pass "a version 2 record still decodes O
 for c in badsum badlen badaxl badtva; do
 	if python3 "$D" "$W/$c.bin" > /dev/null 2>&1; then fail "refuses $c"; else pass "refuses $c"; fi
 done
+
+# the sd card table, run on qemu-m68k: an AutoConfig board's id and base, the motherboard ids by
+# controller name, and the Z3660 at its window as id 4 (tools/test-kinfo-cards.c; amix-dlm C4-1 5.1)
+if command -v m68k-linux-gnu-gcc >/dev/null 2>&1 && command -v qemu-m68k >/dev/null 2>&1; then
+	m68k-cbm-sysv4-gcc $CF -DSDCARDS=4 -c "$HERE/src/kinfo.c" -o "$W/kinfo-sd4.o"
+	m68k-linux-gnu-gcc -static -O1 -Wall -Werror "$HERE/tools/test-kinfo-cards.c" "$W/kinfo-sd4.o" -o "$W/test-kinfo-cards"
+	qemu-m68k "$W/test-kinfo-cards" > "$W/cards.txt" && pass "the card table (test-kinfo-cards.c)" \
+		|| { cat "$W/cards.txt"; fail "the card table (test-kinfo-cards.c)"; }
+	grep -q "PASS   card 0: id 00000004 base 00000000 flags 1" "$W/cards.txt" && pass "the Z3660 at its window is mobo id 4" \
+		|| fail "the Z3660 at its window is mobo id 4"
+else
+	echo "SKIP the card table: no m68k-linux-gnu-gcc or qemu-m68k"
+fi
 
 for K in "$HERE"/build/unix-040-z-rth1*; do
 	[ -f "$K" ] || continue
