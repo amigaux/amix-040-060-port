@@ -23,12 +23,17 @@ What is checked, and refused:
 The sites are the scripts' own tables (P / TEXT; CANARY / PRODUCER), loaded from their source
 without running them.
 
-Module-only sites (MODULE_ONLY below): 2 KiB-page arithmetic the scripts leave alone, because
-the static kernel is consistent without it, converted in the module body only.  A table applies
-to an object that defines every function it names (ufs/exp; s5/exp has none).  Each site:
+Module-only sites (MODULE_ONLY below): 2 KiB-page arithmetic the scripts leave alone, converted
+in the module body only (the static kernel never reaches it with an AMIX root, fs_bsize 8192).
+A table applies to an object that defines every function it names (ufs/exp; s5/exp has none).
+Each site:
   6. lies inside the function it names, outside every relocated field of OBJ, and overlaps no
      site of the scripts;
   7. reads its old bytes in OBJ, in UNIX and in BASE (the base does not convert it).
+A site that names a script (a sixth field) instead replaces that script's value in the module:
+  6'. it lies inside its function, outside every relocated field, and is exactly one site of that
+      script (same offset and length), applied in BASE, overlapping no other;
+  7'. its old bytes are that site's new bytes, read in BASE; OBJ and UNIX read the site's old.
 --static-only leaves them out (the object the scripts' sites alone give).
 
 Output: --triples prints one line per site applied in BASE, `.text <offset> <old> <new>
@@ -65,6 +70,13 @@ MODULE_ONLY = {"ufs": [
     ("ufs_freemap", 0x3b16, H("203c00000800"), H("203c00001000"), "bpp = PAGESIZE/bsize: the numerator"),
     ("ufs_freemap", 0x3b24, H("0681000007ff"), H("068100000fff"), "nblks: i_size + PAGEOFFSET"),
     ("ufs_freemap", 0x3b2a, H("740b"), H("740c"), "nblks: >> PAGESHIFT"),
+    # mountfs: the superblock check refuses fs_bsize < 2048 with EINVAL (cmpil #2047; ble); made
+    # fs_bsize < PAGESIZE.  ufs_getapage takes bsize >= PAGESIZE or bsize == 1024 (PAGESIZE/2 of
+    # the stock object), and panics "ufs_getapage bad bsize" on anything else, so a 2 KiB-block
+    # filesystem is refused at mount instead of panicking at its first page read.
+    # patch_writeback.py makes the stock bound (1023, PAGESIZE/2 - 1) 2047; the module takes 4095.
+    ("mountfs", 0x782a, H("0caa000007ff"), H("0caa00000fff"), "fs_bsize < PAGESIZE: cmpil #PAGESIZE-1",
+     "patch_writeback.py"),
     # ufs_addmap / ufs_delmap: i_mapcnt +=/-= btopr(len), mapped pages (ufs_vnops.c:2313, :2335)
     ("ufs_addmap", 0xc26c, H("0680000007ff"), H("068000000fff"), "btopr(len): + PAGEOFFSET"),
     ("ufs_addmap", 0xc272, H("720b"), H("720c"), "btopr(len): >> PAGESHIFT"),
@@ -176,6 +188,7 @@ def main():
         die(".data 0x%x-0x%x differs between the stock kernel and the base" % ranges[".data"])
     owner = {}
     listed = set()      # every byte of every script site in the ranges, applied or not
+    sitesat = {}        # (vaddr, len) -> (script, old, new, applied) of each script site in the ranges
     applied = []
     canaries = unapplied = 0
     for script in SCRIPTS:
@@ -191,6 +204,7 @@ def main():
                 die("%s:%s @0x%x: the stock kernel has %s, the script expects %s"
                     % (script, name, vaddr, ut[vaddr:end].hex(), old.hex()))
             cur = bt[vaddr:end]
+            sitesat.setdefault((vaddr, len(old)), []).append((script, old, new, cur == new and old != new))
             if cur not in (old, new):
                 die("%s:%s @0x%x: the base has %s, neither old %s nor new %s"
                     % (script, name, vaddr, cur.hex(), old.hex(), new.hex()))
@@ -238,21 +252,31 @@ def main():
         if not names <= set(funcs):
             die("the object defines %s of the %s module-only table but not %s"
                 % (",".join(sorted(names & set(funcs))), fs, ",".join(sorted(names - set(funcs)))))
-        for func, off, old, new, why in table:
+        for func, off, old, new, why, *over in table:
             end = off + len(old)
             where = "module %s:%s @0x%x (%s)" % (fs, func, off, why)
             if len(old) != len(new) or old == new:
                 die("%s: old and new are not two different byte strings of one length" % where)
             if not funcs[func][0] <= off < end <= funcs[func][1]:
                 die("%s lies outside %s, 0x%x-0x%x" % (where, func, funcs[func][0], funcs[func][1]))
-            for name, have in (("the object", ot), ("the stock kernel", ut[lo:hi]), ("the base", bt[lo:hi])):
-                if have[off:end] != old:
-                    die("%s: %s has %s, the table expects %s" % (where, name, have[off:end].hex(), old.hex()))
+            stockold = old
+            if over:
+                hit = sitesat.get((lo + off, len(old)), [])
+                if [h[0] for h in hit] != over or not hit[0][3] or hit[0][2] != old:
+                    die("%s is not one site of %s applied in the base with new bytes %s"
+                        % (where, over[0], old.hex()))
+                stockold = hit[0][1]
+                if any(k != (lo + off, len(old)) and k[0] < lo + end and lo + off < k[0] + k[1] for k in sitesat):
+                    die("%s overlaps a site of the patch scripts other than %s's" % (where, over[0]))
+            elif any(lo + o in listed for o in range(off, end)):
+                die("%s overlaps a site of the patch scripts" % where)
+            for name, have, want in (("the object", ot, stockold), ("the stock kernel", ut[lo:hi], stockold),
+                                     ("the base", bt[lo:hi], old)):
+                if have[off:end] != want:
+                    die("%s: %s has %s, the table expects %s" % (where, name, have[off:end].hex(), want.hex()))
             for r, (t, n, add) in orel.items():
                 if r < end and off < r + WIDTH.get(t, 4):
                     die("%s overlaps the relocated field of %s+%d @0x%x" % (where, n, add, r))
-            if any(lo + o in listed for o in range(off, end)):
-                die("%s overlaps a site of the patch scripts" % where)
             module.append((lo + off, old, new, "module", func))
     if "--static-only" in a:
         module = []
@@ -281,7 +305,8 @@ def main():
     # read back: the object differs from OBJ exactly in the changed bytes, and its .text is the
     # base's with the module-only sites converted
     w = rows.Elf(out)
-    if secbytes(w, ".text") != want or sum(1 for i in range(len(b)) if b[i] != O.b[i]) != len(diff) + mbytes:
+    if secbytes(w, ".text") != want or sum(1 for i in range(len(b)) if b[i] != O.b[i]) \
+            != sum(1 for i in range(len(ot)) if want[i] != ot[i]):
         die("%s does not read back as the base's bytes and the module-only sites" % out)
     sys.stderr.write("fsobj-patch: wrote %s (sha256 %s), its .text = the base's 0x%x-0x%x%s\n"
                      % (out, hashlib.sha256(bytes(b)).hexdigest()[:8], lo, hi,

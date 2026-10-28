@@ -31,7 +31,7 @@ check() {	# fs sites canaries module-sites sha256 static-sha256
 			|| fail "$1: patched object ${v#*:} $(sha256sum < "$T/$1.exp" | cut -c1-8), want $(echo $v | cut -c1-8)"
 	done
 }
-check ufs 49 3 12 84316ffccc350fc83f4a215d7f52318327ae75e3211a5300a4603f8db97777c8 130b2def83eca2984316499913ae8342d76c1b0e908b45c220e797148cc4deaf
+check ufs 49 3 13 6636b27edf42b1a6b52856668f789edbfd567040ee45b8831bba35ec7fc910f9 130b2def83eca2984316499913ae8342d76c1b0e908b45c220e797148cc4deaf
 check s5 25 0 0 fc2bfe5a5850e7ea33addc3d906752bf297cdc7bdd5f0fc6327c6da4d8b3959d fc2bfe5a5850e7ea33addc3d906752bf297cdc7bdd5f0fc6327c6da4d8b3959d
 
 # refusals: a copy of the base (or of the object) with one thing changed
@@ -80,4 +80,10 @@ three .text 0xc273 0x0a 0x830c7 0x0a && refuse "a module-only site's old byte (u
 	"the object has 720a, the table expects 720b" ufs "$T/b" "$T/o" "$T/u"
 three reloff 0x38c6 0x388e 0x7a71a 0x7a6e2 && refuse "a module-only site in a relocated field (kmem_alloc's moved there)" \
 	"overlaps the relocated field of kmem_alloc+0 @0x388e" ufs "$T/b" "$T/o" "$T/u"
+# the mountfs guard replaces patch_writeback.py's bound (0x7e67e, 1023 -> 2047) with 4095: refused
+# when the base does not apply that site
+mutate "$FSOBJ_BASE" "$T/b6" .text 0x7e682 0x03 && refuse "the mountfs guard over an unapplied script site" \
+	"is not one site of patch_writeback.py applied in the base" ufs "$T/b6" "$U"
+grep -q '^\.text 0x0782a 0caa000007ff 0caa00000fff module:mountfs$' "$T/ufs.triples" \
+	&& pass "ufs: mountfs refuses fs_bsize < 4096 (cmpil #4095)" || fail "ufs: no mountfs guard in the triples"
 [ $fails = 0 ] && echo "PASS: 0 failing" || { echo "FAIL: $fails failing"; exit 1; }
