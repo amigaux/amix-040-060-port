@@ -89,6 +89,18 @@ Z3660_NET_SRC="/path/to/amix-z3660net/src"
 # zz9000.c and zz9000.h are read from it.
 ZZ9000_SRC="/path/to/amix-z3660rtg/overlay/usr/sys/amiga/driver/zz9000"
 
+# ---------------------------------------------------------------- OPTIONAL: the module kernel
+
+# The stock kernel source tree (usr/sys) that relink-040-audio.sh copies the audio driver from.
+# Leave it unset when $AMIX_ROOT/usr/sys exists; otherwise the default is the cross toolchain's
+# copy, $AMIX_CROSS/m68k-cbm-sysv4/sysroot/usr/sys, made from the same installation.
+#AMIX_SYS="$AMIX_ROOT/usr/sys"
+
+# The module core and the Paula patchers are taken from sibling checkouts at pinned revisions
+# (DLM_REV in relink-040-dlm.sh, PAULA_REV in relink-040-audio.sh); point elsewhere with
+#DLM_REPO="/path/to/amix-dlm"
+#PAULA_REPO="/path/to/amix-paula"
+
 # ---------------------------------------------------------------- OPTIONAL: analysis
 
 # Ghidra, for the decompilation helper in tools/.  Not needed to build anything.

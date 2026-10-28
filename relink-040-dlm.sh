@@ -7,7 +7,8 @@
 #                  sha256.c and crc32.c; taken from DLM_REV with git archive, so amix-dlm's
 #                  working tree does not matter
 #   ident.o        tools/mkident.py --asm: dlm_ident (AXK1) and the arena's zero block in .data
-#   ksym.o         mkksym -a abi/k46/ddi.list -a abi/k46/core.list: the allowlisted symbol block
+#   ksym.o         mkksym -k <kabi> -a abi/k46/ddi.list -a abi/k46/core.list: the allowlisted symbol
+#                  block, the names whose minor is at most the cut's (C3-2 version 2, section 2)
 #   devkvmap040.o  dev_kvmap/dev_kvunmap (src/devkvmap040.s), unless the base has them
 #   libgcc.a       __lshrdi3, __udivdi3, __umoddi3 (DDI v1), from the toolchain
 #   dlm_tail040.s  the closing .balign 4
@@ -18,7 +19,9 @@
 # the base.  No weak symbol survives and nothing stays undefined but etext, edata and end.
 #
 # Order (the module kernel, one family: KD060-Z):
-#   dd -> z3660 (Z3660_NET=off) -> f4arms -> f6 -> rth1 (DLM=1) -> kinfo (DLM=1) -> dlm -> fpe
+#   carve -> dd -> sd4card -> f4arms -> f6 -> audio -> rth1 (DLM=1) -> kinfo (DLM=1) -> dlm -> fpe
+# audio (relink-040-audio.sh) is what a kabi minor 3 cut needs: it defines paula_busy and
+# audio_nopen, and this pass refuses a 1.3 claim on a base without them.
 # monsw and zz9000 are not linked: majors 49, 51 and 52 belong to modules.  The base must be
 # kinfo's DLM=1 output: its two open imports, dlm_kinfo_list and dlm_marc_post, are the core's.
 # fpe stays the last link.  `relink-040-dlm.sh --fill <kernel>` then fills the block's sizes and
@@ -31,7 +34,8 @@
 #        sh relink-040-dlm.sh --fill <kernel>
 #   DLM_REPO=<dir>   amix-dlm (default: the sibling checkout)
 #   DLM_REV=<rev>    the amix-dlm revision the core and tools come from (default: the pin below)
-#   DLM_KABI=<tag>   default k46.1.2; must equal the base's kinfo_kabi
+#   DLM_KABI=<tag>   default k46.1.3; must equal the base's kinfo_kabi.  k46.1.2 builds a cut without
+#                    the audio pass (the names of minor 3 are then neither listed nor checked)
 #   DLM_ARENA=<n>    the arena's capacity (default 0x60000, M-MOD1)
 #   DLM_ABI_NEW=1    --fill: a fingerprint that moved is written (KERNEL.abi.txt) and taken instead of
 #                    failing -- only for the one rewrite of a tag's reference C3-3 allows
@@ -70,9 +74,13 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # reviewed 2026-10-27.
 # 7b07bce: plat_dmainit skips the leading blank of the stamped buildid (" 68060-..."), so the core's
 # build id equals a core-tier module's build= (before it, ufs was refused: EBADVER); abi unchanged.
+# e45b061: DDI minor 3 (C3-2 version 2): AllocMem, FreeMem, displaytype, paula_busy and audio_nopen
+# for the Paula module; core patch 0046, mkksym -k (a kernel lists the names of its own minor, and
+# ksymgate.py and mkabi.py read the minor from dlm_ident); c 54 paula in the registry.  kabi
+# k46.1.3, abi 18c0a1c9 (abi-k46.1.3.txt); at k46.1.2 the fingerprint is unchanged, 2ab48658.
 DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
-DLM_REV="${DLM_REV:-7b07bce}"
-DLM_KABI="${DLM_KABI:-k46.1.2}"
+DLM_REV="${DLM_REV:-e45b061}"
+DLM_KABI="${DLM_KABI:-k46.1.3}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
 REV=$(git -C "$DLM_REPO" rev-parse --verify "$DLM_REV^{commit}") \
@@ -188,6 +196,17 @@ print(b.split(b'\0')[0].decode())
 PY
 )
 [ "$KK" = "$DLM_KABI" ] || { echo "[FAIL] the base's kinfo_kabi is '$KK', not $DLM_KABI (relink-040-kinfo.sh DLM=1)"; exit 1; }
+# a cut claims a minor only with every name of it (C3-2 v2 section 2); minor 3's two flags come from
+# the audio pass, the rest are stock
+KMIN=${DLM_KABI##*.}
+case $KMIN in ""|*[!0-9]*) echo "ERROR: DLM_KABI '$DLM_KABI' has no numeric minor"; exit 1;; esac
+if [ "$KMIN" -ge 3 ]; then
+	for s in paula_busy audio_nopen; do
+		echo "$NM_IN" | grep -qE " [DdBbC] $s\$" \
+			|| { echo "[FAIL] $DLM_KABI: the base has no $s -- run relink-040-audio.sh before rth1"; exit 1; }
+	done
+	echo "      $DLM_KABI: paula_busy and audio_nopen in the base (relink-040-audio.sh)"
+fi
 O="$S/obj"
 rm -f "$O"/*.o "$O"/*.warn
 offs
@@ -233,7 +252,7 @@ if grep -q '^	\.balign	16$' "$O/ident.s"; then
 	echo "      ident.s: dlm_arena's .balign 16 -> 4 (the record rounds the arena to 16, C3-3 v5)"
 fi
 m68k-cbm-sysv4-as -o "$O/ident.o" "$O/ident.s"
-"$S/mkksym" -a "$S/kit/abi/k46/ddi.list" -a "$S/kit/abi/k46/core.list" > "$O/ksym.s" 2> "$O/ksym.log" \
+"$S/mkksym" -k "$DLM_KABI" -a "$S/kit/abi/k46/ddi.list" -a "$S/kit/abi/k46/core.list" > "$O/ksym.s" 2> "$O/ksym.log" \
 	|| { echo "[FAIL] mkksym -a: $(cat "$O/ksym.log")"; exit 1; }
 m68k-cbm-sysv4-as -o "$O/ksym.o" "$O/ksym.s"
 echo "      ident.o: AXK1 + arena $DLM_ARENA; ksym.o: $(sed 's/^mkksym: //' "$O/ksym.log")"
