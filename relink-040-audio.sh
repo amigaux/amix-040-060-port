@@ -9,16 +9,20 @@
 # A kernel claims minor 3 only with this pass in its chain: relink-040-dlm.sh refuses the claim
 # without the two names, and so do the symbol gate and the fingerprint.
 #
-# The amix-paula repository is a SEPARATE PROJECT and is never modified.  Its two source patchers
+# The amix-paula repository is a SEPARATE PROJECT and is never modified.  Its three source patchers
 # are taken at PAULA_REV with git show, so its working tree does not matter, and are applied to a
 # build-time copy of the stock driver ($AMIX_SYS/amiga/driver/audio.c and audio.h), in this order:
 #   port/src/patch_audio_safeclose.py   /dev/audio stops the channels a client holds before it
 #                                       frees the client (a stock use-after-free on a killed player)
+#   port/src/patch_audio_initwait.py    audioinit()'s wait for each channel's hand-fed word is
+#                                       bounded (about 2 ms); a silent Paula fails the open EIO
+#                                       instead of holding the box at splaudio for good
 #   port/src/patch_audio_paula.py       the two names, and both opens test the other's flag with no
 #                                       sleep between test and set
 # Each patcher finds its places by the SHA-256 of the stock lines and refuses any other audio.c.
 # Commodore's source is not in this repository.  The compile and the link are those of amix-paula's
-# port/relink-040-audio-paula.sh at the same revision: the output is byte-identical to that script's.
+# port/relink-040-audio-paula.sh at the same revision: the output is byte-identical to that script's
+# run with AUDIO_SRC = the stock driver already patched with the safe close and the bounded wait.
 #
 # The rebuilt object is linked after the base, whose audioinfo, audioinit and audiointr are
 # weakened: cdevsw and the level-4 interrupt bind to the new driver, the stock one stays as dead code.
@@ -39,10 +43,11 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
 
-# d82e32d: the open race closed on both sides (patch_audio_paula.py re-tests paula_busy at splaudio
-# after its KM_SLEEP allocation, five fingerprinted places) and the safe close.
+# 62fdcab: the open race closed on both sides (patch_audio_paula.py re-tests paula_busy at splaudio
+# after its KM_SLEEP allocation, five fingerprinted places), the safe close, and the bounded
+# audioinit() wait (patch_audio_initwait.py, three fingerprinted places).
 PAULA_REPO="${PAULA_REPO:-$HERE/../amix-paula}"
-PAULA_REV="${PAULA_REV:-d82e32d}"
+PAULA_REV="${PAULA_REV:-62fdcab}"
 if [ -z "$AMIX_SYS" ]; then
 	if [ -f "$AMIX_ROOT/usr/sys/amiga/driver/audio.c" ]; then AMIX_SYS="$AMIX_ROOT/usr/sys"
 	else AMIX_SYS="$AMIX_CROSS/m68k-cbm-sysv4/sysroot/usr/sys"; fi
@@ -71,11 +76,11 @@ done
 REV=$(git -C "$PAULA_REPO" rev-parse --verify "$PAULA_REV^{commit}") \
 	|| { echo "ERROR: $PAULA_REV is not a commit in $PAULA_REPO"; exit 1; }
 P="$HERE/build/paula-rev"; rm -rf "$P"; mkdir -p "$P"
-for f in patch_audio_safeclose.py patch_audio_paula.py; do
+for f in patch_audio_safeclose.py patch_audio_initwait.py patch_audio_paula.py; do
 	git -C "$PAULA_REPO" show "$REV:port/src/$f" > "$P/$f" \
 		|| { echo "ERROR: port/src/$f does not exist at $PAULA_REV in $PAULA_REPO"; exit 1; }
 done
-echo "[*] amix-paula $(echo "$REV" | cut -c1-7): patch_audio_safeclose.py, patch_audio_paula.py"
+echo "[*] amix-paula $(echo "$REV" | cut -c1-7): patch_audio_safeclose.py, patch_audio_initwait.py, patch_audio_paula.py"
 echo "      stock driver: $SRC (audio.c sha256 $(sha256sum "$SRC/audio.c" | cut -c1-16))"
 
 # ---------------------------------------------------------------- 2. the driver
@@ -86,6 +91,7 @@ cp "$SRC/audio.c" "$SRC/audio.h" "$B/"
 # the Amiga memory.h, not libc's <memory.h> that the -I order would find first
 cp "$AMIX_SYS/amiga/inc/memory.h" "$B/"
 run_step 1 python3 "$P/patch_audio_safeclose.py" "$B/audio.c"
+run_step 1 python3 "$P/patch_audio_initwait.py" "$B/audio.c"
 run_step 1 python3 "$P/patch_audio_paula.py" "$B/audio.c"
 CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 # -traditional knows no "signed"; audio.h and audiohw.h use "signed char"
