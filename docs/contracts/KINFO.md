@@ -164,8 +164,8 @@ It is built with amix-dlm's k46 ABI kit at the core's revision, made with `PORT`
 **DDI minor 3: the audio driver (2026-10-28, amix-dlm C3-2 version 2).** Minor 3 adds the names the
 Paula module (amix-paula, `/dev/paula` on c 54) imports: `AllocMem`, `FreeMem`, `displaytype` (stock)
 and `paula_busy`, `audio_nopen`. The last two come from `relink-040-audio.sh`, which rebuilds the
-stock audio driver with amix-paula's two patchers (`patch_audio_safeclose.py`, `patch_audio_paula.py`)
-from `AMIX_SYS` (default `$AMIX_ROOT/usr/sys`, else the cross sysroot's copy). It runs between f6 and
+stock audio driver with amix-paula's patchers (`patch_audio_safeclose.py`, `patch_audio_initwait.py`
+from amix-paula 62fdcab on, `patch_audio_paula.py`) from `AMIX_SYS` (default `$AMIX_ROOT/usr/sys`, else the cross sysroot's copy). It runs between f6 and
 rth1. The dlm pass lists the cut's minor (`mkksym -k`), and refuses a 1.3 claim on a base without
 the two flags; ksymgate and the fingerprint read the minor from `dlm_ident`. A cut without the audio
 pass is built with `DLM_KABI=k46.1.2 KINFO_KABI=k46.1.2` (fingerprint 2ab48658, as before).
@@ -176,3 +176,12 @@ The first such cut is `68060-261028-59` (port b5f9bc1, amix-dlm e45b061, amix-pa
 kabi `k46.1.3`, abi `18c0a1c9` (= `abi/k46/abi-k46.1.3.txt`), kernel sha256 `a23135e4`. Its ufs
 module wraps the same `ufs-exp.k46` (6636b27e) and stays `k46.1.2`, since a module carries the
 highest minor it imports; only its `build=` differs from -51's.
+
+The cut `68060-261028-61` (port d76a7f0, everything else as -59) takes the patchers from amix-paula
+62fdcab: `patch_audio_initwait.py` bounds `audioinit()`'s busy-wait for each channel's hand-fed word
+(32 scan lines, about 2 ms), so a Paula that never raises its interrupt (amiberry
+`sound_output=none`, or a sick chip) fails the first `/dev/audio` open with `EIO` instead of holding
+the box at `splaudio`. `audio_040.o` 2be2b185, byte-identical to amix-paula's
+`relink-040-audio-paula.sh` with `AUDIO_SRC` already patched by the safe close and the bounded wait.
+Kernel sha256 `516faa6b`, abi `18c0a1c9` as -59, ufs module `2f68f4d4` (its `build=` only). -59
+stays as built.
