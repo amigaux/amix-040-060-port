@@ -98,7 +98,7 @@ ZZ9000_SRC="/path/to/amix-z3660rtg/overlay/usr/sys/amiga/driver/zz9000"
 
 # The module core and the Paula patchers are taken from sibling checkouts at pinned revisions
 # (DLM_REV in relink-040-dlm.sh, PAULA_REV in relink-040-audio.sh); point elsewhere with
-#DLM_REPO="/path/to/amix-dlm"
+#DLM_REPO="/path/to/amix/kernel/dlm"
 #PAULA_REPO="/path/to/amix-paula"
 
 # ---------------------------------------------------------------- OPTIONAL: analysis

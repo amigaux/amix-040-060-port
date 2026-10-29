@@ -26,12 +26,13 @@
 #   STOCK=<unix>      the stock kernel the base was made from (default $AMIX_ROOT/stand/unix)
 #   STOCK_SYS=<dir>   the stock usr/sys tree with fs/ufs/exp and fs/s5/exp
 #                     (default build/sysroot-modelb/usr/sys)
-#   DLM_REPO, DLM_REV the amix-dlm revision whose abi/k46/core.list is checked (default: the pin
-#                     of relink-040-dlm.sh, so the two passes read one revision)
+#   DLM_REPO, DLM_REV the core revision whose abi/k46/core.list is checked (default: the checkout
+#                     and pin of relink-040-dlm.sh, so the two passes read one revision)
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
+. "$HERE/tools/dlm-rev.sh"
 STOCK="${STOCK:-$AMIX_ROOT/stand/unix}"
 . "$HERE/tools/verify-stock.sh"
 verify_stock "$STOCK"
@@ -39,7 +40,7 @@ verify_stock "$STOCK"
 IN="${1:-$HERE/build/unix-040}"
 OUT="${2:-$HERE/build/unix-040-carve}"
 STOCK_SYS="${STOCK_SYS:-$HERE/build/sysroot-modelb/usr/sys}"
-DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
+DLM_REPO="${DLM_REPO:-$HERE/../amix/kernel/dlm}"
 DLM_REV="${DLM_REV:-$(sed -n 's/^DLM_REV="\${DLM_REV:-\(.*\)}"$/\1/p' "$HERE/relink-040-dlm.sh")}"
 [ -f "$IN" ] || { echo "ERROR: base kernel missing: $IN"; exit 1; }
 m68k-linux-gnu-readelf -h "$IN" >/dev/null 2>&1 || { echo "ERROR: $IN is not an ELF object"; exit 1; }
@@ -60,10 +61,9 @@ echo "$NM_IN" | grep -qE " T ufsinit\$" \
 	|| { echo "[FAIL] base has no ufsinit -- already carved?"; exit 1; }
 
 # ---------------------------------------------------------------- 1. the core tier at the pin
-REV=$(git -C "$DLM_REPO" rev-parse --verify "$DLM_REV^{commit}") \
-	|| { echo "ERROR: $DLM_REV is not a commit in $DLM_REPO"; exit 1; }
+dlm_rev
 CORE="$OUT.core.list"
-git -C "$DLM_REPO" show "$REV:abi/k46/core.list" > "$CORE"
+git -C "$DLM_GIT" show "$REV:${DLM_PFX}abi/k46/core.list" > "$CORE"
 echo "[*] amix-dlm $(echo "$REV" | cut -c1-7): abi/k46/core.list, $(grep -cv '^#' "$CORE") names"
 
 # ---------------------------------------------------------------- 2. the carve and its gates

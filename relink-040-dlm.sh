@@ -32,8 +32,9 @@
 #
 # usage: sh relink-040-dlm.sh [base-kernel] [output]
 #        sh relink-040-dlm.sh --fill <kernel>
-#   DLM_REPO=<dir>   amix-dlm (default: the sibling checkout)
-#   DLM_REV=<rev>    the amix-dlm revision the core and tools come from (default: the pin below)
+#   DLM_REPO=<dir>   the core's checkout: amix's kernel/dlm (default: ../amix/kernel/dlm beside this
+#                    repository) or a standalone amix-dlm (tools/dlm-rev.sh)
+#   DLM_REV=<rev>    the revision the core and tools come from (default: the pin below)
 #   DLM_KABI=<tag>   default k46.1.3; must equal the base's kinfo_kabi.  k46.1.2 builds a cut without
 #                    the audio pass (the names of minor 3 are then neither listed nor checked)
 #   DLM_ARENA=<n>    the arena's capacity (default 0x60000, M-MOD1)
@@ -61,6 +62,7 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/tools/config-load.sh"
 . "$HERE/tools/build-step.sh"
+. "$HERE/tools/dlm-rev.sh"
 
 # 76f83d8: core patches 0001-0045 (0029 no-sleep, 0030 dlm_halt, 0031 block rows, 0032 sd_register,
 # 0033 the arena load path, 0034 dlm_marc_root, 0035 match=, 0036 root_defer, 0037 dlm_static_root,
@@ -78,20 +80,19 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # for the Paula module; core patch 0046, mkksym -k (a kernel lists the names of its own minor, and
 # ksymgate.py and mkabi.py read the minor from dlm_ident); c 54 paula in the registry.  kabi
 # k46.1.3, abi 18c0a1c9 (abi-k46.1.3.txt); at k46.1.2 the fingerprint is unchanged, 2ab48658.
-DLM_REPO="${DLM_REPO:-$HERE/../amix-dlm}"
+DLM_REPO="${DLM_REPO:-$HERE/../amix/kernel/dlm}"
 DLM_REV="${DLM_REV:-e45b061}"
 DLM_KABI="${DLM_KABI:-k46.1.3}"
 DLM_ARENA="${DLM_ARENA:-0x60000}"
 S="$HERE/build/dlm-rev"
-REV=$(git -C "$DLM_REPO" rev-parse --verify "$DLM_REV^{commit}") \
-	|| { echo "ERROR: $DLM_REV is not a commit in $DLM_REPO"; exit 1; }
+dlm_rev
 
 # the core and the kit's tools at DLM_REV, staged once per revision
 stage() {
 	[ -f "$S/.rev" ] && [ "$(cat "$S/.rev")" = "$REV" ] && return 0
 	rm -rf "$S"; mkdir -p "$S/kit" "$S/obj"
-	git -C "$DLM_REPO" archive "$REV" core abi tools loader/common tests/host/axrel.c toolchain.pin \
-		| tar -x -C "$S/kit"
+	dlm_archive core abi tools loader/common tests/host/axrel.c toolchain.pin \
+		| tar -x --strip-components=$DLM_STRIP -C "$S/kit"
 	cp -R "$S/kit/core/upstream" "$S/core"
 	while read p; do
 		case "$p" in \#*|"") continue ;; esac
