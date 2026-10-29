@@ -224,6 +224,7 @@ and it says so when they are not, rather than passing silently.
 Rebuilding the same tree twice produces images differing **only in the build-id stamp** (a date
 and a per-day counter, 16 bytes at a known offset). That is the regression test for the build
 system itself: after changing anything infrastructural, rebuild and diff.
+Set `SOURCE_DATE_EPOCH` and seed `build/.build-seq` to make the stamp itself reproducible.
 
 ---
 

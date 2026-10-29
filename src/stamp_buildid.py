@@ -29,6 +29,10 @@ write unless the current content starts with " 68040-".
 STAMP_BUILDID_CPU=60 writes " 68060-..." instead (2026-10-27): the module kernel is emitted for the
 68060 only, and its sidecar's build= must be the kernel's own string, byte for byte.  inituname's
 boot-time '4' -> '6' flip is then a no-op.  Default 40, so the static families are unchanged.
+
+SOURCE_DATE_EPOCH, when set, supplies the date instead of today, read as a UTC date (2026-10-29;
+https://reproducible-builds.org/specs/source-date-epoch/).  With it and a seeded .build-seq, a
+rebuild on another day is byte-identical.  A malformed value is an error, never a quiet today.
 """
 import struct, subprocess, sys, os, re, datetime
 
@@ -81,6 +85,19 @@ def seq_block():
     lo, hi = (int(x) for x in r.stdout.split())
     return lo, hi
 
+def build_date():
+    """The id's yymmdd: today, or SOURCE_DATE_EPOCH's UTC date when that is set."""
+    sde = os.environ.get('SOURCE_DATE_EPOCH')
+    if sde is None:
+        return datetime.date.today().strftime('%y%m%d')
+    if not re.fullmatch(r'[0-9]+', sde):
+        die(f"SOURCE_DATE_EPOCH={sde!r}: not a decimal count of seconds since 1970-01-01 UTC")
+    try:
+        d = datetime.datetime.fromtimestamp(int(sde), datetime.timezone.utc).date()
+    except (OverflowError, OSError, ValueError):
+        die(f"SOURCE_DATE_EPOCH={sde!r}: out of range")
+    return d.strftime('%y%m%d')
+
 def next_seq(builddir, today):
     lo, hi = seq_block()
     seqfile = os.path.join(builddir, '.build-seq')
@@ -106,7 +123,7 @@ def main():
     if len(sys.argv) != 2:
         die(f"usage: {sys.argv[0]} <kernel-elf>")
     path = sys.argv[1]
-    today = datetime.date.today().strftime('%y%m%d')
+    today = build_date()
     seq = next_seq(os.path.dirname(path) or '.', today)
     cpu = os.environ.get('STAMP_BUILDID_CPU', '40')
     if cpu not in ('40', '60'):
