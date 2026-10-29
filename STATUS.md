@@ -159,7 +159,8 @@ under which a row that is green in one column and blank in another means anythin
 | FPU: 68060 context save/restore | — | — | EMU | HW | ISSUE-43; `fpc_*` counters |
 | Graphics: Piccolo / Xsvga (Z2) | — | — | — | HW | `docs/REALHW-ACCEPTANCE-260731.md` §Xsvga, `docs/REALHW-ACCEPTANCE-260801.md` |
 | Graphics: VA2000 RTG | — | HW | — | HW | `docs/REALHW-ACCEPTANCE-260801.md` |
-| RAM above 32 MB | — | — | — | **not implemented** | §3; private analysis retained outside this repository |
+| RAM: one region up to 128 MiB | ? | ? | ? | HW | `Total Unix memory = 134213632` on an A4000 + Z3660 (68LC060, `amix_ram 128`), `docs/060-F4-M2-ATT4-RESULTS-260825.md`; the 4 KiB page is what lets the kernel describe 128 MiB (§3) |
+| RAM: two separate regions pooled | — | — | — | **not implemented** | only the region the kernel is loaded into is used (§3); private analysis retained outside this repository |
 | Graphics: VA2000 RTG over Zorro III | — | HW | — | HW | `docs/REALHW-Z3-VA2000-ACCEPTANCE-260819.md` (060), `docs/REALHW-Z3-040-260906.md` (040) |
 | 68LC060 | — | — | — | — | not in these columns: boots to multiuser on `LC060-Z3660` (reported at the merge, `7a99fe9`); floating point through the FPE lane is not accepted — §3 FPU |
 
@@ -226,7 +227,10 @@ software FPU — NetBSD's m68k FPE, linked by `relink-040-fpe.sh`, with `FPE=0` 
 byte for byte — was merged on 2026-08-28. Its bring-up on real silicon is in `docs/contracts/FPE-*.md`,
 and it is not accepted.
 
-**RAM > 32 MB.** The machine offers 48 MB in two regions (32 MB @`0x08000000` + 16 MB
+**RAM: one region, not two.** A single region of up to 128 MiB works: with 4 KiB pages the
+kernel's fixed page-frame budget covers twice what the stock 2 KiB-page kernel's does, and the
+68LC060 on a Z3660 runs with 128 MiB (§2). What is not implemented is pooling two separate
+regions. The machine this was studied on offers 48 MB in two regions (32 MB @`0x08000000` + 16 MB
 @`0x07000000`, the second *below* the first) and AMIX counts only the one the kernel was loaded
 into. Codex's analysis found **no technical ceiling**; the blocker is that the boot-time
 algorithm does not recognise A and B as one pool. Bounded boot/startup work, not a counter bump.
@@ -430,7 +434,7 @@ survives as history but its conclusion has been replaced.
 
 ### Two decisions taken 2026-08-13, recorded so they are not silently reopened
 
-* **RAM above 32 MB: declined.** The analysis stands (no technical ceiling; the missing 16 MB is
+* **Pooling two RAM regions: declined.** The analysis stands (no technical ceiling; the missing 16 MB is
   region representation plus a one-contiguous-span startup model), and the corrected fix is bigger
   than it first looked — coalescing the regions is not enough on its own, the kernel must also be
   bound at the bottom of the merged span, or startup taught to accept memory below the kernel.
