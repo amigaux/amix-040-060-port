@@ -367,7 +367,7 @@ survives as history but its conclusion has been replaced.
 | 104 | the panic backtrace stopped after one frame | FIXED, **not yet exercised on hardware** | — | second line |
 | 105 | `xpanic` decided whether to `sync()` from uninitialised bits | FIXED, **not yet exercised on hardware** | — | second line |
 | 106 | PID 1 dies at exec with a kernel-shaped user stack pointer | CLOSED — symptom record | Z3660 | a defect of the card's emulation, not of this port |
-| 107 | stock `kzero` is `bzero`, so a shrinking `ftruncate` can panic (grimoire quirk 90) | FIXED, **not yet exercised on hardware** | EMU | stock defect; `src/kzero_nofault.s` arms the `u_nofault` pad; the three panicking cases now return with intact data on the test kernel `68060-261030-50`; the 030 line has the same defect |
+| 107 | stock `kzero` is `bzero`, so a shrinking `ftruncate` can panic (grimoire quirk 90) | FIXED | EMU, 060 HW | stock defect; `src/kzero_nofault.s` arms the `u_nofault` pad; the three panicking cases return with intact data on the test kernel `68060-261030-50`, in emulation and on the A4000T's 68060 (the panic itself measured in emulation only); the 030 line has the same defect |
 
 **ISSUE-107's emergency rollback is two variables.** `KZERO=0` builds `relink-040.sh` without `src/kzero_nofault.s`, so `kzero` is the stock `bzero` alias again. On the -61 recipe that reproduces the record `516faa6b` byte for byte. `tools/status-facts.sh` fails that kernel's `kzero` binding, and so the build's status gate refuses it, unless `STATUS_ALLOW_NO_KZERO=1` is also exported; the row then reads "rolled back". Nothing else accepts the missing override.
 

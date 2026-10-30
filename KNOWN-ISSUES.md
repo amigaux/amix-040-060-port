@@ -6826,9 +6826,9 @@ the fix is emulator-side.
 
 ---
 
-## ✅ ISSUE-107 (2026-10-30, a stock defect: REPRODUCED ON DEMAND in emulation on `68060-261028-61`, FIXED in emulation on the test kernel `68060-261030-50` — not yet on hardware): stock `kzero` is a second name for `bzero`, so a shrinking `ftruncate` can panic the kernel (grimoire quirk 90)
+## ✅ ISSUE-107 (2026-10-30, a stock defect: REPRODUCED ON DEMAND in emulation on `68060-261028-61`, FIXED on the test kernel `68060-261030-50` in emulation and HARDWARE-ACCEPTED the same day, A4000T + Z3660/68060): stock `kzero` is a second name for `bzero`, so a shrinking `ftruncate` can panic the kernel (grimoire quirk 90)
 
-> **Ledger: FIXED in emulation, not exercised on hardware.** `src/kzero_nofault.s` gives `kzero`
+> **Ledger: FIXED; accepted in emulation and on the A4000T's 68060 (test kernel, not a cut).** `src/kzero_nofault.s` gives `kzero`
 > the fault catch SVR4 defines for it; `relink-040.sh` binds it by default (`KZERO=1`) and refuses a
 > kernel where `kzero` is still the `bzero` alias. The 68030 line has the same defect; the file
 > assembles byte-identically there and the port is that line's job.
@@ -6880,6 +6880,15 @@ past the old EOF); `kzr_alien_n` 0 throughout; `kzr_calls` 51 → 90 → 277. Sm
 `cp` + `cmp` of `/stand/unix`, an odd-size `dd` copy (bs 1000 then 333) and a spec-node write and
 read-back on `/dev/dsk/c5d0s1` (`seek=7`, bs 1000) all compare equal.
 Built with `KZERO=0`, the same tree reproduces the record `-61` kernel (`516faa6b`) byte for byte.
+
+**Verified on hardware (2026-10-30, A4000T, Z3660/68060, 128 MB).** The same test kernel and ufs
+module, installed by `kbootset` as a generation on the onboard 53C710 root (a4kt710, `c6d0s1`) and
+booted from a power cycle. All nine cases return 0 with size M, `[0,M)` intact and `[M, N-1)` zero
+after the regrow, the box up after each (case 5 run alone after a telnet login failure, a bench
+fault). `kzr_fail_n` 0 → 3, `kzr_last_addr` `0x40ac1000`, `kzr_alien_n` 0 throughout; `cp` +
+`cmp` and the odd-size `dd` compare equal; the spec-node write ran only against `/dev/null` (no free
+scratch slice on that machine). Rolled back to `-61` afterwards. No `-61` control was run there, so
+the panic itself is measured in emulation only.
 
 ---
 
