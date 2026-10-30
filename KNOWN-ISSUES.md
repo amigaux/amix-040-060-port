@@ -6892,6 +6892,65 @@ the panic itself is measured in emulation only.
 
 ---
 
+## ✅ ISSUE-108 (2026-10-30, a stock defect: MEASURED in emulation on `68060-261028-61` and `68060-261030-50`, FIXED by the ufs module of the test kernel `68060-261030-50` in emulation; NOT YET ON HARDWARE): a shrink to an unaligned length past the direct blocks leaves the old bytes on disk, and a regrow reads them back (grimoire quirk 91)
+
+> **Ledger: FIXED in emulation (test kernel, not a cut); the hardware run joins the batched release
+> acceptance.** `src/ufs_vptrunz.c` writes the zeroed tail of the kept block before the stock
+> `pvn_vptrunc`; `tools/ufs-tailzero.sh` binds it into the ufs object by default (`UFS_TAILZERO=0`
+> leaves the object unchanged) and refuses an object where `ufs_itrunc` does not reach it. The
+> routine is the 68030 line's (amix kernel/k30 `1be27f8`), ported; only its comment differs.
+
+**Symptom.** No panic and no error: after `F_FREESP` shrinks a file to M and the file grows back,
+part of `[M, old length)` reads the file's OLD bytes instead of zeros. Measured on `-61` and `-50`
+alike (ftshrink, root ufs, 8 KiB blocks, 4 KiB pages):
+`200000→150000` stale `[151552,155647]`; `480017→470000` stale `[471040,475135]`;
+`200000→151552` stale `[151552,155647]`; `20000→15000`, `300017→250000`, `200000→147456`,
+`1000000→900000` and `1000→500` clean. The stale bytes are on disk: they survive `sync`, a
+shutdown and a fresh boot.
+
+**Rule** (fits every case): the file extends past the 12 direct blocks and M is not block-aligned.
+Warm, `[roundup(M, PAGESIZE), roundup(M, 8192))` keeps the old bytes; cold (no page of the file
+cached), all of `[M, roundup(M, 8192))` does.
+
+**Mechanism.** `ufs_itrunc` calls `pvn_vptrunc(vp, M, 8192 - blkoff(M))`. Warm, `pvn_vptrunc`
+zeroes the range in the cache, releases it `SM_WRITE|SM_ASYNC`, then aborts every page at or past
+M; with SVR4's 8 KiB pages M's page covered the rest of the block, with 4 KiB (and the 030's 2 KiB)
+the pages past it are aborted before the write reaches the disk. Cold, `pvn_vptrunc` returns at once
+(`v_pages == NULL`) and zeroes nothing.
+
+**Fix.** The ufs object's one symbol named `pvn_vptrunc` is renamed `ufs_vptrunz` (a same-length
+`.strtab` string, 4 bytes) and linked (`ld -r`) with `src/ufs_vptrunz.c`. When the shrink cuts into
+a kept block past the direct blocks, `ufs_vptrunz` zeroes `[M, end of the block)` through segkmap in
+`MAXBSIZE` windows with `kzero`, which faults pages in (the cold case), and releases each with
+`SM_WRITE` alone, a synchronous put; then it calls the stock `pvn_vptrunc`. Every other call is the
+stock one. Counters `qz_calls`, `qz_tail`, `qz_cold`, `qz_kzfail`, `qz_puterr` behind `qz_magic`
+(`"QZT!"`). The step runs between `fsobj-patch.py` and the module wrap (`docs/contracts/KINFO.md`);
+the base kernel is unchanged. Its HARD CHECK: `ufs_vptrunz` defined once, `qz_magic`, `ufs_itrunc`
+its only caller and no longer a caller of `pvn_vptrunc`, `ufs_vptrunz` a caller of `pvn_vptrunc`.
+
+**Proof chain.** `fsobj-patch` gives the same ufs object (`6636b27e…`) on the `-50` and `-61` trees.
+With `UFS_TAILZERO=0` it passes through, and the `-50` module is `c939f2fb…` (the ISSUE-107 module)
+and the `-61` module `2f68f4d4…`, both byte for byte; with the step, the object is `f49bf55e…` and
+the modules `e1d632f5…` (`-50`) and `53fb173e…` (`-61`). The test kernel is therefore unix
+`1f98f683…` (`68060-261030-50`, unchanged) with ufs `e1d632f5…`; the build id does not tell the two
+`-50` ufs modules apart, the sha does.
+
+**Verified (emulation, row N219m, two boots by `kbootset`).** The ufs sha read back from the
+installed generation. k30's quirk-91 probes, judged by its `qzeval.py`: `probe.sh` warm on the root
+×3, a fresh ufs on `c5d0s1` with `probe.sh` remount ×2 and `probe7.sh` cold ×4 — **68 runs, 68
+clean**; `fsck -n` clean. ftshrink, the eight shapes above ×2: all regrow to zeros. The nine
+ISSUE-107 cases: all return 0 with intact data and zeros after the regrow. Smoke (`cp`+`cmp`,
+odd-size `dd`, a spec-node write and read-back on `c5d0s1`) equal. Counters at the end:
+`qz_calls` 230, `qz_tail` 68, `qz_cold` 18 (all in the cold runs), `qz_puterr` 0, `qz_kzfail` 3 —
+the tail `kzero` stopping at the page past the old EOF in three ISSUE-107 shapes, as designed;
+hence `kzr_fail_n` 6 rather than 3, `kzr_alien_n` 0.
+**Control** (same row, the vehicle's `-61`, one boot, the same tests): 56 of 68 probe runs BAD
+(every warm, remount and cold run of the stale shapes), all six ftshrink runs of the three stale
+shapes STALE, and the first panicking ISSUE-107 case (`110017→110000`) panicked at
+`pc=0x0800032A`, as `-61` does.
+
+---
+
 ## ⚠ ISSUE-50 (2026-08-25, OPEN): the burst step depends on a binary no clone can build, and nothing says so
 
 > **Ledger: OPEN** — found while preparing the first acceptance run on merged `main`.
