@@ -6826,6 +6826,63 @@ the fix is emulator-side.
 
 ---
 
+## ✅ ISSUE-107 (2026-10-30, a stock defect: REPRODUCED ON DEMAND in emulation on `68060-261028-61`, FIXED in emulation on the test kernel `68060-261030-50` — not yet on hardware): stock `kzero` is a second name for `bzero`, so a shrinking `ftruncate` can panic the kernel (grimoire quirk 90)
+
+> **Ledger: FIXED in emulation, not exercised on hardware.** `src/kzero_nofault.s` gives `kzero`
+> the fault catch SVR4 defines for it; `relink-040.sh` binds it by default (`KZERO=1`) and refuses a
+> kernel where `kzero` is still the `bzero` alias. The 68030 line has the same defect; the file
+> assembles byte-identically there and the port is that line's job.
+
+**Symptom.** A shrinking `fcntl(F_FREESP)` (what `ftruncate` is on SVR4) panics the kernel for some
+lengths only:
+
+```
+PANIC: KERNEL FAULT psw=0x2004, pc=0x0800032A, fmt=0x4, vector=0x2 (Bus Error)
+```
+
+`pc` is load base + `0x32A`, `bzero`'s `movel %a1,%a0@+` (the 030's `+0x32C` is the next
+instruction, a format-A frame's pc). Measured 2026-10-30 on `68060-261028-61`, emulated A4000 +
+LC060/Z3660 with about 32 MB: `110017→110000` and `477017→477000` panic; `1000→500`,
+`90017→90000`, `110017→106496`, `112017→110000`, `480017→477000` and `480017→480000` survive.
+
+**Rule** (fits every case on both lines; the 030 cases are the grimoire's): the shrink panics when
+the new length M is unaligned, M and the old length N lie in the same 8 KiB block past the 12
+direct blocks, and that block ends beyond the page holding the old EOF
+(`roundup(N, PAGESIZE) < roundup(N, 8192)`). With 4 KiB pages that needs N in the lower half of its
+block; with the 030's 2 KiB pages, anywhere but the last quarter.
+
+**Mechanism.** `ufs_itrunc` passes `zbytes = 8192 - (M mod 8192)` to `pvn_vptrunc`, which zeroes
+through segkmap to the end of the block with `kzero`. SVR4's `kzero` is `bzero` with a fault catch
+that returns -1, and `pvn_vptrunc` calls it rather than `bzero` so that a page which cannot be
+brought in does not panic. In the stock 2.1c image `kzero` and `bzero` are one body (both
+`.text+0x302`), so a store into the page wholly past the old EOF, which the fault path does not
+resolve, is a kernel fault. Callers of `kzero` in the base: `pvn_vptrunc`, `rwip`, `rwvp`,
+`spec_write`, `writei`; the k46 carve moves `rwip` and `writei` into the ufs module, which imports
+`kzero`. All ignore the return value, as SVR4's do.
+
+**Fix.** `src/kzero_nofault.s` (68000 instructions only) arms the stock `u_nofault` landing pad
+(`u+0x374`, the word `copyin`/`fubyte` arm) around a call to the stock `bzero`. `k_trap` runs the
+resolver first and lands on the pad only when it fails, so a non-resident page inside the file still
+faults in. The pad accepts a landing only from its own `bzero` frame (trap-time `a2` = `sp` and
+`Lkz_ret` on top of the stack); anything else panics, as the unarmed kernel would. Nothing readable
+is lost: the loop runs upward, so `[M, end of the old-EOF page)` is already zero when the fault is
+taken. Counters `kzr_calls`, `kzr_fail_n`, `kzr_last_addr` and `kzr_alien_n` sit behind
+`kzr_magic` (`"KZR!"`). The relink weakens the stock `kzero` and links ours; its HARD CHECK
+requires `kzero` off `0x302`, `bzero` still at `0x302`, one strong `kzero` and the counters.
+
+**Verified (emulation, row N219m, two boots by `kbootset`).** Test kernel `68060-261030-50`, unix
+sha256 `1f98f683…` (2 419 461 bytes), kabi k46.1.3, ufs module rebuilt for it (`c939f2fb…`). All
+nine cases, the three that panicked on `-61` among them, return 0 with size M, `[0,M)` intact and,
+after regrowing to N, `[M, N-1)` zero; the box stays up.
+The counters, read with `adb` against the booted image: `kzr_fail_n` 0 before the cases and 3
+after, one per former panic case, with `kzr_last_addr` `0x40abd000` (page-aligned: the first page
+past the old EOF); `kzr_alien_n` 0 throughout; `kzr_calls` 51 → 90 → 277. Smoke on the same boot:
+`cp` + `cmp` of `/stand/unix`, an odd-size `dd` copy (bs 1000 then 333) and a spec-node write and
+read-back on `/dev/dsk/c5d0s1` (`seek=7`, bs 1000) all compare equal.
+Built with `KZERO=0`, the same tree reproduces the record `-61` kernel (`516faa6b`) byte for byte.
+
+---
+
 ## ⚠ ISSUE-50 (2026-08-25, OPEN): the burst step depends on a binary no clone can build, and nothing says so
 
 > **Ledger: OPEN** — found while preparing the first acceptance run on merged `main`.
