@@ -106,7 +106,7 @@ echo
 # The ELF work is one python block: it needs the symbol table, the section headers and the
 # .data bytes at once, and doing that in sh with readelf+od is where transcription errors live.
 python3 - "$IMG" "$TEXT" "$BASE" "${AMIX_COMMON_SYMS:-z3660 putbuf}" <<'PY'
-import struct, subprocess, sys
+import os, struct, subprocess, sys
 
 img, textsize = sys.argv[1], int(sys.argv[2])
 BASE = int(sys.argv[3], 0)               # load base: where the loader bound the kernel
@@ -342,6 +342,10 @@ print("tail-jump there).  `ld -r` does not fail when an override definition is m
 print("leaves the stock body strong and links cleanly -- so this table, not the build's exit")
 print("status, is what says the override actually took.")
 print()
+# The emergency rollback (2026-10-30): an override that may be built out on purpose names the
+# variable that lets this table accept a kernel without it.  Set, the row reads "rolled back" and
+# does not count as failing; unset, the missing override fails as any other would.
+ROLLBACK = {"kzero": "STATUS_ALLOW_NO_KZERO"}       # KZERO=0 relink-040.sh: the stock bzero alias
 print("| symbol | stock | strong def | retained alias | verdict |")
 print("|---|---:|---:|---|---|")
 bad = 0
@@ -351,13 +355,14 @@ for name, stock, alias, why in OVERRIDES:
     ok = v is not None and v != stock
     if alias:
         ok = ok and ov == stock
-    bad += 0 if ok else 1
+    rolled = not ok and os.environ.get(ROLLBACK.get(name, ""), "") == "1"
+    bad += 0 if ok or rolled else 1
     print("| `%s` | `%05x` | %s | %s | %s |" % (
         name, stock,
         ("`%08x`" % v) if v is not None else "**MISSING**",
         ("—" if not alias else
          ("`%s`=`%08x`" % (alias, ov)) if ov is not None else "**%s MISSING**" % alias),
-        "ok" if ok else "**CHECK**"))
+        "ok" if ok else ("rolled back (%s=1)" % ROLLBACK[name]) if rolled else "**CHECK**"))
 print()
 print("bindings failing: **%d**" % bad)
 print()

@@ -369,6 +369,8 @@ survives as history but its conclusion has been replaced.
 | 106 | PID 1 dies at exec with a kernel-shaped user stack pointer | CLOSED — symptom record | Z3660 | a defect of the card's emulation, not of this port |
 | 107 | stock `kzero` is `bzero`, so a shrinking `ftruncate` can panic (grimoire quirk 90) | FIXED, **not yet exercised on hardware** | EMU | stock defect; `src/kzero_nofault.s` arms the `u_nofault` pad; the three panicking cases now return with intact data on the test kernel `68060-261030-50`; the 030 line has the same defect |
 
+**ISSUE-107's emergency rollback is two variables.** `KZERO=0` builds `relink-040.sh` without `src/kzero_nofault.s`, so `kzero` is the stock `bzero` alias again. On the -61 recipe that reproduces the record `516faa6b` byte for byte. `tools/status-facts.sh` fails that kernel's `kzero` binding, and so the build's status gate refuses it, unless `STATUS_ALLOW_NO_KZERO=1` is also exported; the row then reads "rolled back". Nothing else accepts the missing override.
+
 **ISSUE-69 (stock 2.1c `setuid(-123456)` test panic) differs between the two lines.** Upstream keeps it. `driver-line` removes it in the FPE pass (`src/patch_setuid_hook.py`, one byte); EMU acceptance is pending (DL-14).
 
 **The monitor switch on `driver-line` is `/dev/monsw`, char major 52** (`relink-040-monsw.sh`; `mknod /dev/monsw c 52 0`). It was 50 until PO-09, but that row is the SAD STREAMS driver's, so user opens never reached monsw. The zz9000 driver built with `-DZZ9K_MONSW` (amix-z3660rtg 7b449cd onward) switches through it and drives no CIA line itself. Its pass accepts that build only on a base that has monsw. Built and gated only; not yet run in EMU or on HW.
