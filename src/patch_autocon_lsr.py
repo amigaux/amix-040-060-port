@@ -45,4 +45,7 @@ def main():
     print("  [ok]   ISSUE-76 autocon @0x%05x: asrl -> lsrl (ids >= 0x8000 match)" % (CTX + 8))
 
 
-main()
+# Guarded: fsobj-patch.py and other readers load this file for its site tables, and an
+# unguarded main() would patch whatever kernel path sits in their argv (2026-10-30).
+if __name__ == "__main__":
+    main()

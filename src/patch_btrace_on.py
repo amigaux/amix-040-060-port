@@ -69,5 +69,8 @@ def main():
 
 WHAT = {"btrace_on": "DBG early-boot serial phase trace enabled",
         "kdbg_on":   "DBG VM diagnostics enabled (base/quiet stay silent)"}
-for FLAG in ("btrace_on", "kdbg_on"):
-    main()
+# Guarded: fsobj-patch.py and other readers load this file for its site tables, and an
+# unguarded main() would patch whatever kernel path sits in their argv (2026-10-30).
+if __name__ == "__main__":
+    for FLAG in ("btrace_on", "kdbg_on"):
+        main()

@@ -22,6 +22,10 @@
 # the old value 0x00000000, fails closed on anything unexpected.
 
 import struct, sys
+# Guarded (2026-10-30): this script does its work at module level, so loading it would patch
+# whatever kernel path sits in the loader's argv.  It refuses to be imported.
+if __name__ != "__main__":
+    raise ImportError("%s patches the kernel in its argv; run it, do not import it" % __file__)
 
 CB, WT = 0x00000020, 0x00000000
 

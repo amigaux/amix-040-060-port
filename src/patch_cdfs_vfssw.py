@@ -141,4 +141,7 @@ def main():
     print("vfssw[4] = { \"cdfs\", cdfsinit, 0, 0 }; sysent[78] = cdfs_rfsys -> %s" % kernel)
 
 
-main()
+# Guarded: fsobj-patch.py and other readers load this file for its site tables, and an
+# unguarded main() would patch whatever kernel path sits in their argv (2026-10-30).
+if __name__ == "__main__":
+    main()

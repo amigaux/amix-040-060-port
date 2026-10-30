@@ -129,4 +129,7 @@ def main():
     print("Z3660 wiring installed -> %s" % IMG)
 
 
-main()
+# Guarded: fsobj-patch.py and other readers load this file for its site tables, and an
+# unguarded main() would patch whatever kernel path sits in their argv (2026-10-30).
+if __name__ == "__main__":
+    main()

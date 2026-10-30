@@ -16,6 +16,10 @@
 # usage: python3 src/patch_xpage_flip.py <kernel>      (writes in place: 1 -> 0)
 
 import sys, os, struct, subprocess
+# Guarded (2026-10-30): this script does its work at module level, so loading it would patch
+# whatever kernel path sits in the loader's argv.  It refuses to be imported.
+if __name__ != "__main__":
+    raise ImportError("%s patches the kernel in its argv; run it, do not import it" % __file__)
 
 if len(sys.argv) != 2:
     raise SystemExit("usage: %s <kernel-elf>" % sys.argv[0])

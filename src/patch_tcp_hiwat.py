@@ -92,4 +92,7 @@ def main():
     print("  [ok]   tcpm_info[3].mi_hiwat .data 0x%x: 0x%x -> 0x%x (TCP lower read queue)" % (site, STOCK, FIXED))
 
 
-main()
+# Guarded: fsobj-patch.py and other readers load this file for its site tables, and an
+# unguarded main() would patch whatever kernel path sits in their argv (2026-10-30).
+if __name__ == "__main__":
+    main()

@@ -14,6 +14,10 @@
 # Idempotent; fails closed on any mismatch; the four retargets are one atomic group.
 
 import struct, sys
+# Guarded (2026-10-30): this script does its work at module level, so loading it would patch
+# whatever kernel path sits in the loader's argv.  It refuses to be imported.
+if __name__ != "__main__":
+    raise ImportError("%s patches the kernel in its argv; run it, do not import it" % __file__)
 
 ARGS = sys.argv[1:]
 CHECK = bool(ARGS) and ARGS[0] == "--check"

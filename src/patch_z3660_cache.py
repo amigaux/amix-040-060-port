@@ -29,6 +29,10 @@
 
 import struct
 import sys
+# Guarded (2026-10-30): this script does its work at module level, so loading it would patch
+# whatever kernel path sits in the loader's argv.  It refuses to be imported.
+if __name__ != "__main__":
+    raise ImportError("%s patches the kernel in its argv; run it, do not import it" % __file__)
 
 VALUES = (0, 40, 60)
 MAGIC = 0x5A434121                      # 'ZCA!'

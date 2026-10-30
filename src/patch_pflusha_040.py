@@ -71,4 +71,7 @@ def main():
         f.write(buf)
     print("done: %d patched, %d already-patched -> %s" % (patched, skipped, KERNEL))
 
-main()
+# Guarded: fsobj-patch.py and other readers load this file for its site tables, and an
+# unguarded main() would patch whatever kernel path sits in their argv (2026-10-30).
+if __name__ == "__main__":
+    main()
