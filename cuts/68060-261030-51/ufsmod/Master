@@ -1,0 +1,11 @@
+# ufs: carved by tools/carve.py (S5-04), core tier, built per kernel cut
+$modtype misc
+$class boot
+$match always
+$tier core
+$build 68060-261030-51
+$fs ufs
+$unload never
+$param probe:bool:0
+$desc ufs filesystem (carved)
+ufs	ufs
