@@ -155,7 +155,9 @@ zeroed in place, so no address moves: `vfssw` loses their rows (`nfstype` 10), `
 with the COMMONs only they use. ufs then comes from a core-tier module (`tools/fsobj-patch.py`, wrapped by
 amix-dlm `tools/carve.py` with the cut's build id); s5 has none on this line. The module's inputs are
 the cross sysroot's stock objects: `fsobj-patch.py --stock <stand/unix> --base build/b-new
-usr/sys/fs/ufs/exp` (a439e68f), and `carve.py wrap --filesys usr/sys/master.d/filesys.o` (1c7a3ca6).
+usr/sys/fs/ufs/exp` (a439e68f), then `tools/ufs-tailzero.sh` on its output (grimoire quirk 91: ufs_itrunc's
+`pvn_vptrunc` call goes through `src/ufs_vptrunz.c`; `UFS_TAILZERO=0` passes the object through unchanged), and
+`carve.py wrap --filesys usr/sys/master.d/filesys.o` (1c7a3ca6).
 It is built with amix-dlm's k46 ABI kit at the core's revision, made with `PORT` = this tree and
 `MONSW_H` = its `src/sys/monsw.h`.
 
