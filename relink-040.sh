@@ -687,8 +687,10 @@ echo "[OK] ISSUE-100 panic-path guard bound: sync @0x$SGADDR (stock body was 0x5
 
 # HARD CHECK (2026-10-30, ISSUE-107): kzero must be ours and bzero must stay the stock body.
 # They share .text+0x302 in the stock image, so the failure modes are the quiet ones: a missing
-# weaken leaves kzero = bzero and the quirk-90 panic in place; and the three callers (pvn_vptrunc,
-# rwvp, spec_write) must reach the new kzero through their relocations, not through 0x302.
+# weaken leaves kzero = bzero and the quirk-90 panic in place; and the callers must reach the new
+# kzero through their relocations, not through 0x302: pvn_vptrunc, rwvp, spec_write, and the ufs
+# and s5 write paths rwip and writei (the k46 carve takes those two out of the base; the ufs
+# module's own rwip then imports kzero through the core tier, abi/k46/core.list).
 if [ "$KZERO" = "1" ]; then
 	KZADDR=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="kzero" && $2=="T" {print $1}')
 	BZADDR=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="bzero" && $2=="T" {print $1}')
@@ -699,9 +701,10 @@ if [ "$KZERO" = "1" ]; then
 		|| { echo "[FAIL] kzero does not have exactly one strong definition"; exit 1; }
 	[ -n "$(m68k-linux-gnu-nm "$OUT" | awk '$3=="kzr_magic" && $2=="D" {print $1}')" ] \
 		|| { echo "[FAIL] kzr_magic missing -> kzero_nofault.o's counter block is not in the image"; exit 1; }
-	KZREL=$(m68k-linux-gnu-objdump -r "$OUT" | grep -cE "R_68K_32 +kzero\$")
-	[ "$KZREL" = "3" ] || { echo "[FAIL] $KZREL relocations name kzero, expected 3 (pvn_vptrunc, rwvp, spec_write)"; exit 1; }
-	echo "[OK] ISSUE-107 kzero fault catch bound: kzero @0x$KZADDR, bzero stock @0x302, 3 callers."
+	KZCALLERS=$(m68k-linux-gnu-objdump -dr "$OUT" | awk '/^[0-9a-f]+ <[^>]+>:$/{fn=$2} /R_68K_32[ \t]+kzero$/{gsub(/[<>:]/,"",fn); print fn}' | sort | tr '\n' ' ')
+	[ "$KZCALLERS" = "pvn_vptrunc rwip rwvp spec_write writei " ] \
+		|| { echo "[FAIL] kzero callers are '$KZCALLERS', expected pvn_vptrunc rwip rwvp spec_write writei"; exit 1; }
+	echo "[OK] ISSUE-107 kzero fault catch bound: kzero @0x$KZADDR, bzero stock @0x302, callers $KZCALLERS"
 fi
 
 # HARD CHECK (2026-08-20, ISSUE-102): pageinitzero.o wraps page_init so the page-frame
