@@ -297,6 +297,21 @@ m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/ptdatfree040.s" -o "$HERE/build/ptdatfr
 # read.  This override is the stock loop plus two null checks and a counter block.
 # CPU-independent: it is a defect in generic vfs code, not in anything 040.
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/syncguard.s" -o "$HERE/build/syncguard.o"
+# kzero_nofault (2026-10-30, ISSUE-107, grimoire quirk 90): stock kzero is a second name for
+# bzero (both .text+0x302), so the fault catch SVR4's kzero has is missing and pvn_vptrunc's
+# zeroing of a page past EOF (an unaligned ftruncate shrink past the direct blocks) is a
+# KERNEL FAULT panic.  This kzero arms the stock u_nofault pad (u+0x374) around the stock
+# bzero and returns -1 on an unresolvable fault.  CPU-independent.  KZERO=0 omits the unit
+# and the weaken -- the base without it, byte for byte apart from the build-id stamp.
+KZERO="${KZERO:-1}"
+KZERO_OBJ=""; KZERO_OC=""
+if [ "$KZERO" = "1" ]; then
+	m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/kzero_nofault.s" -o "$HERE/build/kzero_nofault.o"
+	KZERO_OBJ="$HERE/build/kzero_nofault.o"
+	KZERO_OC="--weaken-symbol kzero"
+else
+	echo "[*] KZERO=0 -- building WITHOUT the kzero fault catch (rollback control)"
+fi
 # pageinitzero (2026-08-20, ISSUE-102): the page-frame database is sptalloc'd with a
 # non-zero base, which is segkmem_mapin -- it MAPS existing DRAM and clears nothing --
 # and page_init only ORs p_lock into each struct.  Every other field arrives as
@@ -534,6 +549,7 @@ m68k-linux-gnu-objcopy \
 	--weaken-symbol fpu_setup \
 	--add-symbol fpu_setup_orig=.text:0x19b50,function,global \
 	$FPUINIT_OC \
+	$KZERO_OC \
 	"$HERE/build/unix-stage1"
 
 OUT="$HERE/build/unix-040"
@@ -554,7 +570,7 @@ m68k-cbm-sysv4-ld -r -o "$OUT" "$HERE/build/unix-stage1" \
 	"$HERE/build/config040.o" "$HERE/build/cb_icode040.o" "$HERE/build/kdbg040.o" \
 	"$HERE/build/dbgpublish040.o" "$HERE/build/codepub040.o" "$HERE/build/issue39_040.o" \
 	"$HERE/build/legacysdt040.o" "$HERE/build/ptdatfree040.o" \
-	"$HERE/build/syncguard.o" "$HERE/build/pageinitzero.o" "$HERE/build/segmapdbg.o" \
+	"$HERE/build/syncguard.o" "$HERE/build/pageinitzero.o" "$HERE/build/segmapdbg.o" $KZERO_OBJ \
 	"$HERE/build/btwalk.o" "$HERE/build/usptrap.o" "$HERE/build/srgtrap.o" "$HERE/build/inittrap.o" "$HERE/build/inituser.o" \
 	"$HERE/build/hgfault040.o" \
 	"$HERE/build/i10rev040.o"
@@ -668,6 +684,25 @@ if [ -z "$(m68k-linux-gnu-nm "$OUT" | awk '$3=="syncg_magic" && $2=="D" {print $
 	echo "[FAIL] syncg_magic missing -> syncguard.o's counter block is not in the image"; exit 1
 fi
 echo "[OK] ISSUE-100 panic-path guard bound: sync @0x$SGADDR (stock body was 0x5d21a)."
+
+# HARD CHECK (2026-10-30, ISSUE-107): kzero must be ours and bzero must stay the stock body.
+# They share .text+0x302 in the stock image, so the failure modes are the quiet ones: a missing
+# weaken leaves kzero = bzero and the quirk-90 panic in place; and the three callers (pvn_vptrunc,
+# rwvp, spec_write) must reach the new kzero through their relocations, not through 0x302.
+if [ "$KZERO" = "1" ]; then
+	KZADDR=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="kzero" && $2=="T" {print $1}')
+	BZADDR=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="bzero" && $2=="T" {print $1}')
+	[ -n "$KZADDR" ] && [ "$KZADDR" != "00000302" ] \
+		|| { echo "[FAIL] kzero is '$KZADDR' -> still the stock bzero alias (ISSUE-107)"; exit 1; }
+	[ "$BZADDR" = "00000302" ] || { echo "[FAIL] bzero moved to '$BZADDR' -> only kzero may be replaced"; exit 1; }
+	[ "$(m68k-linux-gnu-nm "$OUT" | grep -cE " T kzero\$")" = "1" ] \
+		|| { echo "[FAIL] kzero does not have exactly one strong definition"; exit 1; }
+	[ -n "$(m68k-linux-gnu-nm "$OUT" | awk '$3=="kzr_magic" && $2=="D" {print $1}')" ] \
+		|| { echo "[FAIL] kzr_magic missing -> kzero_nofault.o's counter block is not in the image"; exit 1; }
+	KZREL=$(m68k-linux-gnu-objdump -r "$OUT" | grep -cE "R_68K_32 +kzero\$")
+	[ "$KZREL" = "3" ] || { echo "[FAIL] $KZREL relocations name kzero, expected 3 (pvn_vptrunc, rwvp, spec_write)"; exit 1; }
+	echo "[OK] ISSUE-107 kzero fault catch bound: kzero @0x$KZADDR, bzero stock @0x302, 3 callers."
+fi
 
 # HARD CHECK (2026-08-20, ISSUE-102): pageinitzero.o wraps page_init so the page-frame
 # database is zeroed before it is published.  Both directions matter and each fails

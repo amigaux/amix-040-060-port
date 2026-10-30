@@ -332,6 +332,7 @@ OVERRIDES = [
     ("sync",             0x5d21a, None,                  "ISSUE-100: stock sync() walks a NULL vsw_vfsops -- any pre-vfsinit panic double-faults"),
     ("page_init",        0xaf42a, "page_init_orig",      "ISSUE-102: the page-frame database is mapped-in DRAM and nothing zeroes it"),
     ("setregs",          0x58b62, "setregs_orig",        "ISSUE-106: measure the USP handoff at the moment setregs writes it"),
+    ("kzero",            0x00302, None,                  "ISSUE-107: stock kzero is bzero -- no fault catch, the quirk-90 ftruncate panic"),
 ]
 print("## Override bindings")
 print()
