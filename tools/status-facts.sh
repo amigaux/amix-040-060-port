@@ -364,6 +364,33 @@ for name, stock, alias, why in OVERRIDES:
          ("`%s`=`%08x`" % (alias, ov)) if ov is not None else "**%s MISSING**" % alias),
         "ok" if ok else ("rolled back (%s=1)" % ROLLBACK[name]) if rolled else "**CHECK**"))
 print()
+# A retarget is not an override: freeq stays strong at its stock address on purpose, and what
+# moves is every relocation that named it (relink-040.sh, tools/freeqguard-retarget.py).  So the
+# row counts relocations by symbol: freeq named once (freeq_guarded's own call), freeq_guarded
+# five times (qdetach, strclose x2, stropen x2), and the counter block present.
+RETARGETS = [
+    # target, guard, guard's relocations, magic, rollback variable, why it matters
+    ("freeq", "freeq_guarded", 5, "fqg_magic", "STATUS_ALLOW_NO_FREEQ_GUARD",
+     "ISSUE-109: qdetach(q, 0) frees a pair still on the run list -- the quirk-92 queuerun fault"),
+]
+named = {}
+if symtab is not None:
+    for s in relas:
+        for r in range(s['size'] // 12):
+            si = u32(s['off'] + r*12 + 4) >> 8
+            nm_ = sym_name(si)
+            named[nm_] = named.get(nm_, 0) + 1
+print("| target | relocations naming it | guard | relocations naming the guard | magic | verdict |")
+print("|---|---:|---|---:|---|---|")
+for tgt, guard, want, magic, var, why in RETARGETS:
+    nt, ng = named.get(tgt, 0), named.get(guard, 0)
+    ok = nt == 1 and ng == want and one(guard, 'T')[0] is not None and one(magic, 'D')[0] is not None
+    rolled = not ok and ng == 0 and os.environ.get(var, "") == "1"
+    bad += 0 if ok or rolled else 1
+    print("| `%s` | %d | `%s` | %d (want %d) | %s | %s |" % (tgt, nt, guard, ng, want,
+          "`%s`" % magic if one(magic, 'D')[0] is not None else "**MISSING**",
+          "ok" if ok else ("rolled back (%s=1)" % var) if rolled else "**CHECK**"))
+print()
 print("bindings failing: **%d**" % bad)
 print()
 
