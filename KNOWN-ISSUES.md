@@ -6991,9 +6991,19 @@ ran 150 rounds a phase and the fqg block was read by `adb` every 90 s.
   cut the free swap to about 9.4 MB. Every run reached "trig done" with no fault, `fqg_magic`
   `46514721`, and `fqg_calls` 355–369 before the trigger and about 4900 after it.
   **`fqg_run` and `fqg_scan` stayed 0 in all 7.** The run counts are nearly identical, so the
-  fork-failure spin never started on this vehicle. The save is shown on the 68030 line, at
-  16 MB.
-- **Control.** `68060-261030-51`, the same trigger, 4 runs (one with the held buffer): no fault.
+  fork-failure spin never started: what runs out is the swap *reservation*, and 150 rounds never
+  got near it.
+- **In the window.** Before the trigger, 6 `dd` buffers blocked on pipes (each half the remaining
+  gap, released after 900 s) cut the reservation to about 1030 blocks (`swap -s` "available").
+  That is k30's window, on all three runs:
+  - fork failed with EAGAIN (`trig.sh: fork failed - too many processes`);
+  - prngd-ctl stalled (phase B's `get` came back empty from round 110);
+  - no login answered for about 14 minutes.
+  The runs: `-52` twice, then the control `-51` once. After the release every run finished
+  with no fault. On `-52`, `fqg_calls` reached about 4990 and **`fqg_run` and `fqg_scan` stayed
+  0 in both runs**: no freed pair was caught. The save is shown on the 68030 line only.
+- **Control.** `68060-261030-51`, the same trigger: 4 runs outside the window (one with a held
+  buffer) and 1 in it, no fault.
   On the 68030 line the plain stock link also rarely faulted (0 of 3), so this does not argue
   against the defect.
 - **Regression.** `-52` on the c51 cell: k30's quirk-91 probes 68/68 clean, no STALE ftshrink
