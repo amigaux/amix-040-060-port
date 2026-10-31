@@ -312,6 +312,27 @@ if [ "$KZERO" = "1" ]; then
 else
 	echo "[*] KZERO=0 -- building WITHOUT the kzero fault catch (rollback control)"
 fi
+# freeqguard (2026-10-31, ISSUE-109, grimoire quirk 92): qattach undoes a failed open with
+# qdetach(q, 0), which frees the queue pair without taking it off the STREAMS run list; the next
+# queuerun calls srvp of freed memory.  freeq_guarded unlinks the pair from the run and scan lists
+# at spl7, then calls the stock freeq; every relocation naming freeq is retargeted to it after the
+# link (tools/freeqguard-retarget.py, below).  CPU-independent; the 030 line has the same fix.
+# FREEQ_GUARD=0 omits the unit and the retarget -- the base without it, byte for byte.
+FREEQ_GUARD="${FREEQ_GUARD:-1}"
+FQG_OBJ=""
+if [ "$FREEQ_GUARD" = "1" ]; then
+	m68k-cbm-sysv4-gcc $(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/') \
+		-c "$HERE/src/freeqguard.c" -o "$HERE/build/freeqguard.o"
+	FQG_IN=$(m68k-linux-gnu-nm "$HERE/build/freeqguard.o" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ')
+	FQG_EX=$(m68k-linux-gnu-nm "$HERE/build/freeqguard.o" | awk '$2 ~ /^[TDB]$/{print $3}' | LC_ALL=C sort | tr '\n' ' ')
+	[ "$FQG_IN" = "freeq qhead qtail scanqhead scanqtail " ] \
+		|| { echo "[FAIL] freeqguard.o imports '$FQG_IN'"; exit 1; }
+	[ "$FQG_EX" = "fqg_calls fqg_last fqg_magic fqg_run fqg_scan freeq_guarded " ] \
+		|| { echo "[FAIL] freeqguard.o exports '$FQG_EX'"; exit 1; }
+	FQG_OBJ="$HERE/build/freeqguard.o"
+else
+	echo "[*] FREEQ_GUARD=0 -- building WITHOUT the freeq guard (rollback control)"
+fi
 # pageinitzero (2026-08-20, ISSUE-102): the page-frame database is sptalloc'd with a
 # non-zero base, which is segkmem_mapin -- it MAPS existing DRAM and clears nothing --
 # and page_init only ORs p_lock into each struct.  Every other field arrives as
@@ -570,7 +591,7 @@ m68k-cbm-sysv4-ld -r -o "$OUT" "$HERE/build/unix-stage1" \
 	"$HERE/build/config040.o" "$HERE/build/cb_icode040.o" "$HERE/build/kdbg040.o" \
 	"$HERE/build/dbgpublish040.o" "$HERE/build/codepub040.o" "$HERE/build/issue39_040.o" \
 	"$HERE/build/legacysdt040.o" "$HERE/build/ptdatfree040.o" \
-	"$HERE/build/syncguard.o" "$HERE/build/pageinitzero.o" "$HERE/build/segmapdbg.o" $KZERO_OBJ \
+	"$HERE/build/syncguard.o" "$HERE/build/pageinitzero.o" "$HERE/build/segmapdbg.o" $KZERO_OBJ $FQG_OBJ \
 	"$HERE/build/btwalk.o" "$HERE/build/usptrap.o" "$HERE/build/srgtrap.o" "$HERE/build/inittrap.o" "$HERE/build/inituser.o" \
 	"$HERE/build/hgfault040.o" \
 	"$HERE/build/i10rev040.o"
@@ -1303,6 +1324,25 @@ if [ "$FPUINIT060" = "1" ]; then
 	run_step indent python3 "$HERE/src/check_fpu_relocs.py" "$OUT" --gated
 else
 	run_step indent python3 "$HERE/src/check_fpu_relocs.py" "$OUT"
+fi
+
+# HARD CHECK (2026-10-31, ISSUE-109): every relocation naming freeq, found by symbol, now names
+# freeq_guarded; only the guard's own call still names freeq, whose stock body stays at 0x5062a.
+# A lost retarget links and boots cleanly and leaves the quirk-92 hole, so the callers are named
+# exactly: qdetach (qattach's undo), strclose and stropen twice each.
+if [ "$FREEQ_GUARD" = "1" ]; then
+	echo
+	echo "[*] freeq guard: every freeq relocation -> freeq_guarded"
+	run_step 2 python3 "$HERE/tools/freeqguard-retarget.py" "$OUT"
+	run_step 2 python3 "$HERE/tools/freeqguard-retarget.py" --check "$OUT"
+	FQADDR=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="freeq" && $2=="T" {print $1}')
+	[ "$FQADDR" = "0005062a" ] || { echo "[FAIL] freeq is at '$FQADDR', not the stock 0x5062a"; exit 1; }
+	[ "$(m68k-linux-gnu-nm "$OUT" | grep -cE " T freeq_guarded\$")" = "1" ] \
+		|| { echo "[FAIL] freeq_guarded does not have exactly one strong definition"; exit 1; }
+	FQCALLERS=$(m68k-linux-gnu-objdump -dr "$OUT" | awk '/^[0-9a-f]+ <[^>]+>:$/{fn=$2} /R_68K_32[ \t]+freeq_guarded$/{gsub(/[<>:]/,"",fn); print fn}' | sort | tr '\n' ' ')
+	[ "$FQCALLERS" = "qdetach strclose strclose stropen stropen " ] \
+		|| { echo "[FAIL] freeq_guarded callers are '$FQCALLERS', expected qdetach strclose x2 stropen x2"; exit 1; }
+	echo "[OK] ISSUE-109 freeq guard bound: freeq stock @0x5062a, freeq_guarded from $FQCALLERS"
 fi
 
 echo
