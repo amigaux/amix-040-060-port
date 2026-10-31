@@ -1,0 +1,239 @@
+{
+ "contract": "amix-kernel-families",
+ "version": 1,
+ "control": {
+  "name": "candidate-3",
+  "sha256": "5aa7d732c3a919c74c4f46cbb679528edfb7848e1761454b0487c2672f405f6e",
+  "sum_r": 49323,
+  "paths": [
+   "inputs/control/unix-060-fpe-r13-zz9000-c3-CARD1-ced0s1"
+  ],
+  "why": "D-1 D4/D5: the rollback and diff reference; never rebuilt (KT-04). Paths are relative to the cut's run root (cut 68060-261030-51; optional there)."
+ },
+ "scan060": {
+  "control_set_file": "contracts/scan060/candidate-3.txt",
+  "control_set_sha256": "9dec3ed8dcf038c6184c9bd06b76d137c6317fd4b9bb5439c5e56fe225b8eeb9",
+  "scanned_with": "amix-040-060-port test-tools/scan060.py @ dcd9d9f (sha256 723dd882b5bb130b...)",
+  "normalisation": "candidate lines only; address column dropped; PC-relative targets '@(<hex> <SYM>)' reduced to '@(<SYM>)'; sorted. A newer scan060.py cannot move the gate: the set is pinned by this sha.",
+  "why": "The 55 inherited candidates are stock movep/cas2/cmp2/64-bit-mul sites in stock and FPSP code that candidate-3 already carries to a real 060. They are not a driver-line finding. If one is ever shown to execute on silicon, that is a port-lane issue (Antti), not a gate change."
+ },
+ "note": "1.1 stage-2 k46 packages, interim pair (KD060-U's card-order points open): the r7 records + kinfo. Cut r7 (2026-10-21, owner decision 21:5x): the network fixes on the release media. Every shipped kernel carries DRIVER-LINE-10 (k0 gate tcp_hiwat required in every family); the 060 families carry z3660eth 9787f88. The published 1.0 stays r6e (kernel-families-r6e.json / -r6-2.json untouched). Chains work/k0-chains/r7/<family>.",
+ "families": {
+  "KD060-Z": {
+   "cputype": 60,
+   "bo_size": 61440,
+   "cards": [
+    0
+   ],
+   "drivers": [],
+   "wd7": "required",
+   "media_class": "z3660",
+   "bench_only": false,
+   "shipped": false,
+   "relsim_loader": "boot2-040",
+   "driver_objects": [
+    "dd_order040.o",
+    "rth1.o",
+    "rth1_tail040.o",
+    "kinfo.o",
+    "kinfo_tail040.o",
+    "pgrsv.o",
+    "pgrsv_tail040.o",
+    "isp060_pkg.o",
+    "sd4card.o",
+    "sdcardbase040-sd4.o",
+    "sd4card040.o",
+    "dlm-rev/obj/add.o",
+    "dlm-rev/obj/dlm_halt040.o",
+    "dlm-rev/obj/dlm_tail040.o"
+   ],
+   "scan060_vanished": {},
+   "note": "S4-22 (2026-10-26): the root-class kernel, no static z3660scsi (the Z3660 root comes from a module); S4-21 cut (2026-10-26): -61 recipe + relink-040-sd4card.sh after dd; dlm a15104e (core 0001-0032, kabi k46.1.1) with the halt hook, the sd seam, bdevsw[20] freed. The a4091/ide objects and the KD060-ZI IDE switch-table record serve the three-controller proof build only. S3-20, the k46 module kernel (2026-10-26): dd -> z3660 (Z3660_NET=off, e072408) -> f4arms --ufault --cache 60 -> f6 --kvd --swa -> rth1 DLM=1 -> kinfo DLM=1 -> dlm (amix-dlm db0abef) -> fpe (pgrsv, isp060, ttcompat, tcp hiwat), then sddevsize + W-D7. The S3-20 port tree = the -51 tree + the k46-module overlay. S5-15 re-cut (fresh tree): driver_objects pruned to what this chain links (no a4091/ide, the four-card sdcardbase040-sd4.o).",
+   "spl": {
+    "cflags_env": "gcc-cross-amix/build/env.sh",
+    "why": "T-9: under -traditional sys/types.h erases volatile and gcc drops the spl()/splx() asms. G1 = the macro dump must not define volatile empty; G2 = every spl-calling function writes %sr. Paths are relative to --objects-dir (the port build dir); includes are the relink scripts' own.",
+    "units": {
+     "pgrsv.o": {
+      "source": "../src/pgrsv.c",
+      "cpu": "-m68040",
+      "includes": [],
+      "note": "DRIVER-LINE-8: self-contained (no #include); its own pgrsv_spl/pgrsv_splx asm, 2 %sr writes in the object (relink-040-pgrsv.sh asserts both)."
+     }
+    }
+   },
+   "cdevsw": {
+    "49": {
+     "d_open": "nodev",
+     "d_close": "nodev",
+     "d_read": "nodev",
+     "d_write": "nodev",
+     "d_ioctl": "nodev",
+     "d_ttys": null,
+     "d_str": null
+    },
+    "50": {
+     "d_str": "sadinfo"
+    },
+    "51": {
+     "d_open": "nodev",
+     "d_close": "nodev",
+     "d_read": "nodev",
+     "d_write": "nodev",
+     "d_ioctl": "nodev",
+     "d_ttys": null,
+     "d_str": null
+    },
+    "52": {
+     "d_open": "nodev",
+     "d_close": "nodev",
+     "d_read": "nodev",
+     "d_write": "nodev",
+     "d_ioctl": "nodev",
+     "d_ttys": null,
+     "d_str": null
+    },
+    "53": {
+     "d_open": "kinfoopen",
+     "d_close": "kinfoclose",
+     "d_read": "kinforead",
+     "d_write": "kinfowrite",
+     "d_ioctl": "nodev",
+     "d_ttys": null,
+     "d_str": null
+    }
+   },
+   "wd7_payload": "6a5e077e9a8da9a475d96cfbda51b1910a6789f0e1a08b411d7128f41aea89ce",
+   "metal_bound": true,
+   "sddevsize": "fixed",
+   "rth1": "required",
+   "rth1_hook": {
+    "tool": "inputs/patchers/patch_rth1_hook.py",
+    "sha256": "88bb638ef6cb453338f99642a08181afa6bfb44f910c91ff69304de4d7f7ddec",
+    "rev": "90f4cdb"
+   },
+   "release": "r7",
+   "ttcompat_fix": "required",
+   "ttcompat_tool": {
+    "tool": "inputs/patchers/patch_ttcompat_init.py",
+    "sha256": "9d156e52274f950c936834106560b2bb0aa6ef0e1aa66de544692e45b9b55117",
+    "rev": "c2d7cad"
+   },
+   "inputs": {
+    "port": "amix-040-060-port c8a5a80 (relink-040-fpe.sh: pgrsv 7905bd1 + isp060 148f785 default, ttcompat fix f2fb474/c2d7cad default; rth1 pass 90f4cdb)",
+    "a4091": "n/a",
+    "wrapper": "gcc-cross-amix 2ab2b22",
+    "loaders": "good_040_rth b14ba6b5 / good_rth 2ba8e21a",
+    "z3660eth": "amix-z3660net 9787f88"
+   },
+   "pgrsv": "required",
+   "pgrsv_tool": {
+    "tool": "inputs/patchers/patch_pgrsv_sites.py",
+    "sha256": "249598f9582ce508d8cf9e285356643b0366c2e1c26246e79493f93daeac84a0",
+    "rev": "7905bd1"
+   },
+   "isp060": "required",
+   "isp060_tool": {
+    "tool": "inputs/patchers/patch_isp060_hook.py",
+    "sha256": "d9f737a037ff6d71871a33b92c8527b10116829c503c8cc6a1571148039135ec",
+    "rev": "148f785"
+   },
+   "scan060_known_data": [
+    {
+     "object": "isp060_pkg.o",
+     "anchor": "isp060_top",
+     "sha256": "50f0450062123e0fa101e599ada179ce55668e8fb7dc8b250524f174c1d0841b",
+     "hits": [
+      {
+       "offset": "0x5e4",
+       "line": "movepw %a2@(296),%d0 060: movepw not implemented"
+      }
+     ],
+     "why": "the 68060 ISP package (Motorola 060sp isp.S via build-isp060.sh): its one scan060 candidate is an offset-table word at package .text 0x5e4 decoded as movepw -- data, never executed (relink-040-isp060.sh gates exactly this one)"
+    }
+   ],
+   "cut": "r7 (2026-10-21): network fixes -- DRIVER-LINE-10 (TCP lower-read hiwat 4096 -> 16384, port c25d93d)",
+   "tcp_hiwat": "required",
+   "tcp_hiwat_tool": {
+    "tool": "inputs/patchers/patch_tcp_hiwat.py",
+    "sha256": "7b85a0a42bc8ce5b310ea2a8d406e7f99e4970567742a463bf0d90f2435f1e28",
+    "rev": "c25d93d"
+   },
+   "kinfo": "C2-1 v2 with the module list (DLM=1), kabi k46.1.0, cdevsw[53]; port k46-module",
+   "dlm": "S3-20: amix-dlm db0abef core spliced by relink-040-dlm.sh (port k46-module); z3660eth, zz9000, monsw out (majors 49/51/52 empty)",
+   "scan060_tables": {
+    "sha256": "f6827c8d47c65b5cf9ad5f8b82e5dcc9175069f25d0cd2ea92ae442ee5830dad",
+    "objects": [
+     "ide_040.o"
+    ],
+    "why": "KT-31: amix-040-060-port tools/scan060-tables.py (6e8f973) -- a scan060 MOVEP candidate inside a gcc switch dispatch table (movew %pc@(T,%dN:l:2),%d0 / jmp %pc@(T,%d0:w), bound from the moveq before it) is a misdecoded 16-bit offset, not an instruction. KD060-ZI's one: ide_040.o idequeue's 54-entry table, the entry at +0x1616 decodes as `movepw %d0,%a2@(1152)` (.text+0xfd656 in the chain). Reader sha pinned: a newer reader cannot move the gate; anything else new stays a failure."
+   }
+  }
+ },
+ "r7_kernels": [
+  {
+   "family": "KD060-Z",
+   "chain": "work/k0-chains/r7/KD060-Z/KD060-Z-c0-u6",
+   "sha256": "a78bdf8b724798c9c821546a9599315d391fdffd6f3c8867e077f2dff98a845d",
+   "sum_r": 28452,
+   "size": 1996012,
+   "supersedes": "1d4771b5c7fbe3dc (r6-2, 68060-261006-83)",
+   "build_id": "68040-261021-80"
+  },
+  {
+   "family": "KD060-ZA",
+   "chain": "work/k0-chains/r7/KD060-ZA/KD060-ZA-c0-u6",
+   "sha256": "c95c6f472a2d88cb58bc9e69bbb22cda67cfcbac0960a485d5b04bb2b0f0924f",
+   "sum_r": 57107,
+   "size": 2004193,
+   "supersedes": "07a6314aa0c53952 (r6-2, 68060-261006-84)",
+   "build_id": "68040-261021-81"
+  },
+  {
+   "family": "KD060-ZA-CD",
+   "chain": "work/k0-chains/r7/KD060-ZA-CD/KD060-ZA-CD-c0-u6",
+   "sha256": "8ec7c15eb855bc10ae36a7995ee715b570421928463c49cda02d52b22f61fecb",
+   "sum_r": 20401,
+   "size": 2103614,
+   "supersedes": "d4163bec55cdae8e (r6e, 68040-261010-70)",
+   "build_id": "68040-261021-82"
+  },
+  {
+   "family": "K030-U",
+   "chain": "work/k0-chains/r7/K030-U/K030-U-c0-u6",
+   "sha256": "ec296f59518966f9f290366547488c1c014795c8e82b318babc021569c432b22",
+   "sum_r": 65125,
+   "size": 1268942,
+   "supersedes": "11ae38ea0a8827dc (r6e)"
+  },
+  {
+   "family": "K030-U-FD",
+   "chain": "work/k0-chains/r7/K030-U-FD/K030-U-FD-c0-u6",
+   "sha256": "a2f212f773e114f46fd3f88d523ee7e708b677351972c6afc974c7fbec06d68a",
+   "sum_r": 22066,
+   "size": 1267397,
+   "supersedes": "e15421f51fbd4d3a (r6e)"
+  },
+  {
+   "family": "K030-U-FD-S",
+   "chain": "work/k0-chains/r7/K030-U-FD-S/K030-U-FD-S-c0-u6",
+   "sha256": "31e59f65e22c8da8ea9842bd1d493e0558b701b88ef21c74066de5882b43f3a5",
+   "sum_r": 27175,
+   "size": 1267397,
+   "supersedes": "039c0693569e16e5 (r6e)"
+  }
+ ],
+ "r7_kernels_note": "The id -> sha table of cut r7 (2026-10-21). 060 build ids issued from the r7 release-cut port tree; the 030 kernels carry no build id. Proof lines in that cut's BUILD.md.",
+ "r7_firmware": {
+  "file": "golden-66660DDB.bin",
+  "crc32": "66660DDB",
+  "size": 13417468,
+  "sha256": "5a3050a54808cf542c116779c24a6c5f03b8188693e1211fddb3c71c6e2eb26f",
+  "source": "Z3660 eth-rxring fef1e02 (9994961A + eth_adv1000 default YES); release/MANIFEST-golden-2026-10-21b.txt",
+  "rollbacks": {
+   "published card": "1:/hdf/rollback-C96EAD03.bin (the 1.0 firmware)",
+   "bench cards": "1:/hdf/rollback-9994961A.bin beside rollback-C96EAD03.bin"
+  },
+  "deploy": "at the release acceptance only, deploy-kvm --expect-crc 66660DDB",
+  "boot_bin": "open: the Z3660 station decides whether BOOT.BIN follows Z3660.bin (1.0: both C96EAD03)"
+ }
+}
