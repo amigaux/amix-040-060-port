@@ -6951,6 +6951,57 @@ shapes STALE, and the first panicking ISSUE-107 case (`110017→110000`) panicke
 
 ---
 
+## ✅ ISSUE-109 (2026-10-31, a stock defect: the same stock code as the 68030 line, where it was MEASURED; GUARDED on the cut candidate `68060-261031-52` in emulation; the save itself NOT SEEN on k46 yet): a failed STREAMS open frees a queue pair still on the run list, and `queuerun` calls into freed memory (grimoire quirk 92)
+
+> **Ledger: FIXED by a guard (cut candidate, emulation); the fault and the save are measured on
+> the 68030 line only.** `src/freeqguard.c` (amix kernel/k30 `f4aef26`, the code unchanged) takes
+> the pair off the run and scan lists before the stock `freeq`; `relink-040.sh` binds it by
+> default (`FREEQ_GUARD=0` leaves it out) and retargets every relocation that named `freeq`.
+
+**Defect** (root-caused by the 68030 line on its kernels; grimoire quirk 92). `qattach` undoes a
+failed module or driver open with `qdetach(q, 0, 0, cr)`. With clmode 0 the stock `qdetach` skips
+the run-list removal and frees the pair. An open that enabled its own queue before it failed
+(sockmod: the `T_INFO_ACK` on its read queue, `QENAB`) leaves the freed pair on `qhead`. The next
+`queuerun` then calls `qi_srvp` through freed memory: KERNEL FAULT, vector 4 or 0xB at a heap pc,
+backtrace `ureturn` → `queuerun`. The trigger is prngd with prngd-ctl clients during prngd's
+fork-failure spin (swap reservation exhausted).
+
+**k46 has the same code.** In `68060-261030-51` (unix `18fb7e63`), `qattach`, `qdetach`, `freeq`,
+`queuerun`, `strclose`, `stropen` and `runqueues` are at their stock 2.1c (`80a1204f`) addresses
+with identical `.text` bytes. The five relocations naming `freeq` are the stock ones: `qdetach`
+0x4f08a, `strclose` 0x49a78 and 0x49ab4, `stropen` 0x49522 and 0x497ce.
+
+**Fix.** `freeq_guarded` raises to spl7 (`move sr`, privileged on the 010 and later, the same on
+the 040 and 060). It unlinks `q` and `WR(q)` from `qhead`/`qtail` and `scanqhead`/`scanqtail`
+(chained through `q_link`), counts what it took off, and calls the stock `freeq` unchanged.
+Counters `fqg_calls`, `fqg_run`, `fqg_scan`, `fqg_last` sit behind `fqg_magic` (`"FQG!"`).
+`tools/freeqguard-retarget.py` moves every `.rela` entry naming `freeq` to `freeq_guarded`, found
+by symbol; no byte of `.text` moves. relink-040.sh's HARD CHECK wants:
+- the guard's imports and exports exact;
+- `freeq` still at 0x5062a and `freeq_guarded` defined once;
+- its callers exactly `qdetach`, `strclose` ×2 and `stropen` ×2.
+
+`tools/status-facts.sh` fails a kernel without the guard unless `STATUS_ALLOW_NO_FREEQ_GUARD=1` is
+set. `FREEQ_GUARD=0` on -51's recipe at `fff9660` gives -51's seven sums, byte for byte.
+
+**Verified (emulation, row N219m: A4000, 68060, 16 MB Unix memory, 15 MB swap).** k30's trigger
+ran 150 rounds a phase and the fqg block was read by `adb` every 90 s.
+- **Guarded.** The test kernel `68060-261031-51` (-51 with the guard linked onto its base), 6
+  runs, and the cut `68060-261031-52`, 1 run. In 2 of the experiment runs a held 5 MB `dd` buffer
+  cut the free swap to about 9.4 MB. Every run reached "trig done" with no fault, `fqg_magic`
+  `46514721`, and `fqg_calls` 355–369 before the trigger and about 4900 after it.
+  **`fqg_run` and `fqg_scan` stayed 0 in all 7.** The run counts are nearly identical, so the
+  fork-failure spin never started on this vehicle. The save is shown on the 68030 line, at
+  16 MB.
+- **Control.** `68060-261030-51`, the same trigger, 4 runs (one with the held buffer): no fault.
+  On the 68030 line the plain stock link also rarely faulted (0 of 3), so this does not argue
+  against the defect.
+- **Regression.** `-52` on the c51 cell: k30's quirk-91 probes 68/68 clean, no STALE ftshrink
+  run, the nine ISSUE-107 cases rc=0 with the box alive, smoke and `fsck -n` clean; `qz` 229/68/18,
+  kzfail 3, puterr 0; `kzr_fail_n` 6, `kzr_alien_n` 0. Every line equals -51's.
+
+---
+
 ## ⚠ ISSUE-50 (2026-08-25, OPEN): the burst step depends on a binary no clone can build, and nothing says so
 
 > **Ledger: OPEN** — found while preparing the first acceptance run on merged `main`.
