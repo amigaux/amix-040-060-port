@@ -333,6 +333,7 @@ OVERRIDES = [
     ("page_init",        0xaf42a, "page_init_orig",      "ISSUE-102: the page-frame database is mapped-in DRAM and nothing zeroes it"),
     ("setregs",          0x58b62, "setregs_orig",        "ISSUE-106: measure the USP handoff at the moment setregs writes it"),
     ("kzero",            0x00302, None,                  "ISSUE-107: stock kzero is bzero -- no fault catch, the quirk-90 ftruncate panic"),
+    ("sdqueue",          0x0d6f6, "sdqueue_orig",        "the a3091 first-use hang: gsioctl's sdqueue at spl0 lets the WD reset interrupt in"),
 ]
 print("## Override bindings")
 print()
@@ -345,7 +346,8 @@ print()
 # The emergency rollback (2026-10-30): an override that may be built out on purpose names the
 # variable that lets this table accept a kernel without it.  Set, the row reads "rolled back" and
 # does not count as failing; unset, the missing override fails as any other would.
-ROLLBACK = {"kzero": "STATUS_ALLOW_NO_KZERO"}       # KZERO=0 relink-040.sh: the stock bzero alias
+ROLLBACK = {"kzero": "STATUS_ALLOW_NO_KZERO",      # KZERO=0 relink-040.sh: the stock bzero alias
+            "sdqueue": "STATUS_ALLOW_NO_SDQ_SPL"}   # SDQ_SPL=0 relink-040.sh: the stock sdqueue
 # Diagnostic overrides, out of the default build since 2026-11-02 (relink-040.sh I10, KVP, DIAG106): each is
 # judged only when its unit is linked, which its magic word says.  Linked, the override must hold as any other.
 DIAGNOSTIC = {"as_fault": ("i10_magic", "I10=1"), "nullvect": ("kvp_magic", "KVP=1"),

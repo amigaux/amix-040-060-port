@@ -158,6 +158,17 @@ fi
 #                KVP=1 links it (the F3 census, off the trap path by default since 2026-11-02:
 #                with kvp_on 0 it still cost a read and a branch on every exception).
 KVP="${KVP:-0}"
+# sdqspl040 (2026-11-03, the a3091 first-use hang, amix-dlm C2-4 v24 section 18): sdqueue at IPL 2 at least.
+# gsioctl (/dev/scsi) is the one sdqueue caller at spl0; as the stock a3091's first command it lets the WD's
+# reset interrupt in during initialize() and the controller goes DEAD.  The wrapper takes the strong sdqueue
+# and keeps the stock body as sdqueue_orig.  SDQ_SPL=0 builds without it (the rollback).
+SDQ_SPL="${SDQ_SPL:-1}"
+SDQ_OBJ=""; SDQ_OC=""
+if [ "$SDQ_SPL" = "1" ]; then
+	m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/sdqspl040.s" -o "$HERE/build/sdqspl040.o"
+	SDQ_OBJ="$HERE/build/sdqspl040.o"
+	SDQ_OC="--weaken-symbol sdqueue --add-symbol sdqueue_orig=.text:0xd6f6,function,global"
+fi
 KVP_OBJ=""; KVP_OC=""
 if [ "$KVP" = "1" ]; then
 	m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/kvecprobe040.s" -o "$HERE/build/kvecprobe040.o"
@@ -613,6 +624,7 @@ m68k-linux-gnu-objcopy \
 	--add-symbol page_init_orig=.text:0xaf42a,function,global \
 	$DIAG106_OC \
 	$KVP_OC \
+	$SDQ_OC \
 	--weaken-symbol lmul \
 	--weaken-symbol bp_map \
 	--weaken-symbol bp_mapout \
@@ -661,7 +673,7 @@ m68k-cbm-sysv4-ld -r -o "$OUT" "$HERE/build/unix-stage1" \
 	"$HERE/build/inituname040.o" \
 	"$HERE/build/cputype060.o" "$HERE/build/lmul060.o" "$HERE/build/isp61_060.o" \
 	"$HERE/build/fpu060.o" $FPUINIT_OBJ \
-	$KVP_OBJ \
+	$KVP_OBJ $SDQ_OBJ \
 	"$HERE/build/bp_map040.o" "$HERE/build/runtime040.o" "$HERE/build/krnxmemflt040.o" \
 	"$HERE/build/segkmem040.o" "$HERE/build/dma_cache040.o" "$HERE/build/a3091dbg040.o" "$HERE/build/a3091demux040.o" "$HERE/build/segdevchk040.o" "$HERE/build/scrdevfix040.o" "$HERE/build/cb_release040.o" "$HERE/build/btrace.o" \
 	"$HERE/build/config040.o" "$HERE/build/cb_icode040.o" "$HERE/build/kdbg040.o" \
@@ -1018,6 +1030,21 @@ if m68k-linux-gnu-nm "$OUT" | grep -E ' U i10c_hook$' >/dev/null 2>&1; then
 	echo "[FAIL] i10c_hook still UND -> the drop-warning path would call address 0"; exit 1
 fi
 echo "[OK] ISSUE-10 genesis-introspection edge bound: usrxmemflt/krnxmemflt -> i10c_hook @0x$ICADDR."
+fi
+
+# HARD CHECK (2026-11-03, the a3091 first-use hang): sdqueue must be the IPL-2 wrapper, the stock body still
+# reachable as sdqueue_orig at 0xd6f6, and every relocation that names a queue entry must name the wrapper --
+# start, startio, getsense and gsioctl, the four callers in other objects.  ld -r links cleanly when the
+# override did not take, so assert it.
+if [ "$SDQ_SPL" = "1" ]; then
+	SQADDR=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="sdqueue" && $2=="T" {print $1}')
+	SQORIG=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="sdqueue_orig" && $2=="T" {print $1}')
+	if [ -z "$SQADDR" ] || [ "$SQADDR" = "0000d6f6" ] || [ "$SQORIG" != "0000d6f6" ]; then
+		echo "[FAIL] sdqueue '$SQADDR' / sdqueue_orig '$SQORIG' -> the IPL-2 wrapper did not take"; exit 1
+	fi
+	SQN=$(m68k-linux-gnu-objdump -r -j .text "$OUT" | awk '$3=="sdqueue"' | wc -l)
+	[ "$SQN" -ge 4 ] || { echo "[FAIL] $SQN relocations name sdqueue, want the four callers at least"; exit 1; }
+	echo "[OK] sdqueue at IPL 2 at least: wrapper @0x$SQADDR -> sdqueue_orig @0x$SQORIG, $SQN callers."
 fi
 
 # HARD CHECK (2026-07-12): the RUNTIME kernel must carry the NATIVE resume (fixed-u
