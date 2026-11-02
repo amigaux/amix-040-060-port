@@ -50,6 +50,7 @@ hat_chgprot:
 	moveq	&7,%d0
 	andl	%d0,%fp@(20)		| prot &= 7
 | --- one-shot ENTER marker: proves hat_chgprot now runs (fork COW write-protect) ---
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lcp_nodbg
 	movel	Lcp_n,%d0
@@ -64,6 +65,7 @@ hat_chgprot:
 	pea	2
 	jsr	cmn_err
 	lea	%sp@(24),%sp
+.endif
 Lcp_nodbg:
 | --- select PTE op mode: 0=writable(clr b2), 1=no-access(clr b0), 2=read-only(set b2) ---
 	moveq	&2,%d0
@@ -195,9 +197,13 @@ Lcp_done:
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
 	.data
 	.even
+.ifdef KDBG
 Lcp_msg:
 	.asciz	"DBG hat_chgprot040 ENTER seg=%x addr=%x len=%x prot=%x (fork COW WP)"
 	.even
+.endif
+.ifdef KDBG
 Lcp_n:
 	.long	0
+.endif
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

@@ -91,17 +91,7 @@ Lkx_noproc_hit:
 	lea	Lkx_fallback_depth,%a3
 Lkx_slotok:
 	addql	&1,%a3@			| depth = ++*a3  -- THIS process only
-	addql	&1,Lkx_depth		| active resolvers: instrumentation ONLY now
 	movel	%a3@,%d0		| d0 = this process's depth
-	cmpl	Lkx_maxdepth,%d0
-	blsw	Lkx_nomax1
-	movel	%d0,Lkx_maxdepth
-Lkx_nomax1:
-	movel	Lkx_depth,%d4
-	cmpl	Lkx_maxactive,%d4
-	blsw	Lkx_nomax2
-	movel	%d4,Lkx_maxactive
-Lkx_nomax2:
 	movew	%d1,%sr			| restore IPL BEFORE any branch or call
 	cmpil	&4,%d0
 	bgtw	Lkx_f1			| this process is recursing: unresolved
@@ -255,8 +245,6 @@ Lkx_ret:
 |     speculative one: after a SUCCESSFUL resolve, if FA lies in the last 8 bytes of its page,
 |     resolve the NEXT page too.  A `move16` cannot trigger this (it is 16-byte aligned by
 |     definition), and 8 bytes covers every misalignable operand up to an FPU double. ---
-	tstl	xpage_on		| ISSUE-22 A/B: one .data byte turns this off in an
-	beqw	Lkx_nox			| OTHERWISE IDENTICAL image (patch_xpage_flip.py)
 	tstl	%d0
 	bnew	Lkx_nox			| only after a SUCCESSFUL resolve
 | --- v2 (2026-07-28), on Codex's XPAGE-COVERAGE-AUDIT.  v1 used the 060 sibling's address
@@ -332,13 +320,6 @@ Lkx_nox:
 Lkx_dec1:
 	subql	&1,%a3@
 Lkx_dec2:
-	tstl	Lkx_depth
-	bnew	Lkx_dec3
-	addql	&1,Lkx_underflow
-	braw	Lkx_dec4
-Lkx_dec3:
-	subql	&1,Lkx_depth
-Lkx_dec4:
 	movew	%d1,%sr
 	moveml	%fp@(-20),%d2-%d4/%a2-%a3
 	unlk	%fp
@@ -360,19 +341,10 @@ Lkx_fmsg:
 	.even
 Lkx_fn:
 	.long	0
-	.globl	xpage_on
-xpage_on:
-	.long	1			| 1 = xpage handling live (default); 0 = the A/B control
 	.balign 4			| pad section to a 4-byte multiple
 
 	.data
 	.even
-| Lkx_depth is now AGGREGATE INSTRUMENTATION ONLY: how many resolvers are active
-| machine-wide.  It must never decide a failure again -- that is Lkx_proc_depth's
-| job.  The symbol is kept so existing kpeek recipes keep meaning something.
-Lkx_depth:
-	.long	0
-	.balign	4
 | One depth cell per process slot.  200 == v.v_proc; if that tunable ever grows,
 | this table must grow in the same change (the relink asserts the value).
 Lkx_proc_depth:
@@ -385,11 +357,4 @@ Lkx_noproc:
 	.long	0			| curproc or p_pidp NULL at fault time
 Lkx_underflow:
 	.long	0			| a decrement found the counter already 0
-Lkx_maxdepth:
-	.long	0			| deepest single-process recursion seen
-Lkx_maxactive:
-	.long	0			| most resolvers active at once (the old gate's
-					|   view -- if this exceeds 4 while maxdepth
-					|   stays low, the old global gate WOULD have
-					|   produced a false EFAULT right there)
 	.balign 4			| pad section to a 4-byte multiple

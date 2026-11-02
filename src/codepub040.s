@@ -51,18 +51,8 @@
 | `cpusha bc` is correct for every range the stock syscall accepts because it
 | uses none of the supplied geometry.
 |
-| codepub_on ships 1.  It exists so the barrier can be A/B'd on hardware without
-| a rebuild (kpoke 0, re-run, the generated code must then MISFIRE) -- the same
-| idiom as hat_cm_ram / dbg_publish_on / kdbg_on.  An image shipping 0 is a
-| bisect image and must be stamped as such.
-|
-| Counters (uncapped: they are how a boot PROVES the wrapper ran, which "the
-| program worked" does not):
-|   codepub_calls = every mprotect call reaching the wrapper
-|   codepub_exec  = successful calls whose requested prot had PROT_EXEC
-|                   (the ABI events; advances even when codepub_on = 0)
-|   codepub_push  = `cpusha bc` actually executed  (= the spec's codepub_mprotect)
-| With codepub_on = 1 the acceptance invariant is codepub_push == codepub_exec.
+| The barrier is unconditional since 2026-11-02 (the codepub_on A/B word and the three counters
+| that proved it are gone).
 |
 | Argument block: the syscall body receives ONE pointer (fp@(8)) to
 |   args+0 addr   args+4 len   args+8 prot
@@ -79,20 +69,15 @@ mprotect:
 	movel	%fp@(8),%sp@-		| the syscall argument block pointer
 	jsr	mprotect_orig
 	addqw	&4,%sp			| d0 = errno return from here on
-	addql	&1,codepub_calls
 	tstl	%d0
 	bnew	Lcp_out			| failed -> original errno, no publication
 	moveal	%fp@(8),%a0
 	movel	%a0@(8),%d1		| requested prot (as the caller wrote it)
 	andil	&0x4,%d1		| PROT_EXEC
 	beqw	Lcp_out			| not an executable transition
-	addql	&1,codepub_exec
-	tstl	codepub_on
-	beqw	Lcp_out			| A/B image: count the event, skip the barrier
 	.word	0xf4f8			| cpusha bc -- push dirty data lines to RAM,
 					|   invalidate both caches, so the caller's
 					|   next instruction fetch sees the bytes
-	addql	&1,codepub_push
 Lcp_out:
 	moveal	%d0,%a0			| SVR4 m68k: a pointer result rides in a0 too
 	unlk	%fp
@@ -102,18 +87,4 @@ Lcp_out:
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
 	.data
 	.even
-| codepub_on: 1 = publish (the shipped default), 0 = wrapper counts the ABI
-| events but performs no cache operation, for the decisive one-boot A/B.
-	.globl	codepub_on
-codepub_on:
-	.long	1
-	.globl	codepub_calls
-codepub_calls:
-	.long	0
-	.globl	codepub_exec
-codepub_exec:
-	.long	0
-	.globl	codepub_push
-codepub_push:
-	.long	0
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

@@ -32,11 +32,11 @@
 | THE TEARDOWN EDGE GOES WITH IT.  legacysdt040.s (ISSUE-40) released the legacy section 2/3 objects at
 | hat_free.  With no user address space owning one, that release has nothing to free, and a native A4/A6
 | descriptor would reach hat_sdtfree's arguments past nothing but a shape guard.  hat_legacy_sdt_free here
-| keeps the symbol hat_free040 calls and only counts; legacysdt040.o is not linked (HATMAP_NOSDT=0 restores
+| keeps the symbol hat_free040 calls and returns; legacysdt040.o is not linked (HATMAP_NOSDT=0 restores
 | both, byte for byte).  ISSUE-40's page per dynamic exec is not allocated in the first place.
 |
-| COUNTERS: hns_magic "HNS!" (anchor), hns_user_n (hat_map growths skipped), hns_kas_n (kernel growths passed
-| to the stock body), hns_free_n (hat_free teardowns that reached the retired edge).
+| hns_magic "HNS!" anchors the unit.  (Its three counters, of hat_map growths skipped, kernel growths passed
+| on and teardowns reaching the retired edge, are gone since 2026-11-02: they cost every exec and every exit.)
 
 	.text
 	.globl	hat_growsdt_user
@@ -45,16 +45,13 @@ hat_growsdt_user:
 	lea	kas+20,%a1
 	cmpal	%a1,%a0
 	beqs	Lhn_kas
-	addql	&1,hns_user_n
 	moveq	&0,%d0			| success, nothing written: hat_map goes on to load URP
 	rts
 Lhn_kas:
-	addql	&1,hns_kas_n
 	jmp	hat_growsdt		| the kernel address space keeps the stock behaviour
 
 	.globl	hat_legacy_sdt_free
 hat_legacy_sdt_free:
-	addql	&1,hns_free_n
 	rts
 
 	.data
@@ -62,14 +59,5 @@ hat_legacy_sdt_free:
 	.globl	hns_magic
 hns_magic:
 	.long	0x484e5321		| "HNS!"
-	.globl	hns_user_n
-hns_user_n:
-	.long	0
-	.globl	hns_kas_n
-hns_kas_n:
-	.long	0
-	.globl	hns_free_n
-hns_free_n:
-	.long	0
 	.balign	4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
 	.text

@@ -35,16 +35,6 @@ hat_pteload:
 	moveml	%d2-%d3/%a2-%a4,%sp@-
 	movel	%fp@(12),%d2		| d2 = va
 	moveal	%fp@(16),%a2		| a2 = pp
-| --- btrace 'P' one-shot: the FIRST hat_pteload (exercises the CM-B1 Lcm_sel
-|     classifier path).  d0 is scratch here; d2(va)/a2(pp) preserved by btrace_mark. ---
-	tstl	Lbt_ptl_done
-	bnew	Lbt_ptl_skip
-	moveq	&1,%d0
-	movel	%d0,Lbt_ptl_done
-	pea	0x50			| 'P'
-	jsr	btrace_mark
-	addqw	&4,%sp
-Lbt_ptl_skip:
 
 | --- DBG (exec-header segmap collision, 2026-06-24): trace every map into the 8KB exec-
 |     header slot [0x40448000,0x4044a000) with the page's p_offset (pp@(8)) and pfn (arg@20).
@@ -56,6 +46,7 @@ Lbt_ptl_skip:
 	bcsw	Lpo_no
 	cmpil	&0x4044a000,%d2
 	bccw	Lpo_no
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lpo_no
 	movel	Lpo_n,%d0
@@ -77,6 +68,7 @@ Lpo_nooff:
 	lea	%sp@(20),%sp
 	movel	%fp@(12),%d2		| reload (cmn_err scratch)
 	moveal	%fp@(16),%a2
+.endif
 Lpo_no:
 
 | --- DBG: trace EVERY hat_pteload of the libc.so.1 GOT pages [C102F000, C1031000) -- va + pfn +
@@ -88,6 +80,7 @@ Lpo_no:
 	bcsw	Lgt_no
 	cmpil	&0xc1031000,%d2
 	bccw	Lgt_no
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lgt_no
 	movel	Lgt_n,%d0
@@ -104,6 +97,7 @@ Lpo_no:
 	lea	%sp@(20),%sp
 	movel	%fp@(12),%d2		| reload (cmn_err scratch)
 	moveal	%fp@(16),%a2
+.endif
 Lgt_no:
 
 | --- DBG: trace the first 40 maps >=0x48000000 (u-area in segu_get AND, after the
@@ -111,6 +105,7 @@ Lgt_no:
 |     -- shows whether the boot PROGRESSES past the teardown).  Gated, CE_WARN. ---
 	cmpil	&0x48000000,%d2
 	bcsw	Lpt_nodbg
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lpt_nodbg
 	movel	Lpt_dbgn,%d0
@@ -128,6 +123,7 @@ Lgt_no:
 	lea	%sp@(16),%sp
 	movel	%fp@(12),%d2		| reload d2 (cmn_err clobbers? d2 is callee-saved, but be safe)
 	moveal	%fp@(16),%a2
+.endif
 Lpt_nodbg:
 
 | --- A (root) index = (va>>25) & 0x7F   [030: >>30 & 3] ---
@@ -166,6 +162,7 @@ Lpt_nodbg:
 |     Gated 12, CE_WARN; d2/a2 reloaded after.  Remove once the source is fixed. ---
 	cmpil	&0x80000000,%d2
 	bcsw	Lrd_no
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lrd_no
 	movel	Lrd_n,%d0
@@ -190,6 +187,7 @@ Lpt_nodbg:
 	lea	%sp@(32),%sp
 	movel	%fp@(12),%d2		| reload d2 (cmn_err scratch)
 	moveal	%fp@(16),%a2
+.endif
 Lrd_no:
 	bfextu	%fp@(-53){&6:&2},%d0	| UDT = Adesc & 3
 	btst	&1,%d0			| resident? (UDT == 2 or 3 -> bit1 set)
@@ -279,6 +277,7 @@ Lbfill:
 | DIAG (gated 8): dump the leaf page-table address hat_ptalloc returned + va.  Localizes
 | whether the bad user-PT base (0x3F0000, unbacked hole) comes straight from hat_ptalloc/
 | hat_sdtalloc (a4 itself bad) or gets truncated later.  cmn_err preserves d2/a4 (callee-saved).
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lba_nodbg
 	movel	Lba_dbgn,%d0
@@ -292,6 +291,7 @@ Lbfill:
 	pea	2
 	jsr	cmn_err
 	lea	%sp@(16),%sp
+.endif
 Lba_nodbg:
 | ptdat bookkeeping (software state -- kept verbatim; @(4) keeps 030 packing)
 	moveal	%fp@(-4),%a0		| ptdat
@@ -352,7 +352,7 @@ Lbhave:
 	bfextu	%a4@{&0:&20},%d0		| existing PFN (20 bits)  [030: 21]
 	cmpl	%fp@(20),%d0
 	beq	Lpfnok
-	addql	&1,hat_pfnmiss_n		| UNCAPPED: the true rate is the open question (kdbg040.s)
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lreplace
 	movel	Lhp_dbgn,%d0
@@ -371,6 +371,9 @@ Lbhave:
 	jsr	cmn_err
 	lea	%sp@(32),%sp
 	bra	Lreplace
+.else
+	bra	Lreplace
+.endif
 Lpfnok:
 	moveq	&7,%d3
 	andl	%d3,%fp@(24)		| prot &= 7
@@ -564,7 +567,9 @@ Lrp_find:
 |     with `moveq &7,%d3`, which reads neither %d3's old value nor the condition
 |     codes, so nothing is consumed across this. ---
 Lrp_exhaust:
+.ifdef I10
 	addql	&1,i10_rpfail_n		| UNCAPPED (i10rev040.s)
+.endif
 	bra	Lrp_status
 Lrp_unlink:
 	movel	%a4@(256),%a1@		| splice &leaf out: *a1 = leaf->next
@@ -573,9 +578,11 @@ Lrp_unlink:
 |     walked.  Once per successful search, not per iteration.  %d3 is dead here
 |     (Lrp_status reloads it immediately) and the CCs this cmpil sets are not
 |     read by that `moveq`. ---
+.ifdef I10
 	cmpil	&128,%d3
 	bcc	Lrp_nodeep
 	addql	&1,i10_deep_n
+.endif
 Lrp_nodeep:
 | (2) compute the PTE status from prot (mirror Lw_st).
 Lrp_status:
@@ -683,13 +690,9 @@ Lcm_d1:
 	bcs	Lcm_fb
 Lcm_dncs:
 	oril	&0x40,%fp@(-44)		| unmanaged PFN -> NCS (unchanged default)
-	addql	&1,cmf_ncs_n
-	movel	%a4,cmf_ncs_leaf	| a4 = &leaf, live in all three constructors
 	rts
 Lcm_fb:
 	oril	&0x60,%fp@(-44)		| registered framebuffer -> NC, not serialised
-	addql	&1,cmf_fb_n
-	movel	%a4,cmf_fb_leaf
 	rts
 
 | ===========================================================================
@@ -931,6 +934,7 @@ hat_unload:
 	moveml	%d2-%d5/%a2-%a4,%sp@-
 	movel	%fp@(12),%d2		| d2 = va (loop cursor)
 | DEBUG: print the first few hat_unload calls (va, size, flags) -- remove once stable
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lhl_nodbg
 	movel	Lhl_dbgn,%d0
@@ -946,6 +950,7 @@ hat_unload:
 	jsr	cmn_err
 	addaw	&20,%sp
 	movel	%fp@(12),%d2		| reload d2 (cmn_err scratch-safe but be explicit)
+.endif
 Lhl_nodbg:
 	moveal	%fp@(8),%a0
 	movel	%a0@(12),%fp@(-4)	| fp@-4 = seg
@@ -1115,7 +1120,9 @@ Lhl_findfail:
 | after 4 for the whole uptime, so this site's real rate has never been known.
 | The counter is uncapped.  The `movel` that follows loads %d0 outright and does
 | not read the condition codes.
+.ifdef I10
 	addql	&1,i10_hlfail_n
+.endif
 | DEBUG one-shot: report a missing reverse-map entry (pte value, pfn-derived pp, pte addr)
 	movel	Lhl_failn,%d0
 	cmpil	&4,%d0
@@ -1135,9 +1142,11 @@ Lhl_unlink:
 | ISSUE-10 invariant (see Lrp_unlink): %d1 counted down from 256, so %d1 < 128
 | means this search walked past the halfway mark of its budget.  %d1 is only
 | READ here, and Lhl_aftermap opens with `tstl`, which sets the CCs itself.
+.ifdef I10
 	cmpil	&128,%d1
 	bcc	Lhl_nodeep
 	addql	&1,i10_deep_n
+.endif
 Lhl_nodeep:
 Lhl_aftermap:
 	tstl	%fp@(-84)		| flag8
@@ -1271,6 +1280,7 @@ Lhl_no7:
 	bcsw	Lhl_freego
 	cmpil	&0x80080000,%d2
 	bccw	Lhl_freego
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lhl_freego
 	movel	Lhul_n,%d0
@@ -1285,6 +1295,7 @@ Lhl_no7:
 	pea	2
 	jsr	cmn_err
 	lea	%sp@(16),%sp
+.endif
 Lhl_freego:
 | FIX (2026-06-27): do NOT free the leaf / invalidate the Bdesc when pt_inuse hits 0.
 | Freeing here caused leaf-table CHURN -> the child-crash double-alloc: anon_private()'s COW
@@ -1345,6 +1356,7 @@ hat_alloc:
 	moveal	%fp@(8),%a2		| a2 = as
 	| --- one-shot ENTRY marker: proves hat_alloc is reached (proc 1's child path runs).
 	|     If this prints but Lha_msg (post-kmem) does NOT, kmem_zalloc(0x1000) hangs. ---
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lhae_done
 	movel	Lhae_n,%d0
@@ -1357,6 +1369,7 @@ hat_alloc:
 	jsr	cmn_err
 	lea	%sp@(12),%sp
 	moveal	%fp@(8),%a2		| reload a2 (callee-saved, but be safe)
+.endif
 Lhae_done:
 	clrl	%sp@-			| kmem_zalloc flag = 0
 	pea	0x1000			| size 4KB (page-aligned, zeroed)
@@ -1371,6 +1384,7 @@ Lhae_done:
 	.word	0xf478			| cpusha dc -- push the zeroed root page to RAM
 	movel	%a0,%a2@(20)		| as->hat_root = 040 root VA (a0 = return value too)
 	| --- one-shot DBG marker: proves as_alloc/hat_alloc is reached (newproc returned) ---
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lha_done
 	movel	Lha_n,%d0
@@ -1383,6 +1397,7 @@ Lhae_done:
 	pea	2
 	jsr	cmn_err
 	lea	%sp@(16),%sp
+.endif
 Lha_done:
 	moveal	%sp@+,%a2
 	unlk	%fp
@@ -1433,6 +1448,7 @@ hat_free:
 	movel	%a5,%d0
 	beqw	Lf_nullroot
 | --- one-shot ENTER marker: proves hat_free runs (exec/exit teardown reached) ---
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lhf_nodbg
 	movel	Lhf_n,%d0
@@ -1447,6 +1463,7 @@ hat_free:
 	lea	%sp@(16),%sp
 	moveal	%fp@(8),%a0		| reload a5 (callee-saved, but be safe)
 	moveal	%a0@(20),%a5
+.endif
 Lhf_nodbg:
 | --- ISSUE-40 (2026-08-01): release this AS's RETAINED legacy-SDT allocations
 |     BEFORE the native walk touches the root page.  The 030 destructor did this
@@ -1553,6 +1570,7 @@ Lf_badleaf:
 | root[A] is left as-is; Lf_done frees the whole root page anyway.
 Lf_badA:
 	addql	&1,hat_badaslot_n		| UNCAPPED: the true rate is the open question (kdbg040.s)
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lf_nextA
 	movel	Lhfa_n,%d0
@@ -1568,6 +1586,9 @@ Lf_badA:
 	jsr	cmn_err
 	lea	%sp@(20),%sp
 	braw	Lf_nextA		| skip the garbage region entirely
+.else
+	bra	Lf_nextA
+.endif
 Lf_PTE:
 	tstl	%a3@
 	beqw	Lf_nextPTE		| empty PTE -> skip
@@ -1626,7 +1647,9 @@ Lf_findfail:
 | print below is capped at 4.  hat_free clears the leaf PTE on this path anyway
 | (Lf_fail_clr), so an exhausted search leaves a chain node naming a zeroed
 | slot.  The `movel` that follows does not read the condition codes.
+.ifdef I10
 	addql	&1,i10_hffail_n
+.endif
 	movel	Lhf_failn,%d0
 	cmpil	&4,%d0
 	bccw	Lf_fail_clr		| cap exceeded: still must clear the stale PTE
@@ -1645,9 +1668,11 @@ Lf_unlink:
 	movel	%a3@(256),%a4@		| *a4 = pte->revmap_next
 | ISSUE-10 invariant (see Lrp_unlink): %d1 counted down from 256.  Read-only
 | here; the `clrl` that follows sets its own condition codes.
+.ifdef I10
 	cmpil	&128,%d1
 	bcc	Lf_nodeep
 	addql	&1,i10_deep_n
+.endif
 Lf_nodeep:
 	clrl	%a3@			| FIX: clear the 040 leaf PTE -- hat_free only unlinked
 					|   p_mapping (pp->p_mapping=0) but left PTE valid.
@@ -1771,8 +1796,8 @@ hat_ptfree:
 |     metadata separates the page from the HAT's accounting and leaves no owner
 |     that knows which credits and list nodes remain; a counted fail-closed leak is
 |     the safer half of that trade (contract P3).  ptd_keepn_n counts it.
-| With ptd_on = 0 the whole V2.1 body runs again unchanged (Lpf_old), so the A/B
-| control arm is the previous kernel and not a third behaviour.
+| (The ptd_on A/B word and its V2.1 control arm are gone since 2026-11-02: the retirement
+| is the only path.)
 	moveml	%d0-%d1/%a0-%a2,%sp@-
 	movel	%sp@(24),%d0		| table base (20 saved + retaddr + arg0)
 	movel	%d0,%d1
@@ -1800,8 +1825,6 @@ hat_ptfree:
 	addqw	&4,%sp			|   hat_sdtfree(ptd,1) + clears p_ptbits/p_ptdats
 	tstl	%d0
 	beqw	Lpf_release		| 0 = retired -> the page hold is proven 1
-	tstl	ptd_on
-	beqw	Lpf_old			| gated off -> run the V2.1 body verbatim
 	braw	Lpf_ret			| fail closed -> touch NOTHING (counted there)
 Lpf_release:
 	subqw	&1,%a2@(2)		| PAGE_RELE, proven 1 -> 0
@@ -1812,7 +1835,6 @@ Lpf_release:
 	movel	%a2,%sp@-		| pp
 	jsr	page_free
 	addqw	&8,%sp
-	addql	&1,ptd_tblfreed_n
 | A successful release PUBLISHES a real page, so it is a valid progress event for
 | hat_ptalloc's fresh-page retry (it sleeps on &free_pts at 0xb6cd2 under
 | HAT_CANWAIT, reachable from hat_pteload and hat_dup under real memory pressure).
@@ -1828,22 +1850,6 @@ Lpf_release:
 	clrl	pt_waiting
 	addql	&1,ptd_wake_n
 	braw	Lpf_ret
-Lpf_old:
-	clrl	%a2@(32)		| clear p_mapping/p_ptdats union (stale pt_inuse)
-	tstw	%a2@(2)
-	beqw	Lpf_leak		| keepcnt already 0 = not a held page_get page -> leak+log
-	subqw	&1,%a2@(2)		| PAGE_RELE: drop our keep (page_get's hold)
-	bnew	Lpf_held		| someone else still holds it -> do NOT free
-	addql	&1,availrmem
-	addql	&1,availsmem
-	subql	&1,pages_pp_kernel
-	clrl	%sp@-			| dontneed = 0
-	movel	%a2,%sp@-		| pp
-	jsr	page_free
-	addqw	&8,%sp
-	braw	Lpf_ret
-Lpf_held:
-	braw	Lpf_ret			| hold released; another holder keeps the page alive
 Lpf_leak:
 	movel	Lpf_n,%d0
 	cmpil	&8,%d0
@@ -1869,80 +1875,124 @@ Lpf_msg:
 	.even
 Lpf_n:
 	.long	0
+.ifdef KDBG
 Lhae_msg:
 	.asciz	"DBG hat_alloc ENTER as=%x (proc-1 child path running)"
 	.even
+.endif
+.ifdef KDBG
 Lhae_n:
 	.long	0
+.endif
+.ifdef KDBG
 Lha_msg:
 	.asciz	"DBG hat_alloc: as=%x root=%x (kmem_zalloc done)"
 	.even
+.endif
+.ifdef KDBG
 Lha_n:
 	.long	0
+.endif
+.ifdef KDBG
 Lpt_dbgmsg:
 	.asciz	"DBG ptload va=%x urp=%x"
 	.even
+.endif
+.ifdef KDBG
 Lpt_dbgn:
 	.long	0
+.endif
+.ifdef KDBG
 Lrd_msg:
 	.asciz	"DBG ptload2 va=%x urp=%x as=%x rootVA=%x Aidx=%x Adesc=%x"
 	.even
+.endif
+.ifdef KDBG
 Lrd_n:
 	.long	0
+.endif
 Lsz_msg:
 	.asciz	"DBG sdtalloc ptable va=%x raw=%x aligned=%x"
 	.even
 Lsz_n:
 	.long	0
+.ifdef KDBG
 Lpo_msg:
 	.asciz	"DBG segmap-map va=%x poff=%x pfn=%x"
 	.even
+.endif
+.ifdef KDBG
 Lpo_n:
 	.long	0
 	.even
+.endif
+.ifdef KDBG
 Lgt_msg:
 	.asciz	"DBG GOTmap va=%x pfn=%x prot=%x"
 	.even
+.endif
+.ifdef KDBG
 Lgt_n:
 	.long	0
+.endif
 Lpemsg0:
 	.asciz	"hat_pteload: root NOT resident va=%x rootbase=%x Aidx=%x Adesc4=%x desc8=%x"
+.ifdef KDBG
 Lpemsg1:
 	.asciz	"DBG hat_pteload pfn mismatch va=%x leaf=%x slot=%x Bdesc=%x *pte=%x newpfn=%x (overwriting)"
 	.even
+.endif
+.ifdef KDBG
 Lhp_dbgn:
 	.long	0
+.endif
+.ifdef KDBG
 Lbamsg:
 	.asciz	"DBG hat_pteload Lballoc leaf va=%x leafpt=%x (hat_ptalloc result)"
 	.even
+.endif
+.ifdef KDBG
 Lba_dbgn:
 	.long	0
+.endif
 Lhu_msg:
 	.asciz	"hat_unlock: invalid sde (040 walk)"
 	.even
+.ifdef KDBG
 Lhl_dbgmsg:
 	.asciz	"DBG hat_unload va=%x size=%x flags=%x"
 	.even
+.endif
+.ifdef KDBG
 Lhl_dbgn:
 	.long	0
 	.even
+.endif
 Lhl_failmsg:
 	.asciz	"DBG hat_unload: pte not in revmap *pte=%x pp=%x pte@=%x"
 	.even
 Lhl_failn:
 	.long	0
 	.even
+.ifdef KDBG
 Lhul_msg:
 	.asciz	"DBG htunload FREELEAF va=%x leaf=%x npgs=%x (pt_inuse hit 0)"
 	.even
+.endif
+.ifdef KDBG
 Lhul_n:
 	.long	0
 	.even
+.endif
+.ifdef KDBG
 Lhf_msg:
 	.asciz	"DBG hat_free ENTER as=%x root=%x"
 	.even
+.endif
+.ifdef KDBG
 Lhf_n:
 	.long	0
+.endif
 Lhf_failmsg:
 	.asciz	"DBG hat_free: pte not in revmap *pte=%x pte@=%x"
 	.even
@@ -1953,11 +2003,15 @@ Lhfb_msg:
 	.even
 Lhfb_n:
 	.long	0
+.ifdef KDBG
 Lhfa_msg:
 	.asciz	"DBG hatfree BAD-Aslot A=%x Adesc=%x table=%x (skipped)"
 	.even
+.endif
+.ifdef KDBG
 Lhfa_n:
 	.long	0
+.endif
 | --- hat_cm_ram: the managed-ordinary-RAM cache-mode class for the caches
 | campaign (docs/contracts/CM-PTE-WRITER-MATRIX.md stage table).  B1 = 0x00 (writethrough),
 | B2 = 0x20 (copyback).  Read by hat_pteload's Lcm_sel, hat_dup040's private-leaf
@@ -2021,6 +2075,8 @@ Lhfa_n:
 | Deliberately NOT added: nothing uses it yet, and unexercised code is not code
 | that works.
 | ===========================================================================
+| The four words after the magic are no longer written since 2026-11-02 (they cost every device
+| mapping); they stay so hat_cm_fb keeps its offset, cmf_magic+20 (the layout contract below).
 	.globl	cmf_magic
 	.balign 4
 cmf_magic:
@@ -2060,7 +2116,4 @@ hat_cm_fb:
 	.balign 4
 hat_cm_ram:
 	.long	0x00000020		| B2: CM=01 copyback for managed RAM (default since 2026-07-30)
-	.balign 4
-Lbt_ptl_done:
-	.long	0			| btrace 'P' one-shot guard (first hat_pteload)
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

@@ -47,7 +47,8 @@
 | fault inside the replay restores the OUTER replay's DFC, which is the value that loop needs),
 | and Lwb_do cannot use the stack at all: k_trap lands an unresolvable nested fault on Lwb_fail
 | with the trap-time SP, whose rts expects the stack exactly as bsr left it.
-| wb_dfc_on = 0 restores the old behaviour in one .data long, for an A/B inside a single boot.
+| The restore is unconditional since 2026-11-02; the wb_dfc_on A/B word, the injection hook and
+| the DFC/SFC change census that proved it below are gone.
 |
 | PROVEN BY INJECTION 2026-07-29 (68040-260729-03, two seconds, same boot, one .data long apart):
 | with wb_dfc_on = 0 an injected DFC=5 aborted a 1 MiB read at ZERO bytes with errno 14 and printed
@@ -83,9 +84,11 @@ usrxmemflt:
 |     pair is what makes "the fault returned as-if-resolved and landed nothing" a
 |     measurement rather than an inference.  Dormant (one tstl) until i10r_watchva;
 |     preserves d4/d5, every other register, and both function-code registers. ---
+.ifdef I10
 	movel	%fp@(8),%sp@-		| the frame
 	jsr	i10r_pre
 	addqw	&4,%sp
+.endif
 	movel	%fp@(12),%sp@-		| arg2 (fault info)
 	movel	%fp@(8),%sp@-		| arg1 = trap frame
 	jsr	usrxmemflt_orig
@@ -95,10 +98,12 @@ usrxmemflt:
 	beqs	Lu_replay		| resolved: complete the pending write-back below
 	moveq	&1,%d0			| UNRESOLVED user fault, ctx = 1: a pending store is
 	bsrw	wbf_dropwarn		| about to be dropped by skipping the replay -- name it
+.ifdef I10
 	movel	&1,%sp@-		| ISSUE-10 genesis introspection (i10c), ctx = 1: this is
 	movel	%fp@(8),%sp@-		| the site that fires exactly once for the dropped store.
 	jsr	i10c_hook		| Dormant (one tstl) until i10c_on; report-only, preserves d4.
 	addqw	&8,%sp
+.endif
 	braw	Lu_done			| OUTCOME UNCHANGED: still skip replay and signal
 Lu_replay:
 	moveal	%fp@(8),%a2		| a2 = frame
@@ -109,18 +114,22 @@ Lu_replay:
 |     completed has now landed; i10w_hook watches the poisoned longword and, when
 |     it appears, latches THIS frame -- the writer's PC, privilege and registers.
 |     Dormant (one tstl) until i10w_on; preserves d4/d5 and every other register. ---
+.ifdef I10
 	movel	&1,%sp@-		| ctx = 1: a USER store
 	movel	%fp@(8),%sp@-		| the frame
 	jsr	i10w_hook
 	addqw	&8,%sp
+.endif
 | --- ISSUE-10 genesis watch (2026-08-19, src/i10rev040.s).  Same resolved frame,
 |     one hop upstream of i10w_hook: it names the FIRST store of 0x4AFC0000 (PART W)
 |     or the frame that arrived carrying it (PART I).  Dormant (one tstl) until
 |     i10g_on; preserves d4/d5 and every other register, exactly like i10w_hook. ---
+.ifdef I10
 	movel	&1,%sp@-		| ctx = 1: a USER store
 	movel	%fp@(8),%sp@-		| the frame
 	jsr	i10g_hook
 	addqw	&8,%sp
+.endif
 	moveal	u+0x730,%a0		| 060-B: fmt-4 page-crossing completion
 	moveal	%a0@(124),%a1		| a1 = as = curproc->p_as
 	bsrw	wb060_xpage
@@ -159,35 +168,33 @@ Lu_done:
 |     later is that true.  i10p_probe gates itself on the fault address being in
 |     the kernel VA band, and stops walking for good once it finds something;
 |     every other unresolved user fault pays one masked compare.  a0 and d0/d1 are dead here -- Lu_norec's
-|     first act is bsrw Lwb_dfcinject, which writes d0 before it reads it -- and
-|     the probe preserves everything else, d4 (the return value) included. ---
+|     first act loads d0 before anything reads it -- and the probe preserves
+|     everything else, d4 (the return value) included. ---
+.ifdef I10
 	movel	%a0@(84),%sp@-		| the fault address, as the CPU reported it
 	jsr	i10p_probe
 	addqw	&4,%sp
+.endif
 Lu_norec:
-	bsrw	Lwb_dfcinject		| ISSUE-22 fault injection (see Lwb_dfcinject)
-	bsrw	Lwb_dfccheck		| count DFC corruption whether or not the fix is on
-	tstl	wb_dfc_on		| ISSUE-22: give the interrupted code its DFC back
-	beqs	Lu_nodfc
-	movel	%fp@(-4),%d0
+	movel	%fp@(-4),%d0		| ISSUE-22: give the interrupted code its DFC back
 	.word	0x4e7b,0x0001		| movec %d0,%dfc
 	movel	%fp@(-8),%d0
 	.word	0x4e7b,0x0000		| movec %d0,%sfc  -- same contract for the source side
-	addql	&1,wb_dfc_n
-Lu_nodfc:
 | --- ISSUE-10 resolution audit, second hook.  EVERY path this wrapper has joins
 |     here -- resolved, unresolved, write-back denied, far-page failed -- which is
 |     why the audit completes here and not at the resolved tail where i10w_hook and
 |     i10g_hook ride: a fault that returned NONZERO would otherwise leave the whole
 |     block at its ship-time zeros, and reading those back as a measurement is the
 |     error section 13 of the ISSUE-10 document had to record.  Placed AFTER the
-|     DFC/SFC restore so it cannot perturb Lwb_dfccheck's count; it saves and
-|     restores both registers itself.  Dormant (one tstl) until a latch is pending. ---
+|     DFC/SFC restore; it saves and restores both registers itself.  Dormant (one
+|     tstl) until a latch is pending.  Built only with I10=1. ---
+.ifdef I10
 	movel	%d4,%sp@-		| arg3 = the verdict this wrapper is about to return
 	movel	%fp@(12),%sp@-		| arg2 = infop, the k_siginfo_t the resolver writes
 	movel	%fp@(8),%sp@-		| arg1 = the frame
 	jsr	i10r_post
 	lea	%sp@(12),%sp
+.endif
 	movel	%d4,%d0			| restore usrxmemflt's return value
 	moveml	%fp@(-32),%d2-%d5/%a2-%a3
 	unlk	%fp
@@ -213,10 +220,12 @@ krnxmemflt:
 	beqs	Lk_replay		| resolved: complete the pending write-back below
 	moveq	&2,%d0			| UNRESOLVED kernel fault, ctx = 2: a pending store is
 	bsrw	wbf_dropwarn		| about to be dropped by skipping the replay -- name it
+.ifdef I10
 	movel	&2,%sp@-		| ISSUE-10 genesis introspection (i10c), ctx = 2: same
 	movel	%fp@(8),%sp@-		| fire-once site, kernel store variant.  Dormant until
 	jsr	i10c_hook		| i10c_on; report-only, preserves d4.
 	addqw	&8,%sp
+.endif
 	braw	Lk_done			| OUTCOME UNCHANGED: still skip replay
 Lk_replay:
 	moveal	%fp@(8),%a2		| a2 = frame
@@ -227,32 +236,30 @@ Lk_replay:
 Lk_wbok:				| but it has no infop and must NOT enter the signal ABI.
 | --- ISSUE-10 write-watch: a KERNEL store into the write-protected user page --
 |     copyout / bcopy / uiomove -- faults here.  i10w_hook names its exact PC. ---
+.ifdef I10
 	movel	&2,%sp@-		| ctx = 2: a KERNEL store
 	movel	%fp@(8),%sp@-		| the frame
 	jsr	i10w_hook
 	addqw	&8,%sp
+.endif
 | --- ISSUE-10 genesis watch: a KERNEL store of 0x4AFC0000 into the arena would be
 |     named here with its exact PC, exactly as i10w_hook names a kernel propagation. ---
+.ifdef I10
 	movel	&2,%sp@-		| ctx = 2: a KERNEL store
 	movel	%fp@(8),%sp@-		| the frame
 	jsr	i10g_hook
 	addqw	&8,%sp
+.endif
 	lea	kas,%a1			| 060-B: fmt-4 page-crossing completion, as = &kas
 	bsrw	wb060_xpage
 	tstl	%d0			| item 4: propagate a permanent far-page failure
 	beqw	Lk_done
 	movel	%d0,%d4
 Lk_done:
-	bsrw	Lwb_dfcinject		| ISSUE-22 fault injection (see Lwb_dfcinject)
-	bsrw	Lwb_dfccheck		| count DFC corruption whether or not the fix is on
-	tstl	wb_dfc_on		| ISSUE-22: give the interrupted code its DFC back
-	beqs	Lk_nodfc
-	movel	%fp@(-4),%d0
+	movel	%fp@(-4),%d0		| ISSUE-22: give the interrupted code its DFC back
 	.word	0x4e7b,0x0001		| movec %d0,%dfc
 	movel	%fp@(-8),%d0
 	.word	0x4e7b,0x0000		| movec %d0,%sfc  -- same contract for the source side
-	addql	&1,wb_dfc_n
-Lk_nodfc:
 	movel	%d4,%d0			| restore krnxmemflt's return value
 	moveml	%fp@(-32),%d2-%d5/%a2-%a3
 	unlk	%fp
@@ -304,65 +311,6 @@ Lwd_ret:
 	movel	%sp@+,%d2
 	rts
 
-| --- Lwb_dfccheck (ISSUE-22, 2026-07-28): does this fault return with a DIFFERENT DFC than it
-|     arrived with?  That is the whole mechanism, measured directly instead of waiting for its
-|     rare downstream symptom: one control run produced 7686 copy-path faults and no misroute, so
-|     "a fault during a copy" is not the trigger -- "a fault that eats DFC" is.  Counts on BOTH
-|     sides of the wb_dfc_on A/B, because the corruption happens regardless of whether we then
-|     repair it; with the fix on, this counter is the amount of damage the fix is undoing.
-|     Called with the wrapper's frame live (fp@(-4) = the DFC saved on entry).  d0/d1 scratch. ---
-| --- Lwb_dfcinject (ISSUE-22, 2026-07-29): make the rare race deterministic.
-|     The natural corruption happens ~218 times per boot but only matters when it lands inside a
-|     copy loop that still has bytes to write, which is why it surfaces about once per 40 minutes
-|     and why a 12-burst control run proved nothing.  This injects the SAME corruption on demand:
-|     leave wb_dfc_force in DFC for the next wb_dfc_force_n faults, at exactly the point in the
-|     epilogue where a leaking replay would have left it.
-|
-|     PLACED BEFORE THE RESTORE ON PURPOSE.  That is what makes it an A/B of the FIX and not just
-|     of the mechanism:
-|         wb_dfc_on = 0  -> the injected value survives    -> the interrupted copy must break
-|         wb_dfc_on = 1  -> the wrapper repairs it         -> the interrupted copy must be fine
-|     Self-limiting: the budget counts down, so an injection cannot leave the machine unusable
-|     even if the harness dies between arming and disarming.  Arm it from the test program itself
-|     (test-tools/dfcinject.c), microseconds before the read it is meant to hit -- a shell pipeline
-|     spends its budget on the faults of its own exec. ---
-Lwb_dfcinject:
-	tstl	wb_dfc_force
-	beqs	Lwb_noinject
-	movel	wb_dfc_force_n,%d0
-	beqs	Lwb_noinject		| budget spent: leave DFC alone
-	subql	&1,%d0
-	movel	%d0,wb_dfc_force_n
-	addql	&1,wb_dfc_forced
-	movel	wb_dfc_force,%d0
-	.word	0x4e7b,0x0001		| movec %d0,%dfc  -- the leak, on demand
-Lwb_noinject:
-	rts
-
-Lwb_dfccheck:
-	.word	0x4e7a,0x0001		| movec %dfc,%d0  -- what the replay left behind
-	movel	%fp@(-4),%d1		| what the interrupted code had
-	cmpl	%d1,%d0
-	beqs	Lwb_dfcsame
-	addql	&1,wb_dfc_changed
-	movel	%d0,wb_dfc_lastnew
-	movel	%d1,wb_dfc_lastold
-Lwb_dfcsame:
-| --- SFC, the sibling Codex found (ISSUE22-DFC-ARCH-STATE-AUDIT.md, 7c314b2): ptest040.s:52 writes
-|     SFC and never restores it, defended in its own comment by the exact assumption ISSUE-22
-|     disproved for DFC.  There is no victim today -- every MOVES consumer sets its own function
-|     code -- so this counter exists to keep that claim measured rather than assumed.  The write
-|     itself is deliberately LEFT IN PLACE: it was added as insurance against DFC/SFC ambiguity on
-|     real silicon, and the case for removing it rests on an emulator source reading.  Making the
-|     leak harmless costs nothing; removing working hardware insurance on a manual's word does. ---
-	.word	0x4e7a,0x0000		| movec %sfc,%d0
-	movel	%fp@(-8),%d1
-	cmpl	%d1,%d0
-	beqs	Lwb_sfcsame
-	addql	&1,wb_sfc_changed
-Lwb_sfcsame:
-	rts
-
 | wb060_sswsynth (060-B, 2026-07-10; XPAGE unit 2026-07-28): a2 = trap frame.
 | Clobbers d0/d1/d2 -- d2 was added when this began RETURNING the original FSLW in d0 (0 when
 | the frame is not format 4).  Both callers save d2-d5, so that is in contract.
@@ -393,9 +341,6 @@ wb060_sswsynth:
 					| d1 cannot serve: the RW test below masks it down to
 					| bits 24-23, which is what a first cut of this change
 					| returned by mistake.
-	addql	&1,x60_fmt4_n		| F1 instrumentation: every fmt-4 frame, both wrappers
-	movel	%d2,x60_last_fslw	| capture FSLW HERE -- the movew below overwrites bits
-					| 31-16 (MA, RW, SIZE, TT, TM) in the frame itself
 	movel	%d2,%d1
 	movel	%d1,%d0
 	swap	%d0
@@ -807,13 +752,11 @@ Lwr_ret:
 | moves re-walks the page table and picks up the new writable PTE.
 Lwb_do:
 	.word	0xf518			| pflusha -- drop stale ATC entries before re-issuing the store
-	addql	&1,wb_replay_n		| ISSUE-22 instrumentation: how often a replay runs at all
+.ifdef I10
+	addql	&1,wb_replay_n		| replays performed: the ISSUE-10 step audit reads it
+.endif
 	moveq	&7,%d0
 	andl	%d3,%d0			| FC = WBxS & 7
-	cmpil	&1,%d0			| ...and how often it aims DFC somewhere other than user
-	beqs	Lwb_fcok		| data, which is the hazard: the interrupted copy loop
-	addql	&1,wb_replay_odd	| set DFC=1 ONCE and never reloads it (lcopyout 0x5a2)
-Lwb_fcok:
 	.word	0x4e7b,0x0001		| movec %d0,%dfc
 	movel	%d2,%d1			| d1 = data, to be left-justified -- BEFORE the size decode: movel
 					| sets the CCs, and it must not clobber the Z flag between the
@@ -887,8 +830,6 @@ Lwb_fcok:
 	movel	%d3,%d0
 	lsrl	&5,%d0
 	andil	&3,%d0			| SIZE: 0=long, 1=byte, 2=word, 3=line
-	tstl	wbn_on
-	beqw	Lwb_serial		| escape hatch: 0 = the pre-ISSUE-65 replay, whole
 	cmpil	&1,%d0
 	beqw	Lwb_nbyte		| byte: native unconditionally
 	cmpil	&2,%d0
@@ -899,7 +840,6 @@ Lwb_fcok:
 	movel	%a3,%d0
 	andil	&3,%d0
 	bnew	Lwb_mis
-	addql	&1,wbn_l_n
 	movel	&2,wbn_mode		| 2 = native long
 	.word	0x0e93,0x1800		| moves.l %d1,%a3@   (no postincrement: a3 = WBxA)
 	braw	Lwb_ndone
@@ -907,18 +847,14 @@ Lwb_nword:
 	movel	%a3,%d0
 	andil	&1,%d0
 	bnew	Lwb_mis
-	addql	&1,wbn_w_n
 	movel	&1,wbn_mode		| 1 = native word
 	.word	0x0e53,0x1800		| moves.w %d1,%a3@
 	braw	Lwb_ndone
 Lwb_nbyte:
-	addql	&1,wbn_b_n
 	clrl	wbn_mode		| 0 = native byte
 	.word	0x0e13,0x1800		| moves.b %d1,%a3@
 	braw	Lwb_ndone
-Lwb_mis:
-	addql	&1,wbn_fallback_n	| misaligned word/long: the retained ISSUE-7 path,
-					| counted so its coverage is a number and not a hope
+Lwb_mis:				| misaligned word/long: the retained ISSUE-7 path
 Lwb_serial:
 	movel	&3,wbn_mode		| 3 = byte-serialising fallback
 	movel	%d3,%d0
@@ -982,9 +918,7 @@ Lwb_ndone:
 | Dropping four bytes and returning therefore leaves the remaining write-backs unprocessed and
 | hands d0 to the wrapper -- which is the mechanical meaning of "stop the ordered replay".
 |
-| wbf_prop_on = 0 restores the old swallow-and-continue behaviour in one .data long, for an A/B
-| inside a single boot.  This is the hottest path in the kernel that this project touches --
-| wb_replay_n reaches five figures per boot -- so it gets the same escape hatch ISSUE-22 has.
+| The propagation is unconditional since 2026-11-02 (the wbf_prop_on A/B word and its swallow arm are gone).
 |
 | KNOWN LIMIT, stated rather than hidden.  Contract item 8 also asks that pending write-back state
 | be RETAINED across a signal whose handler repairs the mapping and returns.  This does not do
@@ -1034,8 +968,6 @@ Lwbf_nonat:
 	jsr	cmn_err
 	lea	%sp@(16),%sp
 Lwbf_q:
-	tstl	wbf_prop_on
-	beqw	Lwbf_swallow		| A/B control: 0 = the pre-2026-08-12 behaviour
 | --- classify the TRANSFER MODIFIER.  The follow-up audit corrected this: WBS & 7 is a TM, not
 |     universally a logical function code.  TM 1/2 are user data/code, 5/6 supervisor data/code,
 |     3/4 MMU TABLE SEARCH, 0 a data-cache PUSH and 7 reserved.  The first version of this code
@@ -1077,10 +1009,6 @@ Lwbf_user:
 Lwbf_stop:
 	addql	&4,%sp			| drop Lwb_do's return address -- the replay ENDS here
 	rts				| and returns to the wrapper with d0 set
-Lwbf_swallow:
-	addql	&1,wbf_swallow_n	| the old behaviour, kept only as the A/B control
-	moveq	&0,%d0
-	rts
 | --- Q3: a landing this pad does not own.  The stack below us belongs to code we cannot name,
 |     so the one thing not to do is modify it: no u_nofault write from a foreign d2, no addql,
 |     no rts.  Fail fast and say what was seen.  No such landing has ever been observed -- the
@@ -1122,39 +1050,20 @@ wbf_magic:
 	.globl	wbn_magic
 wbn_magic:
 	.long	0x57424e21		| "WBN!" -- ISSUE-65 native-size replay
-	.globl	wbn_on
-wbn_on:
-	.long	1			| 0 = restore the pre-ISSUE-65 replay whole, in one .data
-					| long, for an A/B inside a single boot
-	.globl	wbn_b_n
-wbn_b_n:
-	.long	0			| native byte replays
-	.globl	wbn_w_n
-wbn_w_n:
-	.long	0			| native ALIGNED word replays
-	.globl	wbn_l_n
-wbn_l_n:
-	.long	0			| native ALIGNED long replays
-	.globl	wbn_fallback_n
-wbn_fallback_n:
-	.long	0			| misaligned word/long left on the retained byte path.
-					| This is the residual's denominator: zero here means
-					| the workload never produced a misaligned WB, NOT that
-					| the fallback is correct.
+.ifdef I10
+	.globl	wb_replay_n
+wb_replay_n:
+	.long	0			| write-back replays performed (Lwb_do entries)
+.endif
 	.globl	wbn_fail_n
 wbn_fail_n:
-	.long	0			| native replays that faulted.  Meaningless without
-					| wbn_b_n + wbn_w_n + wbn_l_n as its denominator.
+	.long	0			| native replays that faulted
 	.globl	wbn_mode
 wbn_mode:
 	.long	3			| the LAST replay's mode: 0=native byte, 1=native word,
 					| 2=native long, 3=byte fallback.  Read it to know what
 					| wbf_addr means; initialised to 3 so a read before any
 					| replay does not claim a native transfer.
-	.globl	wbf_prop_on
-wbf_prop_on:
-	.long	1			| 1 = propagate a denied write-back (the fix)
-					| 0 = the pre-2026-08-12 swallow-and-continue, for an A/B
 	.globl	wbf_sup_fatal
 wbf_sup_fatal:
 	.long	1			| 1 = a denied KERNEL write-back panics with diagnostics
@@ -1198,10 +1107,6 @@ wbf_nosig_n:
 	.globl	wbf_krn_n
 wbf_krn_n:
 	.long	0			| denials seen by the KERNEL wrapper (no signal ABI there)
-	.globl	wbf_swallow_n
-wbf_swallow_n:
-	.long	0			| denials dropped because wbf_prop_on was 0.  In a shipping
-					| boot this must be 0, or the fix is switched off.
 	.globl	wbf_afb_n
 wbf_afb_n:
 	.long	0			| si_addr taken from the replay pointer because the CPU's
@@ -1253,50 +1158,12 @@ Lwd_msg:
 	.asciz	"unresolved fault dropped a pending write-back: ctx=%d addr=%x data=%x pc=%x"
 	.balign	4
 
-| --- ISSUE-22 (2026-07-28): DFC restore, and the one .data long that turns it off ---
-	.globl	wb_dfc_on
-wb_dfc_on:
-	.long	1			| 1 = restore the caller's DFC (the fix); 0 = A/B control
-	.globl	wb_dfc_n
-wb_dfc_n:
-	.long	0			| restores performed -- the denominator for the A/B
-	.globl	wb_dfc_changed
-wb_dfc_changed:
-	.long	0			| faults that returned with a DFC the caller did not set
-	.globl	wb_dfc_lastold
-wb_dfc_lastold:
-	.long	0			| the caller's DFC in the most recent such fault
-	.globl	wb_dfc_lastnew
-wb_dfc_lastnew:
-	.long	0			| what the replay left in DFC instead
-	.globl	wb_replay_n
-wb_replay_n:
-	.long	0			| write-back replays performed (Lwb_do entries)
-	.globl	wb_replay_odd
-wb_replay_odd:
-	.long	0			| ...of those, replays that set DFC to something != user data
-| --- fault injection (Lwb_dfcinject): arm with kpoke or from dfcinject.c ---
-	.globl	wb_dfc_force
-wb_dfc_force:
-	.long	0			| 0 = off; else the FC value to leave in DFC
-	.globl	wb_dfc_force_n
-wb_dfc_force_n:
-	.long	0			| remaining budget, counts down (self-limiting)
-	.globl	wb_dfc_forced
-wb_dfc_forced:
-	.long	0			| injections actually performed
-	.globl	wb_sfc_changed
-wb_sfc_changed:
-	.long	0			| faults returning with an SFC the caller did not set
 | --- 060 fault-path instrumentation (F1, 2026-08-05; docs/060-COUNTERS-UNIT-SPEC-260805.md) ---
 | M68060-XPAGE-ACCEPTANCE.md is a STATIC pass whose runtime verdict is blocked on one thing:
 | nothing counted format-4 frames, so a booting 060 proved the paths were SURVIVED, not
 | EXERCISED.  These are pure instrumentation -- no control flow, no policy, no register use
 | (addql/movel to absolute addresses only).  Every one of them sits inside a branch that only a
 | fmt-4 frame reaches, so the 040 executes none of them.
-	.globl	x60_fmt4_n
-x60_fmt4_n:
-	.long	0			| format-4 frames seen by the wrappers (user AND kernel)
 	.globl	x60_ma_n
 x60_ma_n:
 	.long	0			| MA tier taken -- the architecture contract
@@ -1318,10 +1185,6 @@ x60_far_fail_n:
 	.globl	x60_last_fa
 x60_last_fa:
 	.long	0			| last faulting FA (frame+72), unmodified
-	.globl	x60_last_fslw
-x60_last_fslw:
-	.long	0			| last FSLW, captured in sswsynth BEFORE it overwrites
-					| bits 31-16 in place -- after that the only copy is d5
 	.globl	x60_fprot_n
 x60_fprot_n:
 	.long	0			| F3: MA-tier crossing WRITE into a resident, write-

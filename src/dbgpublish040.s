@@ -39,11 +39,8 @@
 | instruction bytes.  UIO_READ=0 / UIO_WRITE=1 per <sys/uio.h> and prwrite's
 | literal 1.
 |
-| dbg_publish_on ships 1.  It exists so publication can be A/B'd on hardware
-| (kpoke it to 0, re-run, compare) without a rebuild -- the same idiom as
-| hat_cm_ram / btrace_on / kdbg_on.  An image shipping 0 is a bisect image and
-| must be stamped as such.  Counters are uncapped and free: they are how a boot
-| proves the wrappers actually ran, which "it still works" does not.
+| Publication is unconditional since 2026-11-02 (the dbg_publish_on A/B word and the four
+| counters that proved the wrappers ran are gone).
 |
 | Wired by patch_dbgpublish.py:
 |   0x47eb8  suword  -> dbg_suword_publish     (ptrace, already-writable path)
@@ -65,12 +62,8 @@ dbg_suword_publish:
 	movel	%fp@(8),%sp@-		| addr
 	jsr	suword
 	addqw	&8,%sp
-	addql	&1,dbg_ptrace_calls
-	tstl	dbg_publish_on
-	beqw	Lds_out
 	.word	0xf4f8			| cpusha bc -- publish to RAM, invalidate both caches
-	addql	&1,dbg_ptrace_publish
-Lds_out:
+
 	moveal	%d0,%a0			| SVR4 m68k: a pointer result rides in a0 too
 	unlk	%fp
 	rts
@@ -89,11 +82,7 @@ dbg_uiomove_publish:
 	lea	%sp@(16),%sp
 	cmpil	&1,%fp@(16)		| UIO_WRITE?
 	bnew	Ldu_out			| a read creates no user instruction bytes
-	addql	&1,dbg_procfs_calls
-	tstl	dbg_publish_on
-	beqw	Ldu_out
 	.word	0xf4f8			| cpusha bc
-	addql	&1,dbg_procfs_publish
 Ldu_out:
 	moveal	%d0,%a0
 	unlk	%fp
@@ -103,21 +92,4 @@ Ldu_out:
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
 	.data
 	.even
-| dbg_publish_on: 1 = publish (the shipped default), 0 = wrappers pass through
-| unchanged so the publication can be A/B'd live via /dev/kmem.
-	.globl	dbg_publish_on
-dbg_publish_on:
-	.long	1
-	.globl	dbg_ptrace_calls
-dbg_ptrace_calls:
-	.long	0
-	.globl	dbg_ptrace_publish
-dbg_ptrace_publish:
-	.long	0
-	.globl	dbg_procfs_calls
-dbg_procfs_calls:
-	.long	0
-	.globl	dbg_procfs_publish
-dbg_procfs_publish:
-	.long	0
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

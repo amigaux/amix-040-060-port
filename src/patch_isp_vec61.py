@@ -96,8 +96,7 @@ def main():
         raise SystemExit("ABORT: M68Kvec[61] target is %s, expected %s" % (symname(cur), OLD_TARGET))
 
     # every ISP symbol the handler needs must be defined in this image
-    for s in ("isp61_vec", "isp61_magic", "isp61_entry_n", "isp61_ok_n",
-              "isp61_unsupported_n", "isp61_last_pc"):
+    for s in ("isp61_vec", "isp61_magic", "isp61_unsupported_n"):
         i = sym_index(s)
         if u32(b, so + i*se + 12) & 0xffff == 0:      # st_shndx == SHN_UNDEF
             raise SystemExit("ABORT: %s is undefined in %s" % (s, KERNEL))

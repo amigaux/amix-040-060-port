@@ -132,8 +132,6 @@ Lrt_hbnorm:
 | OWN hard-error value (5b412: `moveq &9,%d0`) -- so nothing downstream sees a code this
 | kernel does not already produce.  d0 alone carries the result, matching the two existing
 | return paths in this function.
-	tstl	hbu_on
-	beqw	Lrt_hbtail		| escape hatch: 0 = pre-ISSUE-47 behaviour, for an A/B in one boot
 	moveal	%fp@(12),%a0
 	movel	%a0@,%d1		| PTE
 	andil	&0xfffff000,%d1		| physical page base
@@ -162,9 +160,6 @@ Lrt_hbtail:
 	.globl	hbu_magic
 hbu_magic:
 	.long	0x48425521		| "HBU!"
-	.globl	hbu_on
-hbu_on:
-	.long	1			| 0 = restore the pre-ISSUE-47 retry, inside one boot
 	.globl	hbu_n
 hbu_n:
 	.long	0			| probes refused because they land outside DTT0/DTT1

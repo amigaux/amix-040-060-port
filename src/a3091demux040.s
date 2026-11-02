@@ -61,47 +61,22 @@
 |     is callee-saved anyway; this saves %d2 and %a2 and touches no other non-scratch
 |     register.
 |
-| EXPECTED READING, written before the first run:
-|   a3w_calls    -- every level-2 interrupt on the machine, so it is large and it is the
-|                   denominator that proves the wrapper is in the table at all
-|   a3w_notours  -- almost all of them (keyboard, serial, ethernet)
-|   a3w_ints_only + a3w_ints_eint -- ordinary disk traffic; must be nonzero or nothing was
-|                   measured
-|   a3w_eint_only > 0 -- the mechanism the audit predicts, and the point of the whole unit
-|   a3w_other    -- 0.  A nonzero value is a source with no recovery contract yet
-|   a3w_nodev    -- 0
-|   a3d_n        -- 0.  The wedge is what this is for
+| WHAT IT COUNTS (since 2026-11-02 only the anomalies; the per-interrupt classification
+| census that proved the mechanism cost every level-2 interrupt on every machine, A3091 or not):
+|   a3w_other    -- 0.  A nonzero value is a source with no recovery contract yet; the entry
+|                   snapshot is in a3w_other_istr and the first four print
 |   a3w_allones  -- 0 on a healthy machine.  See ISSUE-58: nonzero means ISTR read back as
 |                   all ones, which is a read that did not reach the chip rather than a
-|                   source.  Measured 11 in 7990 A3091 interrupts on one Mercury 68060 and
-|                   0 in hundreds of thousands on an A3640.  Read a3w_allones_re with it:
-|                   a plausible second read says the register was fine and the bus was not.
+|                   source.  Read a3w_allones_re with it: a plausible second read says the
+|                   register was fine and the bus was not.
 |
-| INVARIANTS (all three must hold exactly; two counters that cannot both be true have
-| caught more here than green tests have):
-|   a3w_calls     = a3w_nodev + a3w_notours + a3w_own + a3w_allones
-|   a3w_own       = a3w_ints_only + a3w_ints_eint + a3w_eint_only + a3w_other
-|   a3w_eint_acked = (a3w_eint_only - a3w_eint_deleg) + a3w_resid_eint
-|
-| a3w_or_istr IS A SOURCE CENSUS AND MUST STAY ONE.  An all-ones read is rejected BEFORE the
-| OR, because eleven of them put every bit into it on one machine and made the counter say
-| that E_INT had asserted when it never had.  A bit in this counter should mean a source
-| raised it, not that a read failed.
-|
-| a3w_consume IS A LIVE A/B.  1 (the default) consumes a pure E_INT; 0 delegates it and the
-| unit becomes pure instrumentation with the stock behaviour intact.  kpoke flips it without
-| a reboot, which is how the audit's "classification build" is reached without spending a
-| second power cycle on it -- and if the machine wedges anyway, a3w_dead_istr holds the
-| ENTRY snapshot of the interrupt that did it, which is precisely the datum four captures
-| could not produce.
+| a3w_consume IS A LIVE A/B.  1 (the default) consumes a pure E_INT; 0 delegates it to the
+| stock body.  kpoke flips it without a reboot.
 
 	.text
 	.globl	a3091intr_demux
 a3091intr_demux:
 	moveml	%d2/%a2,%sp@-		| %a2 = p2int's table cursor.  Both callee-saved.
-	addql	&1,a3w_calls
-	movel	&0x41335752,a3w_ran	| "A3WR" -- the BODY ran.  a3w_magic is static and
-					| says only that the block is where it is said to be.
 
 	movel	a3091_device,%d0
 	beqw	Law_nodev		| the stock body's first test, and its first return
@@ -113,12 +88,9 @@ a3091intr_demux:
 	cmpil	&0x0000ffff,%d2		| ISSUE-58: a read that did not land, not a source.
 	beqw	Law_allones		| Tested BEFORE the OR below, so the census stays
 					| a census -- see the counter's own comment.
-	orl	%d2,a3w_or_istr
 
 	btst	&4,%d2			| INT_P -- the same gate, unchanged
 	beqw	Law_notours
-	addql	&1,a3w_own
-	movel	%d2,a3w_last_istr
 
 	movel	%d2,%d0
 	andil	&0x010c,%d0		| INTX(8) | UE_INT(3) | OE_INT(2)
@@ -129,20 +101,11 @@ a3091intr_demux:
 
 | --- the WD asked.  Hand it to the stock body, then clean up a DMA event that rode in
 |     with it, so the next interrupt is not a pure E_INT we have to reason about. ---
-	btst	&5,%d2
-	bnes	Law_both
-	addql	&1,a3w_ints_only
-	bras	Law_wd
-Law_both:
-	addql	&1,a3w_ints_eint
-Law_wd:
-	bsr	Law_call
+	jsr	a3091intr		| the stock body (no parameters, see above)
 	movew	%a2@(30),%d0		| residual E_INT after the handler ran?
 	btst	&5,%d0
 	beqw	Law_out
 	movew	&1,%a2@(26)		| CINT
-	addql	&1,a3w_resid_eint
-	addql	&1,a3w_eint_acked
 	braw	Law_out
 
 | --- INT_P without INTS.  E_INT alone is the audit's candidate; anything else is a
@@ -150,20 +113,18 @@ Law_wd:
 Law_noints:
 	btst	&5,%d2
 	beqw	Law_other
-	addql	&1,a3w_eint_only
 	tstl	a3w_consume
 	bnes	Law_consume
-	addql	&1,a3w_eint_deleg	| classification mode: stock behaviour, counted only
-	bsr	Law_call
+	jsr	a3091intr		| the stock body (no parameters, see above)
 	braw	Law_out
 Law_consume:
 	movew	&1,%a2@(26)		| CINT: the SDMAC's own latched event, acknowledged
-	addql	&1,a3w_eint_acked	| without reading SS and without touching the DFA
+					| without reading SS and without touching the DFA
 	movew	%a2@(30),%d0		| did the WD assert while we were doing that?
 	btst	&6,%d0
 	beqw	Law_out
-	addql	&1,a3w_eint_then_ints	| yes -- deliver it rather than wait for the level
-	bsr	Law_call
+					| yes -- deliver it rather than wait for the level
+	jsr	a3091intr		| the stock body (no parameters, see above)
 	braw	Law_out
 
 | --- an error or unclassified source.  Loud, and still fail-stop: the stock body decides,
@@ -180,7 +141,7 @@ Law_other:
 	jsr	printf
 	addql	&8,%sp
 Law_other_go:
-	bsr	Law_call
+	jsr	a3091intr		| the stock body (no parameters, see above)
 	braw	Law_out
 
 | --- ISSUE-58: ISTR read back as all ones.  That is not a register value -- a real error
@@ -209,32 +170,15 @@ Law_allones_pr:
 	jsr	printf
 	lea	%sp@(12),%sp		| addq only reaches 8; lea is the idiom for 12
 Law_allones_go:
-	bsr	Law_call
+	jsr	a3091intr		| the stock body (no parameters, see above)
 	braw	Law_out
 
 Law_notours:
-	addql	&1,a3w_notours
-	bras	Law_out
 Law_nodev:
-	addql	&1,a3w_nodev		| MUST STAY 0 after autoconfig
 Law_out:
 	moveml	%sp@+,%d2/%a2
 	rts
 
-| --- delegate, and notice if the stock body shut the driver down while we were in it.
-|     a3d_n is a3091dbg040.s's DEAD counter; the entry snapshot in %d2 is the one thing
-|     that instrument cannot see, because it runs after `SS` has already been read. ---
-Law_call:
-	movel	a3d_n,%d0
-	movel	%d0,%sp@-
-	jsr	a3091intr
-	movel	%sp@+,%d0
-	cmpl	a3d_n,%d0
-	beqs	Law_call_ret
-	movel	%d2,a3w_dead_istr
-	addql	&1,a3w_dead_n
-Law_call_ret:
-	rts
 	.balign	4
 
 	.data
@@ -252,66 +196,18 @@ La3w_m2:
 	.globl	a3w_magic
 a3w_magic:
 	.long	0x41335721		| "A3W!" -- STATIC: proves the address
-	.globl	a3w_ran
-a3w_ran:
-	.long	0			| "A3WR" once the body has run
 	.globl	a3w_consume
 a3w_consume:
 	.long	1			| 1 = consume a pure E_INT; 0 = delegate it (A/B)
-	.globl	a3w_calls
-a3w_calls:
-	.long	0			| every level-2 interrupt: the denominator
-	.globl	a3w_nodev
-a3w_nodev:
-	.long	0			| MUST STAY 0: device was NULL
-	.globl	a3w_notours
-a3w_notours:
-	.long	0			| INT_P clear at entry
-	.globl	a3w_own
-a3w_own:
-	.long	0			| INT_P set at entry
-	.globl	a3w_ints_only
-a3w_ints_only:
-	.long	0			| WD asked, no DMA event
-	.globl	a3w_ints_eint
-a3w_ints_eint:
-	.long	0			| WD asked and a DMA event rode in with it
-	.globl	a3w_eint_only
-a3w_eint_only:
-	.long	0			| SDMAC alone -- the audit's candidate mechanism
 	.globl	a3w_other
 a3w_other:
 	.long	0			| MUST STAY 0: error or unnameable source
-	.globl	a3w_eint_acked
-a3w_eint_acked:
-	.long	0			| CINT strobes this wrapper issued
-	.globl	a3w_eint_deleg
-a3w_eint_deleg:
-	.long	0			| pure E_INTs handed to the stock body (consume=0)
-	.globl	a3w_resid_eint
-a3w_resid_eint:
-	.long	0			| E_INT still set after a delegated WD event
-	.globl	a3w_eint_then_ints
-a3w_eint_then_ints:
-	.long	0			| the WD asserted inside the pure-E_INT window
-	.globl	a3w_last_istr
-a3w_last_istr:
-	.long	0			| entry snapshot of the last INT_P interrupt
-	.globl	a3w_or_istr
-a3w_or_istr:
-	.long	0			| OR of every entry snapshot: which bits ever appear
 	.globl	a3w_other_istr
 a3w_other_istr:
 	.long	0			| entry snapshot of the last unclassified one
 	.globl	a3w_other_pr
 a3w_other_pr:
 	.long	0			| console lines spent on the above; capped at 4
-	.globl	a3w_dead_n
-a3w_dead_n:
-	.long	0			| times the stock body reached DEAD under us
-	.globl	a3w_dead_istr
-a3w_dead_istr:
-	.long	0			| and the ENTRY istr of the interrupt that did it
 | --- ISSUE-58, appended at the END so no existing offset moves (the a3d block gained its
 |     last two counters the same way on 2026-08-27) ---
 	.globl	a3w_allones

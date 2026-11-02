@@ -127,10 +127,8 @@ def need(name):
 # The two must-stay-zero groups.  Both are read FROM THE DEVICE and not grepped out of the log,
 # because a grep pattern in this file can match the line this file itself printed -- which is
 # what happened to five separate checks on 2026-08-26.
-ZERO_A3W = ['a3w_nodev', 'a3w_other', 'a3w_dead_n', 'a3d_n']
-READ_A3W = [('a3w_calls', 'every level-2 interrupt'), ('a3w_own', 'INT_P set at entry'),
-            ('a3w_eint_only', 'pure SDMAC events -- ISSUE-53 closes when this is nonzero'),
-            ('a3w_eint_acked', 'CINT strobes issued')]
+ZERO_A3W = ['a3w_other', 'a3w_allones', 'a3d_n']
+READ_A3W = []
 ZERO_A3P = ['a3p_d_quar', 'a3p_d_badphase', 'a3p_d_badstat', 'a3p_d_notowner']
 READ_A3P = [('a3p_d_try', 'drains attempted'), ('a3p_d_bytes', 'bytes discarded'),
             ('a3p_d_sent', 'ABORT messages sent'), ('a3p_d_busfree', 'clean bus-free seen'),
@@ -253,7 +251,7 @@ w("# Must-stay-zero readings, taken from the device rather than from the log so 
 w("# in this file can match a line this file printed.  Addresses are spelled out because AMIX")
 w("# `expr` cannot do hex arithmetic, and they carry a Z_ prefix so that no counter address can")
 w("# collide with a block length above.")
-for n in ZERO_A3W + [x for x, _ in READ_A3W] + ZERO_A3P + [x for x, _ in READ_A3P] + ['a3w_ran']:
+for n in ZERO_A3W + [x for x, _ in READ_A3W] + ZERO_A3P + [x for x, _ in READ_A3P]:
     w("Z_%s=%08X" % (n.upper(), need(n)))
 w("")
 w("peek1() { $K $1 1 | sed \"s/.*= //;s/ .*//\"; }")
@@ -268,12 +266,6 @@ w("\tfi")
 w("}")
 w("")
 w('echo "=== ISSUE-53 A3091 SOURCE CLASSIFIER ==="')
-w("r=`peek1 $Z_A3W_RAN`")
-w("if [ \"$r\" = \"41335752\" ]; then")
-w("\techo \"  ran     a3w_ran = $r\"")
-w("else")
-w("\techo \"  NOT-RUN a3w_ran = $r, expected 41335752\"; zbad=`expr $zbad + 1`")
-w("fi")
 for n, why in READ_A3W:
     w('echo "  READING %-16s = `peek1 $Z_%s`   (%s)"' % (n, n.upper(), why))
 for n in ZERO_A3W:

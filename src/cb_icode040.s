@@ -58,11 +58,8 @@
 | separate unit and must not ride along with the ISSUE-38 A/B.
 |
 | Register contract: copyout returns in d0 and d0 is NOT touched after
-| copyout_orig returns -- the gate uses d1 (scratch under this ABI) and the two
-| counters are memory increments, so the wrapper is return-value transparent.
-| Counters (read afterwards with kpeek; the mechanism must be VERIFIED, not
-| assumed from "it booted"): cb_icode_calls = copyouts into the icode window,
-| cb_icode_push = pushes actually performed.  Both must read 1 after a boot.
+| copyout_orig returns -- the gate uses d1 (scratch under this ABI) -- so the
+| wrapper is return-value transparent.  (Its two counters are gone since 2026-11-02.)
 |
 | Mechanism: --weaken-symbol copyout + --add-symbol copyout_orig=.text:0x576.
 | Assemble: m68k-cbm-sysv4-gcc -m68040 -c cb_icode040.s -o build/cb_icode040.o
@@ -81,13 +78,11 @@ copyout:
 	bcsw	Lcbi_out		| below the icode page (unsigned)
 	cmpil	&0x80801000,%d1
 	bccw	Lcbi_out		| at/above the next page
-	addql	&1,cb_icode_calls
 	tstl	%d0
 	bnew	Lcbi_out		| copyout failed -> nothing to publish
 	.word	0xf4f8			| cpusha bc -- push dirty data lines to RAM,
 					|   invalidate both caches, so proc 1's
 					|   instruction fetch sees the icode
-	addql	&1,cb_icode_push
 Lcbi_out:
 	unlk	%fp
 	rts
@@ -96,10 +91,4 @@ Lcbi_out:
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
 	.data
 	.even
-	.globl	cb_icode_calls
-cb_icode_calls:
-	.long	0
-	.globl	cb_icode_push
-cb_icode_push:
-	.long	0
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

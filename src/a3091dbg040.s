@@ -349,16 +349,11 @@ Lad_nopm:
 	jsr	printf
 	lea	%sp@(24),%sp
 
-	movel	a3w_last_istr,%sp@-	| the ENTRY snapshot, from the demux wrapper: the ISTR
-					| as it was BEFORE a3091intr read SS.  a3d_istr below
-					| is read after that, so it can only show what survived
-					| the acknowledgement -- which is why the two are
-					| printed side by side rather than one of them.
-	movel	a3d_istr,%sp@-
+	movel	a3d_istr,%sp@-		| read after a3091intr acknowledged SS: what survived
 	movel	a3d_devp,%sp@-
 	pea	La3d_m4
 	jsr	printf
-	lea	%sp@(16),%sp
+	lea	%sp@(12),%sp
 
 	movel	a3d_whole,%sp@-
 	movel	a3d_ovf,%sp@-
@@ -1193,7 +1188,7 @@ La3d_m3:
 	.asciz	"a3091dbg zarm=%d rarm=%d owned=%d noprep=%d ovf=%d whole=%d\n"
 	.even
 La3d_m4:
-	.asciz	"a3091dbg dev=%x istr=%x entry=%x\n"
+	.asciz	"a3091dbg dev=%x istr=%x\n"
 	.even
 La3p_m1:
 	.asciz	"a3p ss=%x cp=%x tc=%x di=%x con=%x as=%x\n"

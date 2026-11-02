@@ -16,7 +16,9 @@
  * (tools/freeqguard-retarget.py; relink-040.sh, FREEQ_GUARD=0 builds without it).  At spl7
  * freeq_guarded unlinks q and WR(q) from the run list (qhead, qtail) and the scan list (scanqhead, scanqtail),
  * both chained through q_link, counts what it took off, then calls the stock freeq unchanged.  A pair on
- * neither list -- every close the stock code already cleaned up -- costs one walk of each list.
+ * neither list -- every close the stock code already cleaned up -- costs one walk of each list and no store:
+ * fqg_run and fqg_scan are written only when the guard actually took a queue off (on k46 every .data store is
+ * a bus write; the count of every freeq, fqg_calls, is gone since 2026-11-02 for the same reason).
  */
 #include <sys/types.h>
 #include <sys/param.h>
@@ -26,7 +28,6 @@ extern void freeq();
 extern queue_t *qhead, *qtail, *scanqhead, *scanqtail;
 
 long fqg_magic = 0x46514721;	/* "FQG!" */
-long fqg_calls = 0;		/* every freeq */
 long fqg_run = 0;		/* queues taken off the run list */
 long fqg_scan = 0;		/* queues taken off the scan list */
 long fqg_last = 0;		/* the last queue taken off either */
@@ -61,12 +62,13 @@ void
 freeq_guarded(q)
 	queue_t *q;
 {
-	long s;
+	long s, n;
 
-	fqg_calls++;
 	__asm__ __volatile__ ("movew %%sr,%0; movew &0x2700,%%sr" : "=d" (s));
-	fqg_run += fqg_unlink(&qhead, &qtail, q);
-	fqg_scan += fqg_unlink(&scanqhead, &scanqtail, q);
+	if ((n = fqg_unlink(&qhead, &qtail, q)) != 0)
+		fqg_run += n;
+	if ((n = fqg_unlink(&scanqhead, &scanqtail, q)) != 0)
+		fqg_scan += n;
 	__asm__ __volatile__ ("movew %0,%%sr" : : "d" (s));
 	freeq(q);
 }

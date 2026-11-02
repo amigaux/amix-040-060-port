@@ -105,16 +105,12 @@
 | around hat_growsdt inside hat_legacy_sdt_free, which runs at hat_free entry --
 | BEFORE the A/B/C walk that calls hat_ptfree.  The credit this unit produces
 | happens later, outside that window, so requiring i40_pgfreed_n to rise would be
-| requiring the wrong instrument to move.  ptd_pgfreed_n samples availrmem across
-| THIS hat_sdtfree(ptd,1) call, which is where the backing page can come back.
+| requiring the wrong instrument to move.
 |
-| COUNTERS (all uncapped; a boot that comes up proves nothing):
+| COUNTERS (the fail-closed outcomes only since 2026-11-02; the per-call and per-retirement counts and
+| the ptd_on A/B word, which proved the fix, cost every page-table page freed):
 |   ptd_magic     0x50544421 "PTD!" -- anchor; if this does not read back, every
 |                 other address on the line is stale
-|   ptd_calls     hat_ptdat_retire entries (= hat_ptfree calls past its PFN guard)
-|   ptd_retired_n metadata units actually retired
-|   ptd_pgfreed_n PAGES returned BY THE METADATA RELEASE -- the exact attribution
-|                 Codex asked for, and the number that says ISSUE-40 is closed
 |   ptd_keep0_n   fail closed: p_keepcnt == 0  (double release / wrong page)
 |   ptd_keepn_n   fail closed: p_keepcnt > 1   (another holder; was a silent
 |                 decrement before, now counted)
@@ -123,12 +119,6 @@
 |   ptd_badlink_n fail closed: non-reciprocal list links.  MUST be 0; nonzero
 |                 means the layout above is wrong for this image and the two
 |                 passes just saved both lists
-|
-| ptd_on ships 1, so the fix can be A/B'd in ONE boot on hardware (kpoke 0, run
-| leaktest 300 1, kpoke 1, run it again) -- the same idiom as i40_on / hat_cm_ram
-| / codepub_on.  With ptd_on = 0 this returns "not retired" and hat_ptfree falls
-| back to exactly the pre-fix behaviour, INCLUDING the old unconditional
-| decrement, so the control arm is the old kernel and not a third thing.
 |
 | Assemble: m68k-cbm-sysv4-gcc -m68040 -c ptdatfree040.s -o build/ptdatfree040.o
 | Requires: --globalize-symbol hat_sdtfree (retained local `t` @0xb65ca).
@@ -141,9 +131,6 @@
 hat_ptdat_retire:
 	linkw	%fp,&0
 	moveml	%d2-%d3/%a2-%a4,%sp@-
-	addql	&1,ptd_calls
-	tstl	ptd_on
-	beqw	Lpr_fail		| A/B image: count the call, retire nothing
 	moveal	%fp@(8),%a2		| a2 = pp (callee-saved: survives hat_sdtfree)
 | ---------------------------------------------------------------- ownership gate
 	cmpiw	&1,%a2@(2)		| p_keepcnt EXACTLY one
@@ -203,12 +190,10 @@ Lpr_rm:
 	addqw	&8,%sp
 	movel	availrmem,%d0
 	subl	%d3,%d0			| hat_sdtfree credits at 0xb66e4 only when
-	beqw	Lpr_nopage		|   p_sdtbits reached ZERO
-	addl	%d0,ptd_pgfreed_n	| ISSUE-40's page, coming back
+	beqw	Lpr_nopage		|   p_sdtbits reached ZERO (ISSUE-40's page, coming back)
 Lpr_nopage:
 	clrl	%a2@(32)		| p_ptdats = NULL.  No ptd field may be read
 					|   after hat_sdtfree; pp is a different page
-	addql	&1,ptd_retired_n
 	clrl	%d0			| 0 = retired, release the page
 	braw	Lpr_out
 Lpr_badlink:
@@ -231,20 +216,6 @@ Lpr_out:
 	.globl	ptd_magic
 ptd_magic:
 	.long	0x50544421		| "PTD!"
-| ptd_on: 1 = retire the metadata (the shipped default), 0 = hat_ptfree behaves
-| exactly as it did before this unit, so the A/B control arm is the old kernel.
-	.globl	ptd_on
-ptd_on:
-	.long	1
-	.globl	ptd_calls
-ptd_calls:
-	.long	0
-	.globl	ptd_retired_n
-ptd_retired_n:
-	.long	0
-	.globl	ptd_pgfreed_n
-ptd_pgfreed_n:
-	.long	0
 	.globl	ptd_keep0_n
 ptd_keep0_n:
 	.long	0
@@ -259,8 +230,5 @@ ptd_badlink_n:
 	.long	0
 	.globl	ptd_wake_n
 ptd_wake_n:
-	.long	0
-	.globl	ptd_tblfreed_n
-ptd_tblfreed_n:
 	.long	0
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

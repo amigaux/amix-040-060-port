@@ -69,7 +69,6 @@ Lcb_loop:
 	.word	0xf468			| cpushl dc,(a0) -- push if dirty, invalidate
 	addaw	&16,%a0
 	dbf	%d1,Lcb_loop
-	addql	&1,cb_rel_count
 	rts
 Lcb_rej:
 	addql	&1,cb_rel_reject
@@ -111,12 +110,8 @@ cb_vpfree_enter:
 
 	.data
 	.balign 4
-| Release-barrier instrumentation (read via /dev/kmem or Amiberry IPC):
-| cb_rel_count MUST climb under any page-churn workload once the hooks are in;
-| cb_rel_reject staying 0 is part of the static+runtime acceptance.
-	.globl	cb_rel_count
-cb_rel_count:
-	.long	0
+| cb_rel_reject staying 0 is part of the static+runtime acceptance (the per-release
+| count is gone since 2026-11-02: it cost every page free).
 	.globl	cb_rel_reject
 cb_rel_reject:
 	.long	0

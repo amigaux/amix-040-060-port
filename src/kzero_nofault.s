@@ -48,7 +48,6 @@
 kzero:
 	movel	%d2,%sp@-
 	movel	%a2,%sp@-
-	addql	&1,kzr_calls
 	movel	%sp@(16),%sp@-		| len
 	movel	%sp@(16),%sp@-		| addr (sp moved by the push above)
 	movel	u+0x374,%d2		| the outer u_nofault value
@@ -101,9 +100,6 @@ Lkz_amsg:
 kzr_magic:
 	.long	0x4b5a5221		| "KZR!"
 | kzero entries: pvn_vptrunc, rwvp, spec_write.  Nonzero on any kernel that has written a file.
-	.globl	kzr_calls
-kzr_calls:
-	.long	0
 | Unresolvable faults caught: a kzero that stopped early and returned -1.
 	.globl	kzr_fail_n
 kzr_fail_n:

@@ -346,6 +346,10 @@ print()
 # variable that lets this table accept a kernel without it.  Set, the row reads "rolled back" and
 # does not count as failing; unset, the missing override fails as any other would.
 ROLLBACK = {"kzero": "STATUS_ALLOW_NO_KZERO"}       # KZERO=0 relink-040.sh: the stock bzero alias
+# Diagnostic overrides, out of the default build since 2026-11-02 (relink-040.sh I10, KVP, DIAG106): each is
+# judged only when its unit is linked, which its magic word says.  Linked, the override must hold as any other.
+DIAGNOSTIC = {"as_fault": ("i10_magic", "I10=1"), "nullvect": ("kvp_magic", "KVP=1"),
+              "setregs": ("srg_magic", "DIAG106=1")}
 print("| symbol | stock | strong def | retained alias | verdict |")
 print("|---|---:|---:|---|---|")
 bad = 0
@@ -356,6 +360,10 @@ for name, stock, alias, why in OVERRIDES:
     if alias:
         ok = ok and ov == stock
     rolled = not ok and os.environ.get(ROLLBACK.get(name, ""), "") == "1"
+    unbuilt = name in DIAGNOSTIC and one(DIAGNOSTIC[name][0])[0] is None
+    if unbuilt:
+        print("| `%s` | `%05x` | not built | — | diagnostic, only with %s |" % (name, stock, DIAGNOSTIC[name][1]))
+        continue
     bad += 0 if ok or rolled else 1
     print("| `%s` | `%05x` | %s | %s | %s |" % (
         name, stock,

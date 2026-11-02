@@ -77,6 +77,7 @@ hat_dup:
 |     every-Nth), generous enough that a crash-adjacent boot log now carries
 |     recent hat_dup context instead of just the first fork of the session. ---
 	addql	&1,Lhd_n
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lhd_nodbg
 	movel	Lhd_n,%d0
@@ -95,6 +96,7 @@ Lhd_log:
 	pea	2
 	jsr	cmn_err
 	lea	%sp@(24),%sp
+.endif
 Lhd_nodbg:
 
 | ============================================================================
@@ -586,6 +588,7 @@ Lhd_oldcalc:
 Lhd_copy:
 | --- one-shot marker: the FIRST real private-page duplication (the code path the
 |     old stub never ran; confirms plain-fork COW dup actually happens) ---
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lhd_cnodbg
 	movel	Lhd_cn,%d0
@@ -599,6 +602,7 @@ Lhd_copy:
 	pea	2
 	jsr	cmn_err
 	lea	%sp@(20),%sp
+.endif
 Lhd_cnodbg:
 	movel	%fp@(-100),%sp@-
 	movel	%fp@(-108),%sp@-
@@ -637,7 +641,9 @@ Lhd_cnodbg:
 | one.  It is the PRODUCER whose rate decides whether hat_pteload's, hat_unload's
 | and hat_free's 256-node search bounds can ever be reached, so what it can
 | usefully contribute is that rate.  The `movel` below does not read the CCs.
+.ifdef I10
 	addql	&1,i10_dupreg_n
+.endif
 	movel	%fp@(-76),%d0
 	moveal	%d0,%a0
 	addqb	&1,%a0@(6)		| ptdat in-use++
@@ -744,7 +750,9 @@ Lhd_share:
 | ISSUE-10 instrument: the share path splices mid-chain rather than pushing at
 | the head, but it lengthens the chain by one just the same.  Same counter, same
 | reasoning as the private-copy path above.
+.ifdef I10
 	addql	&1,i10_dupreg_n
+.endif
 	movel	%fp@(-76),%d0
 	moveal	%d0,%a0
 	addqb	&1,%a0@(6)		| ptdat in-use++
@@ -797,14 +805,20 @@ Lhd_out:
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
 	.data
 	.even
+.ifdef KDBG
 Lhd_msg:
 	.asciz	"DBG hat_dup040 ENTER n=%x pid=%d oldas=%x newas=%x"
 	.even
+.endif
+.ifdef KDBG
 Lhd_cmsg:
 	.asciz	"DBG hat_dup040 first private-page copy va=%x oldpp=%x newpp=%x"
 	.even
+.endif
 Lhd_n:
 	.long	0
+.ifdef KDBG
 Lhd_cn:
 	.long	0
+.endif
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

@@ -85,6 +85,7 @@ Lgf_ret:
 	cmpil	&0x00010000,%d0
 	bcsw	Lgf_nodbg		| < 0x10000 = null-ish -> skip
 Lgf_dodbg:
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lgf_nodbg
 	movel	Lgf_n,%d1
@@ -99,6 +100,7 @@ Lgf_dodbg:
 	jsr	cmn_err
 	lea	%sp@(12),%sp
 	movel	Lgf_save,%d0		| restore VA (cmn_err clobbers d0/d1/a0/a1)
+.endif
 Lgf_nodbg:
 	moveal	%d0,%a0			| stock returns the address in both d0 and a0
 	unlk	%fp
@@ -107,11 +109,17 @@ Lgf_nodbg:
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
 	.data
 	.even
+.ifdef KDBG
 Lgf_msg:
 	.asciz	"DBG ufault VA=%x"
 	.even
+.endif
+.ifdef KDBG
 Lgf_n:
 	.long	0
+.endif
+.ifdef KDBG
 Lgf_save:
 	.long	0
+.endif
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

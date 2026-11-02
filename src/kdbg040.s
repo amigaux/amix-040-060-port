@@ -104,9 +104,6 @@ kdbg_on:
 | Uncapped event counters for the two anomaly-shaped sites that fire on every
 | healthy boot.  These count REGARDLESS of kdbg_on -- the point is the rate, and a
 | counter costs one increment whether or not anyone is printing.
-	.globl	hat_pfnmiss_n
-hat_pfnmiss_n:
-	.long	0
 	.globl	hat_badaslot_n
 hat_badaslot_n:
 	.long	0

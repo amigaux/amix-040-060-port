@@ -99,57 +99,6 @@
 | ============================================================================
 	.globl	fpe_vec11
 fpe_vec11:
-| ---- THE CENSUS, ahead of every gate (round 4 fix 5) --------------------------------------
-| fpe_fmt2_n used to sit BELOW the fpu_present decline, and every 68040 in the project's
-| bench and metal fleet has an FPU -- so on the only kind of 040 available the lane never armed
-| and the counter could never move.  FPE-GLUE-DESIGN.md 9 item 10 was therefore not merely 0,
-| it was unreachable, and contract 8 item 2's standing gap (the format-2/0x202c pairing rests on
-| Motorola's x_fline.sa and has never been latched from a real 68040 frame in this tree) stayed
-| open through a round that booted two 040 rigs.
-|
-| Counting here costs three to five instructions per vector-11 event and closes it for free on
-| ANY 040 boot: an FPU-present 040 takes format-2 frames at vector 11 for every unimplemented FP
-| instruction the FPSP handles.
-|
-| CORRECTION (verified on 68060 silicon 2026-08-30): format 2 is the UNIMPLEMENTED-INSTRUCTION
-| frame, NOT a 68040-specific shape.  A 68060 with a WORKING FPU takes the same six-word format-2
-| frame for unimplemented FP -- on that run fpe_v11_n and fpe_v11_fmt2_n both moved 0 -> 12 while
-| fpe_v11_fmtx_n stayed 0, so both shapes still decode and only the label was ever wrong, never the
-| dispatch.  The census that closes this "on ANY 040 boot" closes it on any FPU-present part.
-|
-| THE NEVER-ENGAGE BAR IS UNCHANGED.  fpe_entry_n stays behind both gates, below.  The fpe_v11_*
-| family are PRE-GATE OBSERVERS and are EXPECTED to move on FPU-present rigs -- that is their
-| whole purpose -- so any reading of the bar must exclude them by name.
-|
-| Memory-to-memory and memory-immediate throughout: CCR is the only thing this changes, which is
-| the same register discipline the rest of this arm keeps.  The decline path itself is untouched.
-	addql	&1,fpe_v11_n
-	cmpiw	&0x402c,%sp@(6)
-	beqs	Lfpe_cen4
-	cmpiw	&0x202c,%sp@(6)
-	beqs	Lfpe_cen2
-	cmpiw	&0x002c,%sp@(6)
-	beqs	Lfpe_cen0
-	addql	&1,fpe_v11_fmtx_n
-	movew	%sp@(6),fpe_v11_last_fmtvec+2
-	bras	Lfpe_cen_done
-Lfpe_cen4:
-	addql	&1,fpe_v11_fmt4_n
-	bras	Lfpe_cen_done
-Lfpe_cen0:
-	addql	&1,fpe_v11_fmt0_n
-	bras	Lfpe_cen_done
-Lfpe_cen2:
-	addql	&1,fpe_v11_fmt2_n
-	movew	%sp@(6),fpe_v11_fmt2_word+2 | contract 8 item 2: the pairing, from a real frame
-	movel	%sp@(8),fpe_v11_fmt2_ia	| a format-2 frame is 12 bytes and +8 is the OPERAND
-					| EFFECTIVE ADDRESS -- the field only this shape has.
-					| Round 5 measured it: 0 on all 2,007 frames from a
-					| register-to-register fsin, and exactly the operand's
-					| data address from an fsin.d (%a0),%fp0 probe.  The _ia
-					| name predates that and is kept so the symbol stays
-					| stable; contract 6.2 carries the correction
-Lfpe_cen_done:
 
 	tstl	fpu_present		| real silicon: this lane does not exist.  Uncounted on
 	bnew	fpe_decline		| purpose -- fpe_entry_n == 0 is the never-engage bar
@@ -159,7 +108,7 @@ Lfpe_cen_done:
 	cmpiw	&0x402c,%sp@(6)		| eight-word, format 4: 68060 FP disabled
 	beqs	Lfpe_fmt4
 	cmpiw	&0x202c,%sp@(6)		| six-word, format 2: unimplemented FP instruction
-	beqs	Lfpe_fmt2			| (68040 OR 68060-with-FPU -- see the census note above)
+	beqs	Lfpe_fmt2			| (68040 OR 68060-with-FPU: the unimplemented-FP frame)
 	cmpiw	&0x002c,%sp@(6)		| four-word, format 0: a real bad F-line word
 	beqs	Lfpe_fmt0
 	addql	&1,fpe_fmtx_n		| a fourth shape at vector 11 would be a finding
@@ -172,7 +121,6 @@ Lfpe_fmt2:
 	addql	&1,fpe_fmt2_n		| the unimplemented-FP arm is documented and NOT
 	bras	fpe_decline		| implemented this round; today it keeps its FPSP outcome
 Lfpe_fmt4:
-	addql	&1,fpe_fmt4_n
 	btst	&5,%sp@			| stacked SR high byte bit 5 = the S bit
 	beqs	Lfpe_v11user
 	addql	&1,fpe_super_n		| supervisor-origin FP on a part with no FPU is a kernel
@@ -222,10 +170,9 @@ fpe_decline:
 | ============================================================================
 	.globl	fpe_vec60
 fpe_vec60:
-| ---- the census, ahead of every gate, exactly as the vector-11 arm's ---------------------
-| These move on ANY 68060, FPU-present ones included -- a real FPU raises vector 60 for these
-| forms too, and the package handles them.  They are observers and are outside the never-engage
-| bar by name, which fpe_ea_n below is not.
+| ---- every vector-60 event, ahead of the gates ----------------------------------------------
+| fpe_v60_n moves on ANY 68060, FPU-present ones included -- a real FPU raises vector 60 for these
+| forms too, and the package handles them.  A shape other than format 0 is counted and declined.
 	addql	&1,fpe_v60_n
 	cmpiw	&0x00f0,%sp@(6)		| four-word, format 0, vector offset 60 x 4
 	beqs	Lfpe60_cen0
@@ -233,7 +180,6 @@ fpe_vec60:
 	movew	%sp@(6),fpe_v60_last_fmtvec+2
 	bras	Lfpe60_gate
 Lfpe60_cen0:
-	addql	&1,fpe_v60_fmt0_n
 Lfpe60_gate:
 	tstl	fpu_present		| real silicon: the package's business, byte for byte
 	bnes	Lfpe60_decl
@@ -243,7 +189,6 @@ Lfpe60_gate:
 	bnes	Lfpe60_decl
 	btst	&5,%sp@			| stacked SR high byte bit 5 = the S bit
 	bnes	Lfpe60_super
-	addql	&1,fpe_ea_n
 	braw	Lfpe_user		| the vector-11 arm's own body: fpe_trap tells the two
 					| apart by the vector in the frame, so there is no second
 					| copy of the register push / u_ar0 / ureturn sequence
@@ -286,11 +231,6 @@ fpe_decline60:
 | process while it is off the CPU must find it already correct.
 | ============================================================================
 Lfpe_v11user:
-	addql	&1,fpe_user_n		| the VECTOR-11 arm's handoff count, and only that one.
-					| Round 10 kept every registered row of rounds 3-9 meaning
-					| what it meant: fpe_entry_n, fpe_done_n, fpe_sig_n and this
-					| are vector-11 only, and the vector-60 arm has its own
-					| fpe_ea_* set.  FPE-R10-VEC60.md 6.
 Lfpe_user:
 	moveml	%d0-%d7/%a0-%a6,%sp@-	| the 60-byte block, register for register as nullvect
 	movel	sup_cacr,%d0
@@ -695,61 +635,15 @@ fpe_cputype_amix:
 					| assertion for the width defect.  60 on a 68060, 40 on a
 					| 68040; 0 would mean the half-word read is back.  SENTINEL
 					| 0xFFFFFFFF = the lane never armed, so nothing read it
-	.globl	fpe_cputype_bad_n
-fpe_cputype_bad_n:
-	.long	0			| entries where cputype was neither 40 nor 60.  Must stay 0
 	.globl	fpe_disabled_n
 fpe_disabled_n:
 	.long	0			| fpuinit found no FPU and fpe_enable was clear
-
-| ---- the pre-gate census (round 4 fix 5) --------------------------------------------------
-| Counted BEFORE fpu_present and fpu_emul, so these move on every rig including FPU-present
-| ones.  They are observers, not behaviour, and they are explicitly OUTSIDE the never-engage
-| bar -- which remains fpe_entry_n == 0 and fpu_emul == 0 plus every behavioural counter at its
-| initialiser.
-	.globl	fpe_v11_n
-fpe_v11_n:
-	.long	0			| every vector-11 event: armed or not, user or supervisor
-	.globl	fpe_v11_fmt4_n
-fpe_v11_fmt4_n:
-	.long	0			| 0x402c  eight-word, 68060 FP disabled
-	.globl	fpe_v11_fmt2_n
-fpe_v11_fmt2_n:
-	.long	0			| 0x202c  six-word, format 2: unimplemented FP instruction.
-					| THE counter FPE-GLUE-DESIGN.md 9 item 10 wanted and could not
-					| reach.  NOT a 68040-specific frame: a 68060 with a WORKING FPU
-					| takes the same format-2 frame for unimplemented FP -- verified on
-					| 68060 silicon 2026-08-30, where this counter moved 0 -> 12
-	.globl	fpe_v11_fmt0_n
-fpe_v11_fmt0_n:
-	.long	0			| 0x002c  four-word, a genuine bad F-line word
-	.globl	fpe_v11_fmtx_n
-fpe_v11_fmtx_n:
-	.long	0			| any other shape.  Must stay 0
-	.globl	fpe_v11_last_fmtvec
-fpe_v11_last_fmtvec:
-	.long	0xffffffff		| ... its format/vector word, low half
-	.globl	fpe_v11_fmt2_word
-fpe_v11_fmt2_word:
-	.long	0xffffffff		| the last format-2 frame's own word, low half.  Motorola's
-					| x_fline.sa says 0x202c; this is where the tree finally
-					| latches it from real silicon rather than citing it --
-					| round 5 read 0x202c off 2,057 genuine 68040 frames, which
-					| closes contract 8 item 2
-	.globl	fpe_v11_fmt2_ia
-fpe_v11_fmt2_ia:
-	.long	0xffffffff		| ... and its +8 field: the OPERAND EFFECTIVE ADDRESS, 0
-					| when the operand is a register.  Named _ia before it was
-					| measured; nothing consumes it.  Contract 6.2
 
 | ---- the vector-11 arm ------------------------------------------------------------------
 	.globl	fpe_entry_n
 fpe_entry_n:
 	.long	0			| vector-11 events that reached the arm with the lane
 					| armed.  THE never-engage bar: 0 on every FPU-present rig
-	.globl	fpe_fmt4_n
-fpe_fmt4_n:
-	.long	0			| eight-word format-4 frames -- every real LC060 event
 	.globl	fpe_fmt2_n
 fpe_fmt2_n:
 	.long	0			| six-word format-2 (unimplemented FP instruction): declined
@@ -765,14 +659,8 @@ fpe_last_fmtvec:
 	.globl	fpe_super_n
 fpe_super_n:
 	.long	0			| supervisor-origin FP.  Must stay 0; a kernel defect
-	.globl	fpe_user_n
-fpe_user_n:
-	.long	0			| entries handed to the emulator
 
 | ---- outcomes ---------------------------------------------------------------------------
-	.globl	fpe_done_n
-fpe_done_n:
-	.long	0			| instructions emulated and resumed
 	.globl	fpe_sig_n
 fpe_sig_n:
 	.long	0			| entries that ended in a signal, all classes
@@ -820,7 +708,7 @@ fpe_undecoded_n:
 	.globl	fpe_sigpend_n
 fpe_sigpend_n:
 	.long	0			| successful emulations where the gate said "pending work".
-					| Must be VASTLY smaller than fpe_done_n -- that is the gate
+					| Must be vastly smaller than fpe_entry_n -- that is the gate
 	.globl	fpe_sigdeliv_n
 fpe_sigdeliv_n:
 	.long	0			| ... and issig(0) agreed, so psig() ran
@@ -835,9 +723,6 @@ fpe_panic_hard_n:
 	.globl	fpe_copyfail_n
 fpe_copyfail_n:
 	.long	0			| copyin/copyout inside the emulator that failed
-	.globl	fpe_ufetch_n
-fpe_ufetch_n:
-	.long	0			| ufetch_short calls
 	.globl	fpe_ufetchfail_n
 fpe_ufetchfail_n:
 	.long	0			| ... that faulted
@@ -862,51 +747,6 @@ fpe_jb:
 	.globl	fpe_jb_active
 fpe_jb_active:
 	.long	0			| 1 = fpe_jb names a live frame
-
-| ---- instruction-length instrumentation -------------------------------------------------
-| On a format-4 frame the CPU stacks the PC of the instruction AFTER the faulting one, while
-| the emulator computes its own resume PC as f_pcfi + is_advance.  For a STRAIGHT-LINE
-| instruction the two must agree.  Contract 6.3 names a wrong is_advance as the sharpest
-| standing risk in the package -- it resumes the process mid-instruction.
-|
-| ROUND 4: the comparison alone was saturated by a benign class.  A taken FBcc/FDBcc moves the
-| PC off the straight line legitimately, and round 3 read 7,909,400 "misses" that were all
-| exactly that -- an fbnel in libc's _doprnt, one per printf %f.  The glue now classifies the
-| disagreement with the emulator decoder's own optype (fpu_emulate.c:145) before counting it,
-| so fpe_advmiss_n is finally the length check it was written to be.
-| NOTHING IS ACTED ON: the emulator's PC is used either way.
-	.globl	fpe_advmiss_n
-fpe_advmiss_n:
-	.long	0			| a STRAIGHT-LINE advance != the CPU's stacked next-PC.
-					| THE finding counter.  Must read 0 over a full session
-	.globl	fpe_advctl_n
-fpe_advctl_n:
-	.long	0			| ... the disagreement was a taken FBcc/FDBcc.  Benign,
-					| and free to be large: round 3's 7.9 M lands here
-	.globl	fpe_advnofetch_n
-fpe_advnofetch_n:
-	.long	0			| ... the opword could not be fetched, so the class is
-					| unknown.  Neither counted as a miss nor cleared.  Must be 0
-	.globl	fpe_b_pc
-fpe_b_pc:
-	.long	0xffffffff		| the first TRUE miss: faulting instruction address
-	.globl	fpe_b_stacked
-fpe_b_stacked:
-	.long	0xffffffff		| ... the PC the CPU stacked
-	.globl	fpe_b_resume
-fpe_b_resume:
-	.long	0xffffffff		| ... the PC the emulator computed
-	.globl	fpe_b_opword
-fpe_b_opword:
-	.long	0xffffffff		| ... and its opword, so the class is provable from the
-					| counter dump alone and not only from a disassembler
-	.globl	fpe_c_pc
-fpe_c_pc:
-	.long	0xffffffff		| the first EXCLUDED event: proof the exclusion fires
-	.globl	fpe_c_opword
-fpe_c_opword:
-	.long	0xffffffff		| ... its opword.  optype = opword & 0x01C0 must be
-					| 0x0080/0x00C0 (FBcc) or 0x0040 with (opword & 070) == 010
 
 | ---- the presented FP state -------------------------------------------------------------
 	.globl	fpe_save_n
@@ -940,18 +780,15 @@ fpe_exec_setup_n:
 | The accounting closes, and closing it is the deliverable.  Round 10's failure was not that a
 | process died; it was that a process died on an FP instruction and no fpe_* counter said so:
 |
-|	fpe_v60_n == fpe_ea_n + fpe_v60_decl_n		every vector-60 event is accounted
-|	fpe_ea_n  == fpe_ea_done_n + fpe_ea_sig_n	every accepted event has an outcome
+|	fpe_v60_n - fpe_v60_decl_n			vector-60 events handed to fpe_trap
+|	fpe_ea_sig_n					... of which ended in a signal
 |
-| The first five are PRE-GATE OBSERVERS and move on any 68060 including FPU-present ones, the
-| same standing the fpe_v11_* family has.  Everything from fpe_ea_n down is behind both gates
-| and belongs to the never-engage bar: 0 on every rig that has an FPU.
+| fpe_v60_n, fpe_v60_fmtx_n and fpe_v60_last_fmtvec move on any 68060 including FPU-present
+| ones.  Everything below them is behind both gates and belongs to the never-engage bar: 0 on
+| every rig that has an FPU.
 	.globl	fpe_v60_n
 fpe_v60_n:
 	.long	0			| every vector-60 event: armed or not, user or supervisor
-	.globl	fpe_v60_fmt0_n
-fpe_v60_fmt0_n:
-	.long	0			| 0x00f0 -- the four-word frame the 68060 stacks for it
 	.globl	fpe_v60_fmtx_n
 fpe_v60_fmtx_n:
 	.long	0			| any other shape.  MUST STAY 0: a non-zero reading
@@ -967,47 +804,17 @@ fpe_v60_decl_n:
 					| SIGSYS -- THE counter to watch, and the one whose absence
 					| made round 10's death invisible
 
-	.globl	fpe_ea_n
-fpe_ea_n:
-	.long	0			| vector-60 events handed to fpe_trap
 	.globl	fpe_ea_super_n
 fpe_ea_super_n:
 	.long	0			| ... supervisor origin: declined.  Must stay 0
-	.globl	fpe_ea_imm_n
-fpe_ea_imm_n:
-	.long	0			| ... an immediate-source arithmetic/fmove form (command
-					| word bit 15 clear): handed to the emulator
-	.globl	fpe_ea_pack_n
-fpe_ea_pack_n:
-	.long	0			| ... of which the source specifier was PACKED DECIMAL,
-					| which the extracted emulator does not implement at all.
-					| Observer: no behaviour hangs off it.  FPE-R10-VEC60.md 5.3
-	.globl	fpe_ea_fmovmx_n
-fpe_ea_fmovmx_n:
-	.long	0			| ... fmovem.x with a register list, static or dynamic:
-					| handed to the emulator, which implements both
-	.globl	fpe_ea_fmovml_n
-fpe_ea_fmovml_n:
-	.long	0			| ... fmovem.l to 2 or 3 control registers: REFUSED with
-					| SIGILL.  The emulator would report success, load every
-					| selected register from the FIRST longword and advance 8
-					| on a 12-byte instruction -- measured, FPE-R10-VEC60.md 9 T6
 	.globl	fpe_ea_fetchfail_n
 fpe_ea_fetchfail_n:
 	.long	0			| ... the opword/command word could not be fetched:
 					| SIGSEGV, nothing emulated.  Must be 0
-	.globl	fpe_ea_done_n
-fpe_ea_done_n:
-	.long	0			| vector-60 entries the emulator completed and resumed
 	.globl	fpe_ea_sig_n
 fpe_ea_sig_n:
 	.long	0			| vector-60 entries that ended in a signal, all classes.
 					| Watch this beside fpe_sig_n: the two arms are counted apart
-	.globl	fpe_ea_last_op
-fpe_ea_last_op:
-	.long	0xffffffff		| the last vector-60 entry's opword and command word as one
-					| longword, so its class is provable from a counter dump
-					| alone.  SENTINEL
 	.globl	fpe_rewind_n
 fpe_rewind_n:
 	.long	0			| undecodable-SIGFPE aborts whose PC was rewound to the

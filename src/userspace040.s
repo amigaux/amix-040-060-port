@@ -50,10 +50,11 @@
 | fixed there; see that file's header for the injection A/B that proved it.
 |
 | WHAT REMAINS HERE IS A REGRESSION DETECTOR, NOT A HUNT.  us_odd_user counts user-address
-| misroutes and must stay 0 now that the function-code registers are preserved; us_odd_kern
-| counts the legitimate supervisor-data faults on the kernel segmap source (thousands per copy
-| workload -- that is the copy loop's `movel %a0@+` and it is fine).  Both are .globl so kpeek
-| can read them from /dev/mem without the serial capture being alive.  The cmn_err lines are
+| misroutes and must stay 0 now that the function-code registers are preserved.  It is .globl
+| so kpeek can read it from /dev/mem without the serial capture being alive.  (The counts of
+| every classification and of the legitimate supervisor-data faults on the kernel segmap source,
+| thousands per copy workload, are gone since 2026-11-02: they cost every copy fault.)  The
+| cmn_err lines are
 | gated on btrace_on, so the base and quiet kernels are silent and only the DBG build prints.
 |
 | The reroute band-aid that briefly lived here is GONE (see Lus_oddfix).
@@ -64,7 +65,6 @@
 userspace:
 	linkw	%fp,&-16		| -4 fc, -8 fa, -12 fmt, -16 ssw (the probe needs them
 					| across cmn_err, which clobbers d0/d1/a0/a1)
-	addql	&1,us_calls		| denominator: every copy-path fault classified here
 	moveal	%fp@(8),%a0		| a0 = frame
 	moveq	&0,%d0
 	moveb	%a0@(70),%d0		| high byte of format/vector word
@@ -116,15 +116,7 @@ Lus_oddfa:
 	tstl	%d1
 	bmiw	Lus_odduser		| fa >= 0x80000000 -> user space -> THE MISROUTE
 | --- kernel-address case: a non-user function code at a kernel address is legitimate
-|     (the kernel resolver owns it).  Counted, and the first few are logged for context:
-|     if TM=000 pushes exist at all on this machine, this is where they show up first. ---
-	addql	&1,us_odd_kern
-	movel	Lus_ok_n,%d0
-	cmpil	&4,%d0
-	bccw	Lus_kern
-	addql	&1,%d0
-	movel	%d0,Lus_ok_n
-	bsrw	Lus_dolog
+|     (the kernel resolver owns it). ---
 	braw	Lus_kern
 Lus_odduser:
 	addql	&1,us_odd_user
@@ -184,18 +176,10 @@ Lus_oddmsg:
 					| kpeek from userland, so align them properly
 Lus_ou_n:				| print cap, user-address misroutes
 	.long	0
-Lus_ok_n:				| print cap, kernel-address oddities (context)
-	.long	0
-| --- .globl so kpeek/nm can read them without guessing an offset: these four numbers turn a
-|     silent run into a measurement (how many classifications, how many odd, how many fixed). ---
-	.globl	us_calls
-us_calls:
-	.long	0
+| --- .globl so kpeek/nm can read it without guessing an offset: user-address misroutes, which
+|     must stay 0 now that DFC is preserved -- a standing regression detector. ---
 	.globl	us_odd_user
 us_odd_user:
-	.long	0
-	.globl	us_odd_kern
-us_odd_kern:
 	.long	0
 
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

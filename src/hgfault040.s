@@ -64,8 +64,7 @@
 |
 | Every gate below is a deliberate narrowing, and each one is a decision:
 |
-|  1. `hg_on` -- one .data long.  0 restores byte-exact stock behaviour (a tail jmp to the
-|     stock body), the same escape-hatch discipline as wb_dfc_on / wbf_prop_on.
+|  1. (`hg_on`, the one-long escape hatch to byte-exact stock behaviour, is gone since 2026-11-02.)
 |  2. **68040 ONLY** (`cputype == 40`).  The 68060 does not reproduce the wall -- it
 |     restarts stores natively like the 030 -- and its completion path is the format-4
 |     wb060_xpage helper, which would replay neither a single-page sentinel store.  Its
@@ -140,8 +139,6 @@
 	.text
 	.globl	usrxmemflt_orig
 usrxmemflt_orig:
-	tstl	hg_on
-	beqw	Lhg_pass		| rollback switch: byte-exact stock behaviour
 	cmpil	&40,cputype
 	bnew	Lhg_pass		| 68040 ONLY -- the 060 keeps stock behaviour
 	moveal	%sp@(4),%a0		| arg1 = the trap frame
@@ -296,11 +293,6 @@ Lhg_ret:
 hg_magic:
 	.long	0x48474621		| "HGF!"
 | --- the knob ---
-	.globl	hg_on
-hg_on:
-	.long	1			| 1 = the cure is live.  0 = pure pass-through to the
-					| stock body, byte-exact stock behaviour, so the wall
-					| can be reproduced in the SAME boot with one kpoke.
 | --- counters, in reading order ---
 	.globl	hg_seen_n
 hg_seen_n:

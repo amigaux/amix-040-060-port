@@ -105,6 +105,7 @@ Lvt_log:
 | the window below is ordinary memory and this fired 200 times (its whole cap) on an
 | otherwise clean boot.  A diagnostic gated on a physical range is machine-specific
 | by construction; it belongs behind the flag with the other traces.
+.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lvt_done
 	cmpil	&0x07c00000,%d2		| user-page region (below the 0x7EEx buffer cache)
@@ -124,6 +125,7 @@ Lvt_log:
 	pea	2
 	jsr	cmn_err
 	lea	%sp@(24),%sp
+.endif
 Lvt_done:
 | ISSUE-10 v6 (2026-07-10): vtop computes every disk-DMA target (alien/dd.c).  PGALIAS
 | proved page_get never hands out mapped pages, and SEGVPP showed sh's page is (most
@@ -133,6 +135,7 @@ Lvt_done:
 | MAPPING (p_mapping != 0), the DMA is about to overwrite somebody's mapped page -> log
 | va/phys/map/caller (cap 16).  Normal traffic stays silent: buffer-pool pages are
 | unmapped kernel identity pages, and pagein DMA happens BEFORE hat_pteload registers.
+.ifdef I10
 	tstl	%fp@(12)		| proc != 0 = raw/physio user I/O -> mapped target is LEGIT
 	bnew	Lvt_ret
 	movel	%d2,%d0
@@ -162,6 +165,7 @@ Lvt_done:
 	pea	2
 	jsr	cmn_err
 	lea	%sp@(24),%sp
+.endif
 Lvt_ret:
 	movel	%d2,%d0			| return paddr in d0
 	moveal	%d2,%a0			| and a0 (vtop returns both)
@@ -195,16 +199,22 @@ Lvv_out:
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
 	.data
 	.even
+.ifdef KDBG
 Lvt_n:
 	.long	0
+.endif
+.ifdef KDBG
 Lvt_msg:
 	.asciz	"DBG vtop pool phys=%x va=%x proc=%x caller=%x"
 	.even
+.endif
+.ifdef I10
 Lva_n:
 	.long	0
 Lva_msg:
 	.asciz	"DBG VTOPALIAS va=%x phys=%x map=%x caller=%x (DMA target page has a LIVE mapping!)"
 	.even
+.endif
 Lvv_n:
 	.long	0
 Lvv_msg:

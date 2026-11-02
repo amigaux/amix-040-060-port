@@ -66,7 +66,6 @@ segvn_faultpage:
 	tstb	%a0@(2)			| svd->pageprot: per-page protections present?
 	beqw	Lsp_pass		| no -> segment-wide, and segvn_fault@0xac46a already
 					|       rejects that case correctly.  Unchanged.
-	addql	&1,segvn_prot_pp_n	| the per-page path was actually entered
 	moveal	%sp@(20),%a0		| a0 = vpage            (arg5)
 	movel	%a0,%d0
 	beqw	Lsp_pass		| defensive: pageprot set but no vpage array -> do not
@@ -106,10 +105,6 @@ Lsp_pass:
 	.globl	segvn_prot_magic
 segvn_prot_magic:
 	.long	0x53564e21		| "SVN!" -- read this before trusting any address below
-	.globl	segvn_prot_pp_n
-segvn_prot_pp_n:
-	.long	0			| faults reaching the per-page branch at all.  If this is
-					| 0 the check never ran and a PASS below means nothing.
 	.globl	segvn_prot_n
 segvn_prot_n:
 	.long	0			| accesses REJECTED with FC_PROT.  Every one of these

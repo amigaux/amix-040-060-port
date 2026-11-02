@@ -38,7 +38,8 @@ extern int cleanup(), wakeprocs(), sleep();
 
 int pgrsv_pages = 20;			/* SVR4.2 MINPAGEFREE default; 0 disables the reserve */
 unsigned long pgrsv_magic = 0x70677276;	/* "pgrv": read it before believing the counters */
-unsigned long pgrsv_calls = 0;		/* calls through the reserve */
+unsigned long pgrsv_calls = 0;		/* no longer counted (it cost every page_get); kept at 0 because the
+					   family contract's pinned patch_pgrsv_sites.py --check reads it */
 unsigned long pgrsv_waits = 0;		/* sleeps the reserve added (each one is a stock-shaped sleep) */
 unsigned long pgrsv_fails = 0;		/* no-wait calls refused below the reserve */
 
@@ -72,7 +73,6 @@ pgrsv_get(bytes, flags)
 	register unsigned int npages, want;
 	register int s;
 
-	pgrsv_calls++;
 	npages = (bytes + PAGEOFF) >> PAGESHIFT;
 	want = npages + pgrsv_pages;
 	/* page_get refuses npages >= max_page_get outright; a reserve wait there could only hang. */

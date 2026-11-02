@@ -53,20 +53,16 @@ extern int issig();
 extern void psig();
 
 /* ------------------------------------------------------------------- src/fpe040.s objects */
-extern long fpe_cputype, fpe_cputype_amix, fpe_cputype_bad_n;
 extern long fpe_busy, fpe_lock_wait_n, fpe_jb[13], fpe_jb_active;
-extern long fpe_done_n, fpe_sig_n;
+extern long fpe_sig_n;
 extern long fpe_sigfpe_n, fpe_sigill_n, fpe_sigsegv_n, fpe_sigother_n;
 extern long fpe_last_signo, fpe_last_code, fpe_last_fpsr, fpe_undecoded_n;
 extern long fpe_last_si_addr, fpe_last_fault_pc;
 extern long fpe_panic_n, fpe_panic_hard_n, fpe_copyfail_n;
-extern long fpe_ufetch_n, fpe_ufetchfail_n, fpe_fault_addr;
-extern long fpe_advmiss_n, fpe_b_pc, fpe_b_stacked, fpe_b_resume, fpe_b_opword;
-extern long fpe_advctl_n, fpe_advnofetch_n, fpe_c_pc, fpe_c_opword;
+extern long fpe_ufetchfail_n, fpe_fault_addr;
 extern long fpe_sigpend_n, fpe_sigdeliv_n;
 /* the vector-60 arm (round 10) -- src/fpe040.s, and docs/contracts/FPE-R10-VEC60.md 6 */
-extern long fpe_ea_imm_n, fpe_ea_pack_n, fpe_ea_fmovmx_n, fpe_ea_fmovml_n;
-extern long fpe_ea_fetchfail_n, fpe_ea_done_n, fpe_ea_sig_n, fpe_ea_last_op;
+extern long fpe_ea_fetchfail_n, fpe_ea_sig_n;
 extern long fpe_rewind_n;
 extern int fpe_setjmp();
 extern void fpe_longjmp();
@@ -309,7 +305,6 @@ ufetch_short(uaddr, valp)
 	unsigned short tmp;
 	int e;
 
-	fpe_ufetch_n++;
 	e = copyin((char *)uaddr, (char *)&tmp, 2);
 	if (e) {
 		fpe_ufetchfail_n++;
@@ -466,27 +461,6 @@ fpe_trap(uspp, regs, xf)
 	fpe_busy = 1;
 
 	/*
-	 * Keep the CPU-type redirection current.  Cheap enough to do per entry rather than to
-	 * rely on a boot-time write staying true, and the value is the one the extracted tree
-	 * compares against, not AMIX's 40/60.
-	 *
-	 * TOTAL, NOT DEFAULTED.  The old form mapped everything that was not 60 to CPU_68040,
-	 * so a cputype the lane could not read -- which is exactly what the half-word defect
-	 * produced -- looked like a plausible answer.  fpe_cputype_amix carries the raw value
-	 * so the READ itself is checkable, and fpe_cputype_bad_n catches a third value at run
-	 * time rather than only at boot.
-	 */
-	if (cputype == 60)
-		fpe_cputype = NB_CPU_68060;
-	else if (cputype == 40)
-		fpe_cputype = NB_CPU_68040;
-	else {
-		fpe_cputype_bad_n++;
-		fpe_cputype = NB_CPU_68040;
-	}
-	fpe_cputype_amix = cputype;
-
-	/*
 	 * THE FRAME SHIM.  AMIX's trap block is FIFTEEN registers -- D0-D7 and A0-A6 -- with A7
 	 * living outside it as the USP pseudo-register at u_ar0; NetBSD's tf_regs[16] wants A7
 	 * at index 15.  That single difference is why a `struct frame *` cannot simply point at
@@ -563,11 +537,9 @@ fpe_trap(uspp, regs, xf)
 	 * the same test fpu_emulate.c:162-170 dispatches on (0xc000 = fmovem FPn, 0x8000 =
 	 * fmovem FPcr) and the same one-bit test Motorola's own effective-address handler makes.
 	 *
-	 * DIRECT copyin RATHER THAN ufetch_short, for the reason the instrument below records:
-	 * an instrument that moves the numbers beside it is worse than none, and ufetch_short is
-	 * the emulator's own fetch census.  A failure here is a genuine SIGSEGV -- the CPU
-	 * raised the exception on this address, so it was readable a moment ago -- and is
-	 * counted rather than assumed impossible.
+	 * A direct copyin: a failure here is a genuine SIGSEGV -- the CPU raised the exception
+	 * on this address, so it was readable a moment ago -- and is counted rather than
+	 * assumed impossible.
 	 */
 	if (v60) {
 		unsigned short opw, cmdw;
@@ -578,28 +550,15 @@ fpe_trap(uspp, regs, xf)
 			fpe_fault_addr = (long)fault_pc;
 			refuse_signo = SIGSEGV;
 			refuse_code = SEGV_ACCERR;
-		} else {
-			fpe_ea_last_op = ((long)opw << 16) | (long)cmdw;
-			if ((cmdw & 0x8000) == 0) {
-				/*
-				 * Opclass 0/2/3: arithmetic or fmove with an immediate source.
-				 * This is the round-10 death class -- extended (source specifier
-				 * 2) and packed decimal (3) are the two whose operand is twelve
-				 * bytes and therefore the two the 68060's integer unit refuses.
-				 * Extended is emulated correctly; packed is not implemented by
-				 * the emulator at all and comes back as the undecodable SIGFPE
-				 * the rewind below is written for.  FPE-R10-VEC60.md 5.3.
-				 */
-				fpe_ea_imm_n++;
-				if (((cmdw >> 10) & 7) == 3)
-					fpe_ea_pack_n++;
-			} else if ((cmdw & 0xc000) == 0xc000) {
-				fpe_ea_fmovmx_n++;	/* fmovem.x, static or dynamic list */
-			} else {
-				fpe_ea_fmovml_n++;	/* fmovem.l, 2 or 3 control registers */
-				refuse_signo = SIGILL;
-				refuse_code = ILL_ILLOPC;
-			}
+		} else if ((cmdw & 0xc000) == 0x8000) {
+			/*
+			 * fmovem.l of 2 or 3 control registers: refused.  Opclass 0/2/3 (cmdw bit
+			 * 15 clear: arithmetic or fmove with an immediate source -- extended and
+			 * packed, the two twelve-byte operands the 68060's integer unit refuses)
+			 * and fmovem.x (0xc000) go to the emulator.  FPE-R10-VEC60.md 5.3.
+			 */
+			refuse_signo = SIGILL;
+			refuse_code = ILL_ILLOPC;
 		}
 	}
 
@@ -651,89 +610,6 @@ fpe_trap(uspp, regs, xf)
 	*(unsigned int *)(xf + 2) = f.f_pc;
 
 	if (r == 0) {
-		/*
-		 * INSTRUCTION-LENGTH INSTRUMENTATION.  On a format-4 frame the CPU stacks the
-		 * PC of the instruction AFTER the faulting one, and the emulator independently
-		 * computes f_pcfi + insn.is_advance.  For a straight-line instruction they must
-		 * agree.  Contract 6.3 names a wrong is_advance as the sharpest standing risk
-		 * in the package -- NetBSD's own comment calls the format-4 path a hack,
-		 * because it presumes the emulator knows the length of every instruction it
-		 * meets, and on an LC060 it is not a corner case but the only path.
-		 *
-		 * ROUND 4 FIX: THE COMPARISON ALONE WAS MEASURING THE WRONG THING.  A TAKEN FP
-		 * conditional branch legitimately moves the PC off the straight line, and the
-		 * CPU stacks the fall-through as it always does for an instruction it never
-		 * executed.  Round 3 read fpe_advmiss_n = 7,909,400 and its latch named the
-		 * culprit exactly -- an fbnel in libc's _doprnt, one per printf %f conversion.
-		 * So the counter was saturated by a benign class and the length check that was
-		 * supposed to be round 3's primary number was never actually run.
-		 *
-		 * THE EXCLUSION SET IS THE EMULATOR DECODER'S OWN, not a guess.
-		 * fpu_emulate.c:145 computes optype = (opword & 0x01C0) and dispatches on it at
-		 * :162/:191/:196.  Types 2 and 3 (0x0080/0x00C0) are FBcc.  Type 1 (0x0040) is
-		 * FDBcc/FScc/FTRAPcc, and fpu_emul_type1 is explicit about which of the three
-		 * moves control flow: FDBcc alone, as `is_advance += displ` (:1030).  FScc
-		 * (:1073) and FTRAPcc (:1044-1068) always advance, so they STAY under test.
-		 * Types 4-7 never reach this path -- the emulator returns SIGILL.
-		 *
-		 * THE FETCH COSTS NOTHING ON AGREEMENT, which is 73% of the traffic: the opword
-		 * is read only when the two PCs differ.  It is a direct copyin rather than
-		 * ufetch_short so that the instrument does not perturb the emulator's own fetch
-		 * census (fpe_ufetch_n, fpe_ufetchfail_n, fpe_fault_addr) -- an instrument that
-		 * moves the numbers beside it is worse than none.
-		 *
-		 * MEASURED, NOT ACTED ON: the emulator's PC is used either way, so nothing here
-		 * can change what the lane does.
-		 *
-		 * ROUND 10: FORMAT 4 ONLY, WHICH IS WHAT IT ALWAYS MEANT.  The comparison is "the
-		 * CPU's advisory Next PC against the emulator's decode", and only a format-4 frame
-		 * carries a Next PC.  The vector-60 frame's PC field IS the faulting instruction,
-		 * so f_pc would differ from it by the instruction length on every single event and
-		 * the counter would be measuring the length rather than a disagreement about it.
-		 * The gate changes nothing about what the vector-11 path counts.
-		 */
-		if (f.f_format == 4 && f.f_pc != stacked_pc) {
-			unsigned short opw;
-			int optype;
-
-			if (copyin((char *)fault_pc, (char *)&opw, 2) != 0) {
-				/* cannot classify it, so it is neither a miss nor benign */
-				fpe_advnofetch_n++;
-			} else {
-				optype = opw & 0x01C0;
-				if (optype == 0x0080 || optype == 0x00C0 ||
-				    (optype == 0x0040 && (opw & 0070) == 0010)) {
-					/* FBcc or FDBcc: the emulator took the branch */
-					fpe_advctl_n++;
-					if ((unsigned long)fpe_c_pc == 0xffffffff) {
-						fpe_c_pc = (long)f.f_fmt4.f_fslw;
-						fpe_c_opword = (long)opw;
-					}
-				} else {
-					/* a STRAIGHT-LINE advance disagreed.  This is the finding. */
-					fpe_advmiss_n++;
-					if ((unsigned long)fpe_b_pc == 0xffffffff) {
-						fpe_b_pc = (long)f.f_fmt4.f_fslw;
-						fpe_b_stacked = (long)stacked_pc;
-						fpe_b_resume = (long)f.f_pc;
-						fpe_b_opword = (long)opw;
-					}
-				}
-			}
-		}
-		/*
-		 * THE TWO ARMS ARE COUNTED APART, and that is the point.  fpe_entry_n,
-		 * fpe_done_n, fpe_sig_n, fpe_user_n and the four fpe_sig*_n classes stay
-		 * VECTOR-11 ONLY, so every registered row and identity of rounds 3-9 -- p7's
-		 * fpe_v11_n == fpe_entry_n and p8's entry - done == sig above all -- means in a
-		 * round-11 dump exactly what it meant in a round-10 one.  The vector-60 arm
-		 * carries its own closing pair.  FPE-R10-VEC60.md 6.
-		 */
-		if (v60)
-			fpe_ea_done_n++;
-		else
-			fpe_done_n++;
-
 		/*
 		 * ASYNCHRONOUS SIGNAL DELIVERY, and it is not optional.  s_trap -- which ureturn
 		 * calls on the way out -- has no issig/psig loop; that loop lives in u_trap,

@@ -61,7 +61,6 @@
 isp61_vec:
 	cmpil	&60,cputype		| CPU gate: CCR only, no register touched
 	bnew	Lisp_stock
-	addql	&1,isp61_entry_n	| counted before any classification
 	moveml	%d0-%fp,%sp@-		| 60-byte D0-D7/A0-A6 block (identical to nullvect)
 	movel	sup_cacr,%d0
 	.word	0x4e7b,0x0002		| movec %d0,%cacr
@@ -74,7 +73,6 @@ isp61_vec:
 	movew	%a6@(FRM_SR),%d0
 	andiw	&0xc000,%d0		| T1/T0: tracing needs a format-2 trace frame that
 	bnew	Lisp_trace		| this unit does not synthesize -- decline loudly
-	movel	%a6@(FRM_PC),isp61_last_pc
 
 | ---- fetch the whole 8-byte instruction, once, through copyin ----
 | 12 bytes of scratch: 8 for the instruction, 4 for a memory source operand (below).
@@ -92,7 +90,6 @@ isp61_vec:
 	lea	%sp@(12),%sp
 	tstl	%d0
 	bnew	Lisp_ifetch		| copyin failed: no access-error frame synthesis
-	movel	%a5@,isp61_last_insn	| opword:extension, for diagnostics
 
 | ---- decode, before any state changes ----
 	movew	%a5@,%d0
@@ -174,7 +171,6 @@ Lisp_ea_dn:				| source is a data register: no memory access at all
 	lsll	&2,%d0			| mode 0, so d0 is already just the register number
 	movel	%a6@(0,%d0:l),%d7	| the ORIGINAL Dn.  Every input is read before the
 	moveq	&4,%d2			| commit, so Dn == Dh and Dn == Dl are both correct
-	addql	&1,isp61_reg_n
 	braw	Lisp_ea_have
 
 Lisp_ea_an:				| (An)
@@ -211,7 +207,6 @@ Lisp_ea_mem:				| read the 4-byte source operand from USER space
 	tstl	%d0
 	bnew	Lisp_operand		| unreadable operand: decline, nothing committed
 	movel	%a5@(8),%d7
-	addql	&1,isp61_mem_n
 	braw	Lisp_ea_have
 
 Lisp_ea_imm:				| #imm32 follows the extension word
@@ -260,10 +255,8 @@ Lisp_sp1:
 	bplw	Lisp_sp2
 	subl	%d6,%d4			|   b < 0 -> hi -= a
 Lisp_sp2:
-	addql	&1,isp61_muls_n
 	braw	Lisp_commit
 Lisp_unsigned:
-	addql	&1,isp61_mulu_n
 
 | ---- commit: registers, then SR, then PC.  Nothing below here can fail. ----
 Lisp_commit:
@@ -288,7 +281,6 @@ Lisp_noZ:
 					| now skip past the NEXT instruction on the short
 					| forms, and a fixed +4 would execute a displacement
 					| or an immediate as opcodes.
-	addql	&1,isp61_ok_n
 
 | ---- return to user the AMIX way (the fpsp_done shape), never a bare rte ----
 	moveal	%a6,%sp			| drop the scratch; sp = the saved D0 block
@@ -330,18 +322,6 @@ Lisp_stock:
 	.globl	isp61_magic
 isp61_magic:
 	.long	0x49363121		| "I61!" -- refuse to believe the rest without it
-	.globl	isp61_entry_n
-isp61_entry_n:
-	.long	0			| every cputype==60 entry to slot 61
-	.globl	isp61_ok_n
-isp61_ok_n:
-	.long	0			| fully committed emulations
-	.globl	isp61_mulu_n
-isp61_mulu_n:
-	.long	0
-	.globl	isp61_muls_n
-isp61_muls_n:
-	.long	0
 	.globl	isp61_unsupported_n
 isp61_unsupported_n:
 	.long	0			| fetched, but outside the accepted encoding
@@ -357,22 +337,8 @@ isp61_badframe_n:
 	.globl	isp61_trace_decline_n
 isp61_trace_decline_n:
 	.long	0			| trace mode active -> declined, no trace frame
-	.globl	isp61_last_pc
-isp61_last_pc:
-	.long	0			| last validated frame's instruction PC
-	.globl	isp61_last_insn
-isp61_last_insn:
-	.long	0			| last fetched opword:extension
 | Appended 2026-08-09 with the wider EA decode.  New longs go at the END so that every
 | address already published for this block keeps its offset.
-	.globl	isp61_reg_n
-isp61_reg_n:
-	.long	0			| emulations whose source was Dn
-	.globl	isp61_mem_n
-isp61_mem_n:
-	.long	0			| emulations whose source came from memory, (An) or
-					| (d16,An).  Without this a passing wolf3d would not
-					| prove the new path RAN -- the fputest060 lesson.
 	.globl	isp61_opfetch_fail_n
 isp61_opfetch_fail_n:
 	.long	0			| the 4-byte source-operand copyin failed

@@ -122,34 +122,25 @@ fpu_save:
 	bnew	Lfs_stock
 	tstl	fpu_present		| no FPU on this part -> no FSAVE, whoever asked
 	beqs	Lfs_nofpu
-	addql	&1,fpc_save_n
 	moveal	fpu_ptr,%a0
 	btst	&0,%a0@(3)		| UFPRWRT -- low byte of the ustate long (big-endian)
 	bnes	Lfs_wrt			| software image is newer: leave both components alone
 	fsave	%a0@(FP_FSAVE)		| 12-byte 68060 frame
-	movel	%a0@(FP_FSAVE),fpc_last_frame
-					| diagnostic: word 0 = source exponent, word 1 = fmt
 	tstb	%a0@(FP_FMT60)		| THE 68060 discriminator -- byte TWO, not byte zero
 	beqs	Lfs_null
 	cmpib	&F6_IDLE,%a0@(FP_FMT60)
-	beqs	Lfs_idle
+	beqs	Lfs_live
 	cmpib	&F6_EXCP,%a0@(FP_FMT60)
-	beqs	Lfs_excp
+	beqs	Lfs_live
 	addql	&1,fpc_odd_n		| neither null, idle nor exception: an invariant failure.
-	bras	Lfs_live		| Counted loudly; the state is still saved faithfully.
-Lfs_idle:
-	addql	&1,fpc_idle_n
-	bras	Lfs_live
-Lfs_excp:
-	addql	&1,fpc_excp_n
+					| Counted loudly; the state is still saved faithfully.
 Lfs_live:
 	fmovemx	%fp0-%fp7,%a0@(FP_REGS)
 	fmovel	%fpcr,%a0@(FP_FPCR)	| separate moves: the documented 060 sequence
 	fmovel	%fpsr,%a0@(FP_FPSR)
 	fmovel	%fpiar,%a0@(FP_FPIAR)
 	rts
-Lfs_null:
-	addql	&1,fpc_null_n		| genuinely no internal state -- the common case, and the
+Lfs_null:				| genuinely no internal state -- the common case, and the
 	rts				| only one in which dropping the registers is correct
 Lfs_wrt:
 	addql	&1,fpc_save_wrt_n
@@ -175,11 +166,9 @@ fpu_restore:
 	bnew	Lfr_stock
 	tstl	fpu_present		| no FPU on this part -> no FRESTORE, whoever asked
 	beqs	Lfr_nofpu
-	addql	&1,fpc_rest_n
 	moveal	fpu_ptr,%a0
 	tstb	%a0@(FP_FMT60)		| byte TWO again -- same fix, same reason
 	beqs	Lfr_null
-	addql	&1,fpc_rest_live_n
 	fmovemx	%a0@(FP_REGS),%fp0-%fp7	| stock's order: data registers first, controls last
 	fmovel	%a0@(FP_FPCR),%fpcr
 	fmovel	%a0@(FP_FPSR),%fpsr
@@ -188,7 +177,6 @@ fpu_restore:
 	andil	&-2,%a0@		| clear UFPRWRT (FP_USTATE = 0): image published
 	rts
 Lfr_null:
-	addql	&1,fpc_rest_null_n
 	frestore %a0@(FP_FSAVE)		| null frame: this resets the FPU, by design
 	btst	&0,%a0@(3)		| did software supply a programmer model anyway?
 	beqs	Lfr_out
@@ -226,7 +214,6 @@ fpu_setup:
 	bnew	Lst_stock
 	tstl	fpu_present		| no FPU on this part -> no FRESTORE in supervisor mode
 	beqs	Lst_nofpu
-	addql	&1,fpc_setup_n
 	moveal	fpu_ptr,%a0
 	clrl	%a0@(FP_FSAVE)		| 12 zero bytes = a null 68060 frame; byte 2 = 0x00
 	clrl	%a0@(FP_FSAVE+4)
@@ -241,8 +228,7 @@ Lst_copy:
 	moveal	fpu_ptr,%a0		| reload: the copy consumed a0
 	clrl	%a0@			| ustate = 0 (FP_USTATE), dropping UFPRWRT -- stock does
 	rts				| exactly this, and exec/signal setup is where it belongs
-Lst_nofpu:
-	addql	&1,fpc_setup_nofpu_n	| exec or signal delivery on a part with no FPU: the
+Lst_nofpu:				| exec or signal delivery on a part with no FPU: the
 	rts				| u-area's FP slot is left as it is, and nothing traps
 Lst_stock:
 	jmp	fpu_setup_orig
@@ -257,50 +243,18 @@ Lst_stock:
 	.globl	fpc_magic
 fpc_magic:
 	.long	0x46504321		| "FPC!"
-	.globl	fpc_save_n
-fpc_save_n:
-	.long	0			| 060 fpu_save entries
 	.globl	fpc_save_wrt_n
 fpc_save_wrt_n:
 	.long	0			| ... that returned early because UFPRWRT was set.  Its
 					| only originating setter is old ptrace, so this stays 0
 					| unless something is debugging FP registers.
-	.globl	fpc_null_n
-fpc_null_n:
-	.long	0			| post-FSAVE format byte 0x00 -- no live internal state.
-					| The old byte-zero counter said 7100 per boot; that
-					| number was collected with the wrong predicate and this
-					| is its honest replacement.
-	.globl	fpc_idle_n
-fpc_idle_n:
-	.long	0			| 0x60 idle
-	.globl	fpc_excp_n
-fpc_excp_n:
-	.long	0			| 0xe0 exception
 	.globl	fpc_odd_n
 fpc_odd_n:
 	.long	0			| anything else -- must stay 0; non-zero means the frame
 					| is not what the 060 manual says it is
-	.globl	fpc_last_frame
-fpc_last_frame:
-	.long	0			| the frame's first LONG as fpu_save saw it: high word
-					| = source exponent, low word = format/status.  This is
-					| the pair whose confusion caused ISSUE-43.
-	.globl	fpc_rest_n
-fpc_rest_n:
-	.long	0			| 060 fpu_restore entries
-	.globl	fpc_rest_live_n
-fpc_rest_live_n:
-	.long	0			| ... on a non-null frame (registers republished)
-	.globl	fpc_rest_null_n
-fpc_rest_null_n:
-	.long	0			| ... on a null frame (FPU reset)
 	.globl	fpc_rest_wrt_n
 fpc_rest_wrt_n:
 	.long	0			| ... null frame WITH UFPRWRT: the ptrace/proc case
-	.globl	fpc_setup_n
-fpc_setup_n:
-	.long	0			| 060 fpu_setup entries (boot, exec, signal delivery)
 | F1-M2 (2026-08-24) appended at the END so every address already published for this block keeps
 | its offset.  These three count the calls the fpu_present gate REFUSED -- on a 68LC060 they are
 | the ones that would otherwise have executed FSAVE or FRESTORE with no unit to execute them on,
@@ -311,7 +265,4 @@ fpc_save_nofpu_n:
 	.globl	fpc_rest_nofpu_n
 fpc_rest_nofpu_n:
 	.long	0			| fpu_restore refused
-	.globl	fpc_setup_nofpu_n
-fpc_setup_nofpu_n:
-	.long	0			| fpu_setup refused (this is the sendsig/setregs path)
 	.balign	4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
