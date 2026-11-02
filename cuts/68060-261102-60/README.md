@@ -46,3 +46,5 @@ after boot is `kbootset inquiry 1 5` through `/dev/scsi`, at spl0, run in the ba
   line was not captured).
 - -60: the inquiry answers at once (`type 0 UAE scratch.hdf`), and after it a raw write and read-back on the
   WD compare equal, `kbootset cards --probe` lists the units, `swap -a` and `swap -d` on the WD and exectest pass.
+- -60 on the A4000 row (N241a) with -59's whole set: tdemand, the zero page and nullread, the 16 pm probes,
+  exectest 20 and 40, leaktest 60, swap and paging on the scratch slice, fpebench; PASS.
