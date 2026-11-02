@@ -1,7 +1,7 @@
 # Cut 68060-261102-60
 
-The k46 module kernel, kabi k46.1.4 (abi 18c0a1c9), cut from this repository's `k46-module` at `8620d72` and amix
-`46c269c`: the recipe of [`68060-261102-59`](../68060-261102-59/README.md) with two changes.
+The k46 module kernel, kabi k46.1.4 (abi 18c0a1c9), cut from this repository's `k46-module` at `126f59f` and amix
+`46c269c`: the recipe of [`68060-261102-59`](../68060-261102-59/README.md) with three changes.
 
 - **`sdqueue` at IPL 2 at least** (`src/sdqspl040.s`, `relink-040.sh` `SDQ_SPL=1`; amix-dlm C2-4 version 24
   section 18). dd, sdpart and ct call `sdqueue` at `sdspl()`; scsi.c's `gsioctl`, the `/dev/scsi` pass-through,
@@ -9,10 +9,13 @@ The k46 module kernel, kabi k46.1.4 (abi 18c0a1c9), cut from this repository's `
   `initialize()`: `a3091intr` reads SS 0x01 while IDLE, prints `a3091: 0x1 0 0x0`, the controller is DEAD and the
   command never completes. The wrapper takes the strong `sdqueue`, raises to IPL 2 only when called below it,
   calls the stock body (kept at `.text 0xd6f6` as `sdqueue_orig`) and restores SR only if it raised. The 68030
-  line's rule. `SDQ_SPL=0` rebuilds -59's base byte for byte.
+  line's rule. `SDQ_SPL=0` builds without it (at `553657e`, before the pstart change, that rebuilt -59's
+  base byte for byte).
 - **The A1200's Gayle port is motherboard id 2** (`src/rth1.c` `rth1_moboid`, `src/kinfo.c` `kinfo_build`): the sd
   name `A1200 IDE` maps to the id `A4000 IDE` has, one id for either port, the root record's key (amix-dlm C4-1
   section 5.2).
+- **pstart's CACR/Ramsey boot dump only with `btrace_on`** (`src/pstart040.s`): the read of the Ramsey control
+  byte at `0xDE0003` ran on every boot for a line printed only when tracing; an A1200 has no Ramsey.
 
 | File | What |
 |---|---|
@@ -28,7 +31,8 @@ The build is stamped `68060-261102-60`: `SOURCE_DATE_EPOCH=1793577600` (2026-11-
 ## What differs from -59
 
 Symbol by symbol (as -59's README describes the comparison): `sdqueue` (now the wrapper; the stock body is
-`sdqueue_orig`, its bytes unchanged at `0xd6f6`) and the wrapper's labels; `rth1_moboid` and three rth1 functions
+`sdqueue_orig`, its bytes unchanged at `0xd6f6`) and the wrapper's labels; `pstart` (the `btrace_on` test and its
+`Lps_nodump` label); `rth1_moboid` and three rth1 functions
 whose relocations name `rth1.c`'s function-local statics, which the compiler numbers in order and the new
 `gayle1200` renumbered; `kinfo_build` and its strings; the build id (`buildid`, `dlm_ident`). Nothing else.
 The abi, both ufs objects and the kit are -59's; the ufs module differs in its build id only.

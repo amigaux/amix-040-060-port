@@ -1,10 +1,11 @@
 #!/bin/bash
 # cut.sh OUT -- cut 68060-261102-60 (the k46 module kernel, kabi k46.1.4) into OUT: -59's recipe with this
-# repository at 8620d72 (-59's 8620d72 plus sdqueue at IPL 2 at least, src/sdqspl040.s, the a3091 first-use
-# hang; and the A1200's Gayle port as motherboard id 2 in rth1 and kinfo) and amix 46c269c, as -59;
+# repository at 126f59f (-59's 126f59f plus sdqueue at IPL 2 at least, src/sdqspl040.s, the a3091 first-use
+# hang; the A1200's Gayle port as motherboard id 2 in rth1 and kinfo; pstart's CACR/Ramsey boot dump only with
+# btrace_on) and amix 46c269c, as -59;
 # gcc14's binutils (2.43.1) as m68k-linux-gnu-*, as -59.
 # Inputs, by environment:
-#   PORT_GIT     a clone of this repository that has 8620d72 and the patcher revisions below (default: this one)
+#   PORT_GIT     a clone of this repository that has 126f59f and the patcher revisions below (default: this one)
 #   AMIX         an amix clone that has 46c269c (kernel/dlm: the module core and `make kit`; kernel/k30/tools and
 #                contracts: sddevsize and support-probe injectors, emit-family-chains, k0-gates; toolchain/m68k-gnu-bin)
 #   PAULA        amix-paula with 62fdcab (the audio driver's three patchers)
@@ -16,11 +17,11 @@
 #   AMIX_SYSTEM  amigaux/amix-system (kernels/2.1c/unix, the stock kernel the relinks check against)
 #   NETBSD_SYSSRC  NetBSD 10.1's source/sets/syssrc.tgz (the FPSP; tools/netbsd-pin.sh checks its sha256)
 #   CONTROL      optional: the frozen candidate-3 kernel (5aa7d732) emit and k0-gates compare against
-# OUT gets the run root (port/ = git archive 8620d72, the build tree; amix-040-060-port/ = a clone at 8620d72;
+# OUT gets the run root (port/ = git archive 126f59f, the build tree; amix-040-060-port/ = a clone at 126f59f;
 # amix/ = a clone at 46c269c, its kernel/dlm the kit; amix-kerntools/ = 46c269c's kernel/k30 tools and
 # contracts; gnu-bin/; inputs/) and SHA256SUMS-68060-261102-60, which must equal this directory's.
 set -eu
-REV=8620d72 AMIX_REV=46c269c KB=68060-261102-60
+REV=126f59f AMIX_REV=46c269c KB=68060-261102-60
 HERE=$(cd "$(dirname "$0")" && pwd)
 W=${1:?usage: cut.sh OUT}; PORT_GIT=${PORT_GIT:-$(git -C "$HERE" rev-parse --show-toplevel)}
 : "${AMIX:?}" "${PAULA:?}" "${GCA:?}" "${AMIX_SYSTEM:?}" "${NETBSD_SYSSRC:?}"; [ -z "${KT:-}" ] || { echo "cut.sh: KT must be unset"; exit 2; }
