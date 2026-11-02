@@ -34,6 +34,10 @@ pstart:
 | OK boots and on ADDRERR boots (fault after 'A'); ILLEGAL boots fault in config()
 | before 'A' so they are not captured.  CACR via movec (supervisor, valid 040);
 | RAMSEY A3000 control @0x00DE0003.  d0/a0 scratch here (pre-table-build).
+| Only when tracing (btrace_on): an A1200 has no Ramsey, and a blind read of a motherboard
+| register that may not answer is not worth a line nobody sees (2026-11-02).
+	tstl	btrace_on
+	beqw	Lps_nodump
 	pea	0x43			| 'C' = CACR follows
 	jsr	btrace_mark
 	addqw	&4,%sp
@@ -50,6 +54,7 @@ pstart:
 	movel	%d0,%sp@-
 	jsr	btrace_hex
 	addqw	&4,%sp
+Lps_nodump:
 | NOTE: the original pstart's crash-dump prologue (0xd4c..0xd86) is OMITTED here.
 | It tests/sets `crashsw` and `crash_sync`, which are FILE-LOCAL symbols in the
 | kernel -- a relink (ld -r) cannot bind our GLOBAL UND references to them, so
