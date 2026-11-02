@@ -158,7 +158,7 @@ fi
 #                KVP=1 links it (the F3 census, off the trap path by default since 2026-11-02:
 #                with kvp_on 0 it still cost a read and a branch on every exception).
 KVP="${KVP:-0}"
-# sdqspl040 (2026-11-03, the a3091 first-use hang, amix-dlm C2-4 v24 section 18): sdqueue at IPL 2 at least.
+# sdqspl040 (2026-11-02, the a3091 first-use hang, amix-dlm C2-4 v24 section 18): sdqueue at IPL 2 at least.
 # gsioctl (/dev/scsi) is the one sdqueue caller at spl0; as the stock a3091's first command it lets the WD's
 # reset interrupt in during initialize() and the controller goes DEAD.  The wrapper takes the strong sdqueue
 # and keeps the stock body as sdqueue_orig.  SDQ_SPL=0 builds without it (the rollback).
@@ -1032,7 +1032,7 @@ fi
 echo "[OK] ISSUE-10 genesis-introspection edge bound: usrxmemflt/krnxmemflt -> i10c_hook @0x$ICADDR."
 fi
 
-# HARD CHECK (2026-11-03, the a3091 first-use hang): sdqueue must be the IPL-2 wrapper, the stock body still
+# HARD CHECK (2026-11-02, the a3091 first-use hang): sdqueue must be the IPL-2 wrapper, the stock body still
 # reachable as sdqueue_orig at 0xd6f6, and every relocation that names a queue entry must name the wrapper --
 # start, startio, getsense and gsioctl, the four callers in other objects.  ld -r links cleanly when the
 # override did not take, so assert it.
