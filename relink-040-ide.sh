@@ -6,8 +6,9 @@
 #   ide_040.o          ide.c, compiled here from a pinned revision of the amix-gayle-ide repository
 #                      with the volatile-safe kernel flags for -m68040, -DIDE_NBPP=4096 (Model-B pages) and
 #                      -DIDE_CACHE=1 (the driver's own 040/060 data-cache line pushes around PIO
-#                      and its check that the task file is reached cache-inhibited; kmem knob
-#                      ide_cache).  The driver repository owns all of that; this pass compiles it.
+#                      and its check that the task file is reached cache-inhibited, ide_ci_ok;
+#                      the ide_cache knob exists only in an IDE_DIAG build since gayle-ide d320430).
+#                      The driver repository owns all of that; this pass compiles it.
 #   ide_scsicard.o     a new controller table, generated from the base's: every existing row by
 #                      relocation, then one row, IDE_SD_ID on idequeue (src/ide_sd_rows.py, which
 #                      reuses a4091_sd_rows.py's generator).
@@ -87,8 +88,9 @@ ALIEN="$AMIX_SYSROOT/usr/sys/amiga/alien"
 SRCDIR="$HERE/build/ide-src"
 rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"
 # Pinned (P2, 2026-10-02): amix-gayle-ide d19812b (G1) -- the 040/060 build: IDE_NBPP, IDE_CACHE
-# (cpushl/cinvl around PIO, the DTTn cache-inhibit check, ide_cache knob), polled-only on this line,
-# spin budgets x4 with the ide_spins_hw high-water, and the MB banner without a >>11.  ide.c includes
+# (cpushl/cinvl around PIO, the DTTn cache-inhibit check), polled-only on this line, spin budgets x4,
+# and the MB banner without a >>11.  (The ide_cache knob and the ide_spins_hw high-water are IDE_DIAG
+# only since gayle-ide d320430.)  ide.c includes
 # nothing from its own repository; rico.h and sd.h come from the sysroot's amiga/alien.
 # Moved 2026-10-02 to 70e768e (gayle-ide e2c7122): ATAPI CD-ROM via PACKET
 # passthrough, slave mode 2.  Moved again the same day to 32c0420: polled ATAPI ends a command
@@ -149,8 +151,8 @@ echo "      $GOT"
 for s in idequeue idepresent; do
 	m68k-linux-gnu-nm "$OBJ" | grep -qE " T $s\$" || { echo "[FAIL] $s not defined by ide_040.o"; exit 1; }
 done
-m68k-linux-gnu-nm "$OBJ" | grep -qE " [DBC] ide_cache\$" || { echo "[FAIL] ide_040.o has no ide_cache knob -- not an IDE_CACHE build"; exit 1; }
-echo "      defines idequeue, idepresent, and the ide_cache knob"
+m68k-linux-gnu-nm "$OBJ" | grep -qE " [DBC] ide_ci_ok\$" || { echo "[FAIL] ide_040.o has no ide_ci_ok -- not an IDE_CACHE build"; exit 1; }
+echo "      defines idequeue, idepresent, and ide_ci_ok (the IDE_CACHE build's cache-inhibit check)"
 m68k-linux-gnu-nm "$OBJ" | awk '$2 ~ /^[TDBC]$/{print $3}' | LC_ALL=C sort > "$HERE/build/ide_040.defs"
 echo "$NM_IN" | awk 'NF==3{print $3}' | LC_ALL=C sort -u > "$HERE/build/ide-base.names"
 DUP=$(LC_ALL=C comm -12 "$HERE/build/ide_040.defs" "$HERE/build/ide-base.names")
