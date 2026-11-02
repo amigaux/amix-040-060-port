@@ -281,6 +281,9 @@ int main(void)
 	CASE("mobo id 2 (gayle) beside the a4000t-710", (mobocard(0, 0xdd0000, "A4000T onboard SCSI"),
 	     mobocard(1, 0xfffffff0, "A4000 IDE"), boot(0x10, 0, 0, 0), rootrec(0, 0, 2, 0)),
 	     0x00480018, "/dev/dsk/c8d0s2", 2, 0, "root c8d0s1 from the root record (board fffffff0 id 0 unit 0 = card 1)");
+	CASE("mobo id 2 (gayle) by the A1200's name", (mobocard(0, 0xfffffff0, "A1200 IDE"), boot(0x10, 0, 0, 0),
+	     rootrec(0, 0, 2, 0)),
+	     0x00480010, "/dev/dsk/c0d0s2", 2, 0, "root c0d0s1 from the root record (board fffffff0 id 0 unit 0 = card 0)");
 	CASE("old mobo record beside the window", (window_gayle(), boot(0x10, 0, 0, 0), rootrec(1, 0, 0, 1)),
 	     0x00480019, "/dev/dsk/c9d0s2", 2, 0, "root c9d0s1 from the root record (board fffffff0");
 	CASE("mobo id: two cards answer", (mobocard(0, 0xdd2020, "A4000 IDE"), mobocard(1, 0xfffffff0, "A4000 IDE"),

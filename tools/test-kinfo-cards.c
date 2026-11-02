@@ -82,10 +82,17 @@ static int build(void)
 int main(int argc, char **argv)
 {
 	static char z3660[] = "Z3660 SCSI", a3000[] = "A3000 Internal SCSI", gayle[] = "A4000 IDE", other[] = "A4091",
-		a4kt[] = "A4000T onboard SCSI";
+		a4kt[] = "A4000T onboard SCSI", gayle1200[] = "A1200 IDE";
 	int n;
 
-	if (argc > 1 && strcmp(argv[1], "a4000t") == 0) {
+	if (argc > 1 && strcmp(argv[1], "a1200") == 0) {
+		/* the A1200: Gayle's own port, the one controller; the same id as the A4000's */
+		card(0, 0xfffffff0, gayle1200);
+		if (!build())
+			return 1;
+		n = 1;
+		expect(0, 2, 0, 1);			/* gayle */
+	} else if (argc > 1 && strcmp(argv[1], "a4000t") == 0) {
 		/* the A4000T: its onboard 53C710 beside Gayle */
 		card(0, 0x00dd0000, a4kt);
 		card(1, 0xfffffff0, gayle);

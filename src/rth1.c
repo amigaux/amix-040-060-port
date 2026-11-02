@@ -144,20 +144,22 @@ char *a, *b;
 
 /*
  * A card's motherboard id by the name sd holds for it, the rule of kinfo's card table (amix-dlm
- * C2-1 section 2.1): 1 a3000-wd, 2 gayle, 3 a4000t-710; 0 for any other name.
+ * C2-1 section 2.1): 1 a3000-wd, 2 gayle (the A4000's or the A1200's port, one id for either),
+ * 3 a4000t-710; 0 for any other name.
  */
 static int
 rth1_moboid(c)
 int c;
 {
-	static char a3000[] = "A3000 Internal SCSI", gayle[] = "A4000 IDE", a4kt[] = "A4000T onboard SCSI";
+	static char a3000[] = "A3000 Internal SCSI", gayle[] = "A4000 IDE", gayle1200[] = "A1200 IDE";
+	static char a4kt[] = "A4000T onboard SCSI";
 	char *nm = sdhardwarename(c);
 
 	if (nm == 0)
 		return 0;
 	if (rth1_streq(nm, a3000))
 		return 1;
-	if (rth1_streq(nm, gayle))
+	if (rth1_streq(nm, gayle) || rth1_streq(nm, gayle1200))
 		return 2;
 	if (rth1_streq(nm, a4kt))
 		return 3;

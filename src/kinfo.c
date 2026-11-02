@@ -218,8 +218,8 @@ kinfo_build()
 			f = KC_MOBO;
 			if (nm && kinfo_streq(nm, "A3000 Internal SCSI"))
 				id = MOBO_A3000WD;
-			else if (nm && kinfo_streq(nm, "A4000 IDE"))
-				id = MOBO_GAYLE;
+			else if (nm && (kinfo_streq(nm, "A4000 IDE") || kinfo_streq(nm, "A1200 IDE")))
+				id = MOBO_GAYLE;	/* either Gayle port: one id */
 			else if (nm && kinfo_streq(nm, "A4000T onboard SCSI"))
 				id = MOBO_A4KT710;
 			else if (nm && kinfo_streq(nm, "Z3660 SCSI"))
