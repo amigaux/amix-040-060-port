@@ -6903,10 +6903,12 @@ the panic itself is measured in emulation only.
 
 ---
 
-## ✅ ISSUE-108 (2026-10-30, a stock defect: MEASURED in emulation on `68060-261028-61` and `68060-261030-50`, FIXED by the ufs module of the test kernel `68060-261030-50` in emulation; NOT YET ON HARDWARE): a shrink to an unaligned length past the direct blocks leaves the old bytes on disk, and a regrow reads them back (grimoire quirk 91)
+## ✅ ISSUE-108 (2026-10-30, a stock defect: MEASURED in emulation on `68060-261028-61` and `68060-261030-50`, FIXED by the ufs module of the test kernel `68060-261030-50` in emulation; ON HARDWARE 2026-11-02 on `68060-261101-57` and `68060-261102-59`): a shrink to an unaligned length past the direct blocks leaves the old bytes on disk, and a regrow reads them back (grimoire quirk 91)
 
-> **Ledger: FIXED in emulation (test kernel, not a cut); the hardware run joins the batched release
-> acceptance.** `src/ufs_vptrunz.c` writes the zeroed tail of the kept block before the stock
+> **Ledger: FIXED; on hardware 2026-11-02.** The A4000T (68060, root on the Z3660, a fresh ufs
+> 8192/1024 on a scratch disk at SCSI 5) ran the probe set on the cuts `68060-261101-57` and
+> `68060-261102-59`: 68 of 68 runs clean on each, `fsck -n` clean, the raw spec read-back equal,
+> the box up after every case.  Before that: **FIXED in emulation (test kernel, not a cut).** `src/ufs_vptrunz.c` writes the zeroed tail of the kept block before the stock
 > `pvn_vptrunc`; `tools/ufs-tailzero.sh` binds it into the ufs object by default (`UFS_TAILZERO=0`
 > leaves the object unchanged) and refuses an object where `ufs_itrunc` does not reach it. The
 > routine is the 68030 line's (amix kernel/k30 `1be27f8`), ported; only its comment differs.
@@ -6962,10 +6964,13 @@ shapes STALE, and the first panicking ISSUE-107 case (`110017→110000`) panicke
 
 ---
 
-## ✅ ISSUE-109 (2026-10-31, a stock defect: the same stock code as the 68030 line, where it was MEASURED; GUARDED on the cut candidate `68060-261031-52` in emulation; the save itself NOT SEEN on k46 yet): a failed STREAMS open frees a queue pair still on the run list, and `queuerun` calls into freed memory (grimoire quirk 92)
+## ✅ ISSUE-109 (2026-10-31, a stock defect: the same stock code as the 68030 line, where it was MEASURED; GUARDED on the cut candidate `68060-261031-52` in emulation; the save SEEN on k46 hardware 2026-11-02): a failed STREAMS open frees a queue pair still on the run list, and `queuerun` calls into freed memory (grimoire quirk 92)
 
-> **Ledger: FIXED by a guard (cut candidate, emulation); the fault and the save are measured on
-> the 68030 line only.** `src/freeqguard.c` (amix kernel/k30 `f4aef26`, the code unchanged) takes
+> **Ledger: FIXED by a guard; the save seen on k46 hardware 2026-11-02.** On the A4000T (68060)
+> the prngd trigger's 150 rounds ran clean on `68060-261101-57` with `fqg_run` 0 -> 2 (the guard
+> took a queue off the run list twice; without it `queuerun` would have called into the freed
+> pair), and clean on `68060-261102-59` with no save in that run.  Before that: **FIXED by a guard
+> (cut candidate, emulation); the fault and the save measured on the 68030 line only.** `src/freeqguard.c` (amix kernel/k30 `f4aef26`, the code unchanged) takes
 > the pair off the run and scan lists before the stock `freeq`; `relink-040.sh` binds it by
 > default (`FREEQ_GUARD=0` leaves it out) and retargets every relocation that named `freeq`.
 
