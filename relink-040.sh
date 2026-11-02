@@ -1426,7 +1426,7 @@ if [ "$FPSP" = "1" ]; then
 	echo "[*] FPSP 3/4: ld -r  base + fpsp040.o + fpsp_glue040.o${FPSP060_OBJ:+ + fpsp060_pkg.o}"
 	m68k-cbm-sysv4-ld -r -o "$OUT.fpsp" "$OUT" \
 		"$HERE/build/fpsp040.o" "$HERE/build/fpsp_glue040.o" $FPSP060_OBJ
-	mv "$OUT.fpsp" "$OUT"
+	mv "${OUT:?}.fpsp" "${OUT:?}"
 
 	for s in fpsp_vec11 fpsp_done fpsp_fline fpsp_unimp fpsp_unsupp \
 	         fpsp_operr fpsp_ovfl fpsp_unfl fpsp_snan fpsp_bsun; do

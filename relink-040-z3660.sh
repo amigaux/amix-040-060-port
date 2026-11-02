@@ -80,7 +80,7 @@ elif [ -n "$Z3660_NET_REV" ]; then
 	REL=$(git -C "$Z3660_NET_SRC" rev-parse --show-prefix)
 	git -C "$REPO" cat-file -e "$Z3660_NET_REV:${REL}z3660eth.c" \
 		|| { echo "ERROR: ${REL}z3660eth.c does not exist at $Z3660_NET_REV in $REPO"; exit 1; }
-	rm -rf "$HERE/build/z3660net-rev"; mkdir -p "$HERE/build/z3660net-rev"
+	rm -rf "${HERE:?}/build/z3660net-rev"; mkdir -p "$HERE/build/z3660net-rev"
 	git -C "$REPO" archive "$Z3660_NET_REV" "${REL%/}" | tar -x -C "$HERE/build/z3660net-rev"
 	echo "[*] z3660net source: $(git -C "$REPO" rev-parse "$Z3660_NET_REV") ($Z3660_NET_REV, from the repository)"
 	Z3660_NET_SRC="$HERE/build/z3660net-rev/${REL%/}"

@@ -40,7 +40,7 @@ INC="-I$HERE/test-tools/fpe-harness/include -I$HERE/src/fpe-compat -I$SRC/includ
 GCCINC=$(m68k-linux-gnu-gcc -print-file-name=include)
 CF="-std=gnu89 -O1 -g -fno-strict-aliasing -nostdinc -isystem $GCCINC -Wno-implicit"
 
-rm -rf "$OUT"; mkdir -p "$OUT"
+rm -rf "${OUT:?}"; mkdir -p "$OUT"
 echo "[*] cross-compiling the emulator + the harness for m68k (big-endian, ILP32)"
 OBJS=
 for f in "$SRC"/*.c; do

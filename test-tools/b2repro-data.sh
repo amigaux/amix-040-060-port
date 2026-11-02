@@ -25,11 +25,11 @@ FLAG=/tmp/b2repro.stop
 
 [ -f "$REF" ] || { echo "MISSING $REF (dd if=/payload.bin of=$REF bs=1024 count=96)"; exit 20; }
 [ -x "$V" ]   || { echo "MISSING $V"; exit 20; }
-rm -f $FLAG
+rm -f ${FLAG:?}
 
 # preallocate the fixed set ONCE (blocks allocated here, never freed/realloced)
 dir=/tmp/dataonly
-rm -rf $dir; mkdir -p $dir
+rm -rf ${dir:?}; mkdir -p $dir
 i=1
 while [ $i -le $FILES ]; do
 	cp $REF $dir/d$i

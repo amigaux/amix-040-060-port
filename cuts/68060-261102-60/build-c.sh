@@ -32,8 +32,8 @@ Z0=$B/$T-dd
 if [ "${SD4:-1}" = 1 ]; then sh relink-040-sd4card.sh $B/$T-dd $B/$T-sd4 > $L/0b-sd4card.log 2>&1; Z0=$B/$T-sd4; fi
 if [ "${Z3660:-0}" = 1 ]; then Z3660_NET=off Z3660_SCSI_REV=86e6cd7 sh relink-040-z3660.sh $Z0 $B/$T-f7base > $L/1-z3660.log 2>&1
 else cp $Z0 $B/$T-f7base; echo "no z3660 pass: the Z3660 root comes from a module" > $L/1-z3660.log; fi
-if [ "${SD4A:-0}" = 1 ]; then mv $B/$T-f7base $B/$T-z3660; A4091_REPO=${A4091_REPO:?} sh relink-040-a4091.sh $B/$T-z3660 $B/$T-f7base > $L/1b-a4091.log 2>&1; fi
-if [ "${SD4I:-0}" = 1 ]; then mv $B/$T-f7base $B/$T-a4091; IDE_REPO=${IDE_REPO:?} sh relink-040-ide.sh $B/$T-a4091 $B/$T-f7base > $L/1c-ide.log 2>&1; fi
+if [ "${SD4A:-0}" = 1 ]; then mv ${B:?}/${T:?}-f7base ${B:?}/${T:?}-z3660; A4091_REPO=${A4091_REPO:?} sh relink-040-a4091.sh $B/$T-z3660 $B/$T-f7base > $L/1b-a4091.log 2>&1; fi
+if [ "${SD4I:-0}" = 1 ]; then mv ${B:?}/${T:?}-f7base ${B:?}/${T:?}-a4091; IDE_REPO=${IDE_REPO:?} sh relink-040-ide.sh $B/$T-a4091 $B/$T-f7base > $L/1c-ide.log 2>&1; fi
 if [ "${F4:-0}" = 1 ]; then
 	if [ "${Z3660:-0}" = 1 ]; then F4C="--cache 60"; else F4C=; fi; sh relink-040-f4arms.sh --ufault $F4C $B/$T-f7base $B/$T-f7uft > $L/2-f4arms.log 2>&1
 	sh relink-040-f6.sh --kvd --swa $B/$T-f7uft $B/$T-f7vs > $L/3-f6.log 2>&1

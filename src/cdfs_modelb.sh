@@ -81,7 +81,7 @@ sh "$HERE/src/mk_modelb_sysroot.sh" | sed 's/^/      /'
 # the rule also passes and the Makefile never sets.
 build_one() {
 	echo "[*] building cdfs amix-kernel through $2"
-	rm -rf "$1"
+	rm -rf "${1:?}"
 	( cd "$CDFS" && AMIX_SYSROOT="$3" \
 		make amix-kernel AMIX_KERNEL_BUILD="$1" ) | sed 's/^/      /'
 }

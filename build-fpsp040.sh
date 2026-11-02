@@ -40,7 +40,7 @@ echo "[*] checking $(basename "$TGZ") against the pin"
 netbsd_syssrc_verify "$TGZ"
 
 echo "[*] extracting $FPSP_SUB from $(basename "$TGZ")"
-rm -rf "$WORK"; mkdir -p "$WORK"
+rm -rf "${WORK:?}"; mkdir -p "$WORK"
 tar xzf "$TGZ" -C "$WORK" --exclude='*CVS*' "$FPSP_SUB"
 FP="$WORK/$FPSP_SUB"
 cd "$FP"
@@ -93,7 +93,7 @@ m68k-linux-gnu-nm "$OUT" | grep ' U ' | sed 's/^/      /'
   m68k-cbm-sysv4-ld -r -o "$HERE/build/fpsp-cbmcheck.o" "$OUT" ) \
 	&& echo "[OK] m68k-cbm-sysv4-ld -r accepts fpsp040.o (kernel-relink compatible)" \
 	|| { echo "[FAIL] m68k-cbm-sysv4-ld rejects fpsp040.o"; exit 1; }
-rm -f "$HERE/build/fpsp-cbmcheck.o"
+rm -f "${HERE:?}/build/fpsp-cbmcheck.o"
 
 echo "[OK] M1 complete -- build/fpsp040.o  sha256:"
 sha256sum "$OUT"

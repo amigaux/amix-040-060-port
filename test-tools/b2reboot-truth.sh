@@ -38,7 +38,7 @@ case "$1" in
 write)
 	[ -x "$V" ] || { echo "MISSING $V (cc -o b2verify b2verify.c)"; exit 20; }
 	mkdir -p $DIR
-	rm -f $DIR/f* $DIR/EXPECT
+	rm -f ${DIR:?}/f* ${DIR:?}/EXPECT
 	echo "B2RT WRITE kernel=`uname -m`"
 	i=1
 	while [ $i -le $N ]; do

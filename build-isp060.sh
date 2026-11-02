@@ -23,7 +23,7 @@ command -v m68k-linux-gnu-gcc >/dev/null || { echo "ERROR: m68k-linux-gnu-gcc no
 
 echo "[*] checking $(basename "$TGZ") against the pin"
 netbsd_syssrc_verify "$TGZ"
-rm -rf "$WORK"; mkdir -p "$WORK"
+rm -rf "${WORK:?}"; mkdir -p "$WORK"
 tar xzf "$TGZ" -C "$WORK" --exclude='*CVS*' "$SUB/isp.S" "$SUB/copyright.S"
 SP="$WORK/$SUB"
 

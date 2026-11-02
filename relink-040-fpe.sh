@@ -168,7 +168,7 @@ DEFS="-Dpanic=fpe_panic -Dcopyin=fpe_copyin -Dcopyout=fpe_copyout"
 
 echo "[*] cross-compiling the 20 extracted emulator files"
 OBJDIR="$HERE/build/fpe-obj"
-rm -rf "$OBJDIR"; mkdir -p "$OBJDIR"
+rm -rf "${OBJDIR:?}"; mkdir -p "$OBJDIR"
 FPEOBJS=
 for f in "$FPESRC"/*.c; do
 	b=$(basename "$f" .c)

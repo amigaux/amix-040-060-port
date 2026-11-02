@@ -42,7 +42,7 @@ MARK="$HERE0/build/.emu-image"
 
 if [ "$CPU" = "restore" ]; then
 	if [ -f "$SLOT.real" ]; then
-		cp "$SLOT.real" "$SLOT"; rm -f "$MARK"
+		cp "$SLOT.real" "$SLOT"; rm -f "${MARK:?}"
 		echo "[*] restored the saved dbg build into $(basename "$SLOT")"
 	else
 		echo "[*] nothing to restore ($SLOT.real does not exist)"

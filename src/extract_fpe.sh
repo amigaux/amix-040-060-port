@@ -56,17 +56,17 @@ netbsd_syssrc_verify "$NETBSD_SYSSRC"
 # unpack <root> -- lay the four extraction roots out the way the -I lines want them.
 unpack() {
 	d=$1
-	rm -rf "$d" "$d.raw"; mkdir -p "$d.raw"
+	rm -rf "${d:?}" "${d:?}.raw"; mkdir -p "$d.raw"
 	tar -xzf "$NETBSD_SYSSRC" -C "$d.raw" --exclude=CVS \
 		"$SUB" "$MD/cpuframe.h" "$MD/fpreg.h" "$MD/ieee.h" "$MI/sys/ieee754.h"
 	mkdir -p "$d/include/m68k" "$d/include/sys"
 	cp -p "$d.raw/$SUB"/* "$d/"
 	cp -p "$d.raw/$MD/cpuframe.h" "$d.raw/$MD/fpreg.h" "$d.raw/$MD/ieee.h" "$d/include/m68k/"
 	cp -p "$d.raw/$MI/sys/ieee754.h" "$d/include/sys/"
-	rm -rf "$d.raw"
+	rm -rf "${d:?}.raw"
 }
 
-[ -n "$FPE_REEXTRACT" ] && rm -rf "$DEST"
+[ -n "$FPE_REEXTRACT" ] && rm -rf "${DEST:?}"
 
 if [ ! -d "$DEST" ]; then
 	echo "      extracting $SUB + 4 machine-ABI headers -> build/fpe-src/"
@@ -88,10 +88,10 @@ else
 	echo "       is extracted output, not source: nothing should ever edit it, and a kernel"
 	echo "       built from an edited copy is not the emulator this lane measured."
 	echo "       Re-extract:  FPE_REEXTRACT=1 sh src/extract_fpe.sh   (or rm -rf build/fpe-src)"
-	rm -rf "$TMP"
+	rm -rf "${TMP:?}"
 	exit 1
 fi
-rm -rf "$TMP"
+rm -rf "${TMP:?}"
 
 # The four tail members, and nothing else from struct fpframe.
 BAD=$(grep -ohE "fpf_[a-z0-9_]+" "$DEST"/*.c "$DEST"/*.h \

@@ -11,7 +11,7 @@ set -euo pipefail
 W=${W:?}
 KT=$W/amix-kerntools; R=$W/amix-040-060-port; T=$W/port; S=$T/build/dlm-rev
 TAG=${1:-m}; L=$W/log/$TAG; K=$W/kernels/$TAG
-rm -rf $K/sd $K/w $K/w.dlm $K/w.gate $K/w.abi $K/w.abi.txt $W/chains1/$TAG $W/chains2/$TAG $W/out/$TAG
+rm -rf ${K:?}/sd ${K:?}/w ${K:?}/w.dlm ${K:?}/w.gate ${K:?}/w.abi ${K:?}/w.abi.txt ${W:?}/chains1/${TAG:?} ${W:?}/chains2/${TAG:?} ${W:?}/out/${TAG:?}
 cd $KT
 python3 tools/kernel-sddevsize-inject.py inject $K/unix-fpe -o $K/sd > $L/9-sddevsize.log 2>&1; tail -n 1 $L/9-sddevsize.log | cut -c1-90
 python3 tools/kernel-support-probe-inject.py inject $K/sd -o $K/w > $L/10-wd7.log 2>&1; tail -n 1 $L/10-wd7.log | cut -c1-90
@@ -48,7 +48,7 @@ echo "stub objects in the splice: $(ls $S/obj | grep -ci stub || true)"; grep -h
 PIN=gcc-$(awk '$1=="gcc"{print $2}' $S/kit/toolchain.pin)-$(awk '$1=="commit"{print $2}' $S/kit/toolchain.pin)
 python3 tools/kabi-sidecar.py $W/out/$TAG/unix --family generic --pin $PIN --abi $ABI --kbootset-min $W/amix/kernel/dlm/core/kbootset-min -o $W/out/$TAG/kabi > $L/14-sidecar.log 2>&1 || { cat $L/14-sidecar.log; exit 1; }
 python3 tools/kabi-sidecar.py $W/out/$TAG/unix --family generic --pin $PIN --abi $ABI --kbootset-min $W/amix/kernel/dlm/core/kbootset-min -o $W/out/$TAG/kabi-2 > /dev/null
-cmp $W/out/$TAG/kabi $W/out/$TAG/kabi-2 && rm $W/out/$TAG/kabi-2 && echo "sidecar: two runs identical"
+cmp $W/out/$TAG/kabi $W/out/$TAG/kabi-2 && rm ${W:?}/out/${TAG:?}/kabi-2 && echo "sidecar: two runs identical"
 python3 tools/kabi-sidecar.py --check $W/out/$TAG/unix $W/out/$TAG/kabi
 [ "$(sed -n 's/^pin=//p' $W/out/$TAG/kabi)" = "$PIN" ] && echo "kabi pin=$PIN = kernel/dlm/toolchain.pin" \
 	|| { echo "kabi pin= is not $PIN (kernel/dlm/toolchain.pin)"; exit 1; }

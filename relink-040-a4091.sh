@@ -94,7 +94,7 @@ ALIEN="$AMIX_SYSROOT/usr/sys/amiga/alien"
 
 # ---------------------------------------------------------------- 2. the driver source
 SRCDIR="$HERE/build/a4091-src"
-rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"
+rm -rf "${SRCDIR:?}"; mkdir -p "$SRCDIR"
 FILES="src/a4091-wr.c src/a4091_dmarec.h tools/a4091-widths.py"
 # Pinned (2026-09-29): amix-a4091 6cebff2 -- the D42 contract's names, the bounce
 # (a misaligned FROM_DEVICE transfer of <= 1 KB goes through a static 16-aligned buffer, > 1 KB

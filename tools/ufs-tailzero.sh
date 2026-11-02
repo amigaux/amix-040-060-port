@@ -62,7 +62,7 @@ qz_check() {
 }
 
 # ---------------------------------------------------------------- 1. the compile and its gates
-T="$HERE/build/ufs-tailzero"; rm -rf "$T"; mkdir -p "$T"
+T="$HERE/build/ufs-tailzero"; rm -rf "${T:?}"; mkdir -p "$T"
 CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 echo "[*] cross-compiling src/ufs_vptrunz.c (-m68040 dialect)"
 m68k-cbm-sysv4-gcc $CF -c "$HERE/src/ufs_vptrunz.c" -o "$T/ufs_vptrunz.o"

@@ -31,7 +31,7 @@ OUT="$HERE/build/sysroot-modelb"
 [ -d "$REAL/usr/include/sys" ] || { echo "ERROR: real sysroot not found: $REAL"; exit 1; }
 
 echo "[*] mirroring $REAL -> $OUT"
-rm -rf "$OUT"
+rm -rf "${OUT:?}"
 mkdir -p "$OUT/usr/include/sys"
 
 # usr/: everything except include/ is a plain symlink (lib, ccs, sys, ...).
@@ -54,7 +54,7 @@ for e in "$REAL"/usr/include/sys/*; do
 	ln -s "$e" "$OUT/usr/include/sys/$(basename "$e")"
 done
 for h in immu param; do
-	rm -f "$OUT/usr/include/sys/$h.h"
+	rm -f "${OUT:?}/usr/include/sys/${h:?}.h"
 	ln -s "$REAL/usr/include/sys/$h.h" "$OUT/usr/include/sys/${h}_stock.h"
 	cp "$HERE/include-modelb/sys/$h.h" "$OUT/usr/include/sys/$h.h"
 	echo "      sys/$h.h  = Model B   (stock kept as sys/${h}_stock.h)"

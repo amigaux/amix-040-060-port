@@ -62,7 +62,7 @@ EOF
 	rc=$?
 
 	if [ "$rc" -eq 0 ] && [ -s "$d/probe.o" ]; then
-		rm -rf "$d"
+		rm -rf "${d:?}"
 		return 0
 	fi
 
@@ -76,7 +76,7 @@ EOF
 	sed -n '1,4p' "$d/log" | sed 's/^/      /'
 	echo "  Fix: install a wrapper carrying both repairs -- see BUILDING.md, ISSUE-55."
 	echo "       Upstream PR: isoriano1968/gcc-cross-amix, from asokero:fixes-2026-08-asokero"
-	rm -rf "$d"
+	rm -rf "${d:?}"
 	return 1
 }
 

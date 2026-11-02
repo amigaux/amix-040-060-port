@@ -36,6 +36,8 @@ for t in as ld; do
 		|| { echo "cut.sh: m68k-linux-gnu-$t is not binutils 2.43.1 (gcc14's; set G14)"; exit 2; }
 done
 GNU=$(dirname "$(command -v m68k-linux-gnu-nm)")
+# every rm/mv of a variable path in this recipe takes the ${var:?} guard; a cut copied from this one inherits the check
+sh "$PORT_GIT/tools/lint-rm-guard.sh" "$HERE"/*.sh > /dev/null || { sh "$PORT_GIT/tools/lint-rm-guard.sh" "$HERE"/*.sh; exit 2; }
 mkdir -p "$W/log"
 
 # the build tree: the archive, a config.sh naming the inputs, the stamper shim and the block pin
@@ -51,7 +53,7 @@ M68K_GNU_BIN="$GNU"
 AMIX_ROOT="\$AMIX_BUILD/amix-2.1c"
 NETBSD_SYSSRC="$NETBSD_SYSSRC"
 EOF
-mv "$W/port/src/stamp_buildid.py" "$W/port/src/stamp_buildid.real.py"
+mv "${W:?}/port/src/stamp_buildid.py" "${W:?}/port/src/stamp_buildid.real.py"
 cp "$HERE/stamp_buildid.py" "$W/port/src/stamp_buildid.py"; cp "$HERE/blocks.py" "$W/port/tools/blocks.py"
 mkdir -p "$W/port/build"; echo "261102 59" > "$W/port/build/.build-seq"
 

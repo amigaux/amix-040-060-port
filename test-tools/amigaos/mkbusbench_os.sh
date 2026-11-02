@@ -59,7 +59,7 @@ n=$(body rlong | grep -c "move\.l ([0-9]*,*%*a[0-9]*),")
 grep -qE "jsr .*mem(set|cpy)|jbsr .*mem" "$HERE/.busbench_os.s" && \
 	{ echo "[FAIL] a loop was turned into a memset/memcpy call"; fail=1; }
 
-rm -f "$HERE/.busbench_os.s"
+rm -f "${HERE:?}/.busbench_os.s"
 [ "$fail" -eq 0 ] || { echo "[FAIL] codegen check failed -- the AmigaOS and AMIX builds no longer measure the same thing"; exit 1; }
 echo "      codegen OK: 4x32-bit stores, 4x SEPARATE 16-bit stores, 4x32-bit loads, no memset"
 

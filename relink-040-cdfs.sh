@@ -111,7 +111,7 @@ LIBGCC="${AMIX_CROSS:-$(dirname "$(dirname "$(command -v m68k-cbm-sysv4-gcc)")")
 [ -f "$LIBGCC" ] || { echo "ERROR: libgcc.a not found at $LIBGCC"; exit 1; }
 echo "[*] libgcc helpers from $LIBGCC"
 LGDIR="$HERE/build/cdfs-libgcc"
-rm -rf "$LGDIR"; mkdir -p "$LGDIR"
+rm -rf "${LGDIR:?}"; mkdir -p "$LGDIR"
 (cd "$LGDIR" && m68k-linux-gnu-ar x "$LIBGCC" _lshrdi3.o _udivdi3.o _umoddi3.o)
 LGOBJS=
 for o in _lshrdi3 _udivdi3 _umoddi3; do

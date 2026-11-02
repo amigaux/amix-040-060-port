@@ -47,7 +47,7 @@ echo "[*] checking $(basename "$TGZ") against the pin"
 netbsd_syssrc_verify "$TGZ"
 
 echo "[*] extracting $SUB from $(basename "$TGZ")"
-rm -rf "$WORK"; mkdir -p "$WORK"
+rm -rf "${WORK:?}"; mkdir -p "$WORK"
 tar xzf "$TGZ" -C "$WORK" --exclude='*CVS*' "$SUB"
 SP="$WORK/$SUB"
 
@@ -103,7 +103,7 @@ build_one() {
 	  m68k-cbm-sysv4-ld -r -o "$WORK/$_src-cbmcheck.o" "$_out" ) \
 		&& echo "      m68k-cbm-sysv4-ld -r accepts $(basename "$_out")" \
 		|| { echo "[FAIL] m68k-cbm-sysv4-ld rejects $(basename "$_out")"; exit 1; }
-	rm -f "$WORK/$_src-cbmcheck.o"
+	rm -f "${WORK:?}/${_src:?}-cbmcheck.o"
 }
 
 build_one fpsp  "$HERE/build/fpsp060.o"  "00d490"

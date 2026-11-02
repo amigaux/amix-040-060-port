@@ -40,7 +40,7 @@ echo "[*] checking $(basename "$TGZ") against the pin"
 netbsd_syssrc_verify "$TGZ"
 
 echo "[*] extracting $SUB/dist/ftest.sa"
-rm -rf "$WORK"; mkdir -p "$WORK"
+rm -rf "${WORK:?}"; mkdir -p "$WORK"
 tar xzf "$TGZ" -C "$WORK" --exclude='*CVS*' "$SUB/dist/ftest.sa"
 SA="$WORK/$SUB/dist/ftest.sa"
 

@@ -28,7 +28,7 @@ FLAG=/tmp/b2repro.stop
 
 [ -f "$REF" ] || { echo "MISSING $REF"; exit 20; }
 [ -x "$V" ]   || { echo "MISSING $V (cc -o b2verify b2verify.c)"; exit 20; }
-rm -f $FLAG
+rm -f ${FLAG:?}
 
 echo "B2REPRO-COPY start bursts=$BURSTS label=$LABEL ref=$REF"
 b=1

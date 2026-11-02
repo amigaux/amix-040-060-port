@@ -25,12 +25,12 @@ FLAG=/tmp/b2repro.stop
 
 [ -f "$REF" ] || { echo "MISSING $REF (dd if=/payload.bin of=$REF bs=1024 count=96)"; exit 20; }
 [ -x "$V" ]   || { echo "MISSING $V (cc -o b2verify b2verify.c)"; exit 20; }
-rm -f $FLAG
+rm -f ${FLAG:?}
 
 worker() {
 	wid=$1
 	dir=/tmp/mt$wid
-	rm -rf $dir; mkdir -p $dir
+	rm -rf ${dir:?}; mkdir -p $dir
 	n=1
 	while [ $n -le $ITERS ]; do
 		[ -f $FLAG ] && return
@@ -54,10 +54,10 @@ worker() {
 		done
 		# rename + unlink to churn inode / cg reuse (varied order by parity)
 		if [ `expr $n % 2` -eq 0 ]; then
-			j=1; while [ $j -le 8 ]; do mv $dir/f$j.$n $dir/r$j.$n; j=`expr $j + 1`; done
-			j=8; while [ $j -ge 1 ]; do rm -f $dir/r$j.$n; j=`expr $j - 1`; done
+			j=1; while [ $j -le 8 ]; do mv ${dir:?}/f${j:?}.${n:?} ${dir:?}/r${j:?}.${n:?}; j=`expr $j + 1`; done
+			j=8; while [ $j -ge 1 ]; do rm -f ${dir:?}/r${j:?}.${n:?}; j=`expr $j - 1`; done
 		else
-			j=8; while [ $j -ge 1 ]; do rm -f $dir/f$j.$n; j=`expr $j - 1`; done
+			j=8; while [ $j -ge 1 ]; do rm -f ${dir:?}/f${j:?}.${n:?}; j=`expr $j - 1`; done
 		fi
 		[ `expr $n % 10` -eq 0 ] && sync
 		n=`expr $n + 1`

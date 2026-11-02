@@ -112,7 +112,7 @@ export AMIX_SYSROOT
 # the ../.. paths against the upstream repository instead, hence a copy.
 TREE="$HERE/build/zz9000-tree/sys"
 DRV="$TREE/amiga/driver/zz9000"
-rm -rf "$HERE/build/zz9000-tree"
+rm -rf "${HERE:?}/build/zz9000-tree"
 mkdir -p "$DRV"
 ln -s "$AMIX_SYSROOT/usr/sys/amiga/console" "$TREE/amiga/console"
 ln -s "$AMIX_SYSROOT/usr/sys/amiga/inc"     "$TREE/amiga/inc"

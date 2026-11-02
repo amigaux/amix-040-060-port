@@ -206,7 +206,7 @@ echo "[*] PC-relative relocs present (loader MUST have the amix-unix-boot v1.0-0
 m68k-linux-gnu-readelf -rW "$OUT" 2>/dev/null | awk '$3 ~ /^R_68K_PC/{n++} END{print "      "n" PC-relative records"}'
 
 run_step all python3 "$HERE/src/stamp_buildid.py" "$OUT"
-rm -f "$STAGE"
+rm -f "${STAGE:?}"
 echo "[OK] built $OUT"
 echo "     boot: unix_boot040 $(basename "$OUT")   <- unix_boot040 is MANDATORY"
 echo "     nodes: mknod /dev/svga    c 67 0"

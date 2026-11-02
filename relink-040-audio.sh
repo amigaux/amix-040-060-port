@@ -75,7 +75,7 @@ done
 # ---------------------------------------------------------------- 1. the patchers at PAULA_REV
 REV=$(git -C "$PAULA_REPO" rev-parse --verify "$PAULA_REV^{commit}") \
 	|| { echo "ERROR: $PAULA_REV is not a commit in $PAULA_REPO"; exit 1; }
-P="$HERE/build/paula-rev"; rm -rf "$P"; mkdir -p "$P"
+P="$HERE/build/paula-rev"; rm -rf "${P:?}"; mkdir -p "$P"
 for f in patch_audio_safeclose.py patch_audio_initwait.py patch_audio_paula.py; do
 	git -C "$PAULA_REPO" show "$REV:port/src/$f" > "$P/$f" \
 		|| { echo "ERROR: port/src/$f does not exist at $PAULA_REV in $PAULA_REPO"; exit 1; }
@@ -86,7 +86,7 @@ echo "      stock driver: $SRC (audio.c sha256 $(sha256sum "$SRC/audio.c" | cut 
 # ---------------------------------------------------------------- 2. the driver
 sh "$HERE/src/mk_modelb_sysroot.sh" | sed 's/^/      /'
 AMIX_SYSROOT="$HERE/build/sysroot-modelb"; export AMIX_SYSROOT
-B="$HERE/build/audiosrc"; rm -rf "$B"; mkdir -p "$B"
+B="$HERE/build/audiosrc"; rm -rf "${B:?}"; mkdir -p "$B"
 cp "$SRC/audio.c" "$SRC/audio.h" "$B/"
 # the Amiga memory.h, not libc's <memory.h> that the -I order would find first
 cp "$AMIX_SYS/amiga/inc/memory.h" "$B/"

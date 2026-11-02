@@ -86,7 +86,7 @@ ALIEN="$AMIX_SYSROOT/usr/sys/amiga/alien"
 
 # ---------------------------------------------------------------- 2. the driver source
 SRCDIR="$HERE/build/ide-src"
-rm -rf "$SRCDIR"; mkdir -p "$SRCDIR"
+rm -rf "${SRCDIR:?}"; mkdir -p "$SRCDIR"
 # Pinned (P2, 2026-10-02): amix-gayle-ide d19812b (G1) -- the 040/060 build: IDE_NBPP, IDE_CACHE
 # (cpushl/cinvl around PIO, the DTTn cache-inhibit check), polled-only on this line, spin budgets x4,
 # and the MB banner without a >>11.  (The ide_cache knob and the ide_spins_hw high-water are IDE_DIAG

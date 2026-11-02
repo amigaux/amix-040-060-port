@@ -92,7 +92,7 @@ dlm_rev
 # the core and the kit's tools at DLM_REV, staged once per revision
 stage() {
 	[ -f "$S/.rev" ] && [ "$(cat "$S/.rev")" = "$REV" ] && return 0
-	rm -rf "$S"; mkdir -p "$S/kit" "$S/obj"
+	rm -rf "${S:?}"; mkdir -p "$S/kit" "$S/obj"
 	dlm_archive core abi tools loader/common tests/host/axrel.c toolchain.pin \
 		| tar -x --strip-components=$DLM_STRIP -C "$S/kit"
 	cp -R "$S/kit/core/upstream" "$S/core"
@@ -212,7 +212,7 @@ if [ "$KMIN" -ge 3 ]; then
 	echo "      $DLM_KABI: paula_busy and audio_nopen in the base (relink-040-audio.sh)"
 fi
 O="$S/obj"
-rm -f "$O"/*.o "$O"/*.warn
+rm -f "${O:?}"/*.o "${O:?}"/*.warn
 offs
 echo "      mkoffs: $(grep -c '^#define' "$S/core/dlm_offs.h") layouts"
 sh "$S/core/tools/mkreg" "$S/kit/abi/registry/majors" > "$S/core/dlmreg.c" || { echo "[FAIL] mkreg"; exit 1; }
@@ -252,7 +252,7 @@ if grep -q '^	\.balign	16$' "$O/ident.s"; then
 	awk '/^\t\.balign\t16$/ {getline nx; if (nx != "\t.globl\tdlm_arena") exit 1; print "\t.balign\t4"; print nx; n++; next}
 	     {print} END {if (n != 1) exit 1}' "$O/ident.s" > "$O/ident.s.4" \
 		|| { echo "[FAIL] ident.s: the .balign 16 is not the one before dlm_arena"; exit 1; }
-	mv "$O/ident.s.4" "$O/ident.s"
+	mv "${O:?}/ident.s.4" "${O:?}/ident.s"
 	echo "      ident.s: dlm_arena's .balign 16 -> 4 (the record rounds the arena to 16, C3-3 v5)"
 fi
 m68k-cbm-sysv4-as -o "$O/ident.o" "$O/ident.s"

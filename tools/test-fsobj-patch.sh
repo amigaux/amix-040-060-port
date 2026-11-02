@@ -12,7 +12,7 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 . "$HERE/tools/config-load.sh"
 [ -n "$FSOBJ_BASE" ] && [ -n "$FSOBJ_FS" ] || { echo "test-fsobj-patch: FSOBJ_BASE/FSOBJ_FS unset, skipped"; exit 0; }
 STOCK="$AMIX_ROOT/stand/unix"
-T="$HERE/build/test-fsobj"; rm -rf "$T"; mkdir -p "$T"
+T="$HERE/build/test-fsobj"; rm -rf "${T:?}"; mkdir -p "$T"
 P="python3 $HERE/tools/fsobj-patch.py --stock $STOCK"
 fails=0
 pass() { echo "PASS $1"; }
