@@ -23,6 +23,35 @@ pstart:
 | ---- 0xd44: prologue (frame + saved regs, verbatim) ----
 	linkw	%fp,&-40
 	moveml	%d2-%d6/%a2-%a3,%sp@-
+| ---- cputype from the loader's own CPU probe (2026-11-02), before the first cputype test ----
+| The k46 image ships with cputype stamped 60 (the KD060 chain).  The k46 loader (amix-dlm's boot2)
+| does not poke it as unix_boot040 did; it hands its probe's result in the AXL1 record instead:
+| bootinfo.reserved+0x38 = bootinfo+0x6b0, 124 bytes, which config() has copied into the kernel's
+| bootinfo by now.  Valid only when magic "AXL1", version/length 0x0001007c and the 31 longs sum to 0
+| (amix-dlm loader/common/bootinfo.c, the same test as plat_dmainit).  cpu 60 or 40 replaces the
+| stamp; no record (a stock unix_boot pokes cputype itself) or any other value leaves it.  Without
+| this a 68040 runs the 060-only `movec %pcr` below and dies at its first instruction.
+| d0/d1/a0 are scratch here.
+	lea	bootinfo+0x6b0,%a0
+	cmpil	&0x41584c31,%a0@	| "AXL1"
+	bnew	Lps_axl_out
+	cmpil	&0x0001007c,%a0@(4)	| version 1, 124 bytes
+	bnew	Lps_axl_out
+	moveq	&0,%d0
+	moveq	&30,%d1			| 31 longs
+Lps_axl_sum:
+	addl	%a0@+,%d0
+	dbf	%d1,Lps_axl_sum
+	tstl	%d0
+	bnew	Lps_axl_out		| the check long does not close: not a record
+	movel	bootinfo+0x6b0+20,%d0	| cpu: 30, 40 or 60
+	cmpil	&60,%d0
+	beqs	Lps_axl_set
+	cmpil	&40,%d0
+	bnes	Lps_axl_out
+Lps_axl_set:
+	movel	%d0,cputype
+Lps_axl_out:
 	pea	0x41			| btrace 'A' -- kernel entry reached (SP valid post-prologue)
 	jsr	btrace_mark
 	addqw	&4,%sp
@@ -408,8 +437,8 @@ Lkroot:
 	addqw	&4,%sp
 | ---- F1 (2026-08-05): capture the 68060 PCR, once, right after the caches reach their final
 | state.  `movec %pcr,%d0` (control register 0x808) exists ONLY on the 060 and traps as an
-| illegal instruction on the 040, so it is gated on the loader-poked `cputype` -- which is
-| already valid this early, since unix_boot writes it before the kernel is entered.  The 040
+| illegal instruction on the 040, so it is gated on `cputype` -- set from AXL1 at pstart's entry
+| on a k46 loader, poked by the loader itself on a stock one -- so it is valid this early.  The 040
 | therefore executes exactly one extra compare-and-branch here and nothing else.
 | pcr_boot ships as 0xFFFFFFFF, so a skipped or misfiring read stays distinguishable from a
 | real PCR of 0.  See cputype060.s for what the bits mean and why this blocks 060-D.
