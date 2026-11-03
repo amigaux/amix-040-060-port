@@ -35,6 +35,19 @@ if [ "$I10" = 1 ]; then
 	I10_OBJ="$HERE/build/i10rev040.o"
 	I10_OC="--weaken-symbol as_fault --add-symbol as_fault_orig=.text:0xae108,function,global --weaken-symbol brk --add-symbol brk_orig=.text:0x580e8,function,global"
 fi
+# wbkeep040 (2026-11-03): the 68040's pending write-backs of an unresolved user fault kept across its
+# signal and completed when setcontext restores that context (sh grows its heap from a SIGSEGV
+# handler; the 68040 does not re-run the store as the 68030/68060 do).  Takes the strong
+# restorecontext and as_free, the stock bodies kept as *_orig; wb040.s's two hooks under WBKEEP.
+# WBKEEP=0 builds without it (the rollback).
+WBKEEP="${WBKEEP:-1}"
+WBK_AS=""; WBK_OBJ=""; WBK_OC=""
+if [ "$WBKEEP" = "1" ]; then
+	WBK_AS="-Wa,--defsym,WBKEEP=1"
+	m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/wbkeep040.s" -o "$HERE/build/wbkeep040.o"
+	WBK_OBJ="$HERE/build/wbkeep040.o"
+	WBK_OC="--weaken-symbol restorecontext --add-symbol restorecontext_orig=.text:0x58d76,function,global --weaken-symbol as_free --add-symbol as_free_orig=.text:0xadf9a,function,global"
+fi
 # KDBG=1 builds the VM debug prints (the `tstl kdbg_on` blocks in hat040.s, hat_dup040.s,
 # hat_chgprot040.s, vtop040.s and getfault040.s, still gated at run time by kdbg_on).  Since
 # 2026-11-02 the default build leaves them out: with kdbg_on 0 each still cost a read per call on
@@ -74,7 +87,10 @@ echo "      ptest040     = real 040 ptestr -> 030-form PSR (the GOT-relocation C
 m68k-cbm-sysv4-gcc -m68040 $KDBG_AS -c "$HERE/src/getfault040.s"  -o "$HERE/build/getfault040.o"
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/userspace040.s" -o "$HERE/build/userspace040.o"
 m68k-cbm-sysv4-gcc -m68040 $I10_AS $KDBG_AS -c "$HERE/src/vtop040.s" -o "$HERE/build/vtop040.o"
-m68k-cbm-sysv4-gcc -m68040 $I10_AS -c "$HERE/src/wb040.s" -o "$HERE/build/wb040.o"
+# WBQUIET: with WBKEEP=1 a denied replay is the program's grow loop, so its DBG notice is assembled
+# only with KDBG=1 (WBKEEP=0 keeps -60's notice).
+WBQ_AS=""; if [ "$WBKEEP" = 1 ] && [ "$KDBG" != 1 ]; then WBQ_AS="-Wa,--defsym,WBQUIET=1"; fi
+m68k-cbm-sysv4-gcc -m68040 $I10_AS $WBK_AS $WBQ_AS -c "$HERE/src/wb040.s" -o "$HERE/build/wb040.o"
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/segvn_prot040.s" -o "$HERE/build/segvn_prot040.o"
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/ptest040.s"     -o "$HERE/build/ptest040.o"
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/uvatosde040.s"  -o "$HERE/build/uvatosde040.o"
@@ -508,7 +524,18 @@ m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/krnxmemflt040.s" -o "$HERE/build/krnxme
 # is measured, not deduced: the i10a as_fault audit was armed on the page and then on
 # the exact address while the wall fired, and recorded i10a_vamatch_n = 0 against
 # i10a_seen_n of 417 and 1024.  See src/hgfault040.s's header.
-m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/hgfault040.s" -o "$HERE/build/hgfault040.o"
+#   Since 2026-11-03 it is linked only with WBKEEP=0 (HGFAULT follows it): it grows the break behind
+# the program's back, and the program's own next brk, from the break it knows, takes the page back
+# with the store in it -- sh's arena sentinel, then a NULL free-list link and the "no space" wall.
+# With WBKEEP=1 the fault goes to sh's SIGSEGV handler as on the 68030, the handler grows the break
+# itself, and setcontext completes the kept store (src/wbkeep040.s); usrxmemflt_orig is the stock
+# body at 0x5aede again.
+if [ "$WBKEEP" = 1 ]; then HGFAULT="${HGFAULT:-0}"; else HGFAULT="${HGFAULT:-1}"; fi
+HG_OBJ=""; HG_OC="--add-symbol usrxmemflt_orig=.text:0x5aede,function,global"
+if [ "$HGFAULT" = 1 ]; then
+	m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/hgfault040.s" -o "$HERE/build/hgfault040.o"
+	HG_OBJ="$HERE/build/hgfault040.o"; HG_OC=""
+fi
 m68k-linux-gnu-objcopy --redefine-sym segu_get=segu_get_lockfix "$HERE/build/segu_lockfix.o"
 # i10s (2026-08-20, ISSUE-10 resolution audit PART SEVEN): i10rev040.o carries an OUTER
 # tail-call wrapper on segvn_faultpage that observes the per-page decision and then hands
@@ -609,6 +636,7 @@ m68k-linux-gnu-objcopy \
 	--add-symbol vtop_orig=.text:0xb7568,function,global \
 	--weaken-symbol usrxmemflt \
 	--add-symbol usrxmemflt_stock=.text:0x5aede,function,global \
+	$HG_OC \
 	--weaken-symbol segvn_faultpage \
 	--add-symbol segvn_faultpage_orig=.text:0xac01a,function,global \
 	$I10_OC \
@@ -625,6 +653,7 @@ m68k-linux-gnu-objcopy \
 	$DIAG106_OC \
 	$KVP_OC \
 	$SDQ_OC \
+	$WBK_OC \
 	--weaken-symbol lmul \
 	--weaken-symbol bp_map \
 	--weaken-symbol bp_mapout \
@@ -673,7 +702,7 @@ m68k-cbm-sysv4-ld -r -o "$OUT" "$HERE/build/unix-stage1" \
 	"$HERE/build/inituname040.o" \
 	"$HERE/build/cputype060.o" "$HERE/build/lmul060.o" "$HERE/build/isp61_060.o" \
 	"$HERE/build/fpu060.o" $FPUINIT_OBJ \
-	$KVP_OBJ $SDQ_OBJ \
+	$KVP_OBJ $SDQ_OBJ $WBK_OBJ \
 	"$HERE/build/bp_map040.o" "$HERE/build/runtime040.o" "$HERE/build/krnxmemflt040.o" \
 	"$HERE/build/segkmem040.o" "$HERE/build/dma_cache040.o" "$HERE/build/a3091dbg040.o" "$HERE/build/a3091demux040.o" "$HERE/build/segdevchk040.o" "$HERE/build/scrdevfix040.o" "$HERE/build/cb_release040.o" "$HERE/build/btrace.o" \
 	"$HERE/build/config040.o" "$HERE/build/cb_icode040.o" "$HERE/build/kdbg040.o" \
@@ -681,7 +710,7 @@ m68k-cbm-sysv4-ld -r -o "$OUT" "$HERE/build/unix-stage1" \
 	$LSDT_OBJ "$HERE/build/ptdatfree040.o" \
 	"$HERE/build/syncguard.o" "$HERE/build/pageinitzero.o" $SMU_OBJ $KZERO_OBJ $FQG_OBJ $SWG_OBJ \
 	"$HERE/build/btwalk.o" $DIAG106_OBJ \
-	"$HERE/build/hgfault040.o" \
+	$HG_OBJ \
 	$I10_OBJ
 
 echo
@@ -994,27 +1023,35 @@ fi
 # call or push address 0 the first time a heap page is grown on a fault.  Assert all of it.
 UXOADDR=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="usrxmemflt_orig" && $2=="T" {print $1}')
 UXSADDR=$(m68k-linux-gnu-nm "$OUT" | awk '$3=="usrxmemflt_stock" && $2=="T" {print $1}')
-if [ -z "$UXOADDR" ]; then
-	echo "[FAIL] usrxmemflt_orig is not a global T -> wb040's jsr is unbound"; exit 1
-fi
-if [ "$UXOADDR" = "0005aede" ]; then
-	echo "[FAIL] usrxmemflt_orig is still the stock body 0x5aede -> hgfault040.o is NOT in the kernel"; exit 1
-fi
-if [ -z "$UXSADDR" ] || [ "$UXSADDR" != "0005aede" ]; then
-	echo "[FAIL] usrxmemflt_stock missing or not at 0x5aede (nm: '$UXSADDR') -> the tail call is wrong"; exit 1
-fi
-if m68k-linux-gnu-nm "$OUT" | grep -E ' U usrxmemflt_stock$' >/dev/null 2>&1; then
-	echo "[FAIL] usrxmemflt_stock still UND -> every user memory fault would jmp to address 0"; exit 1
-fi
-if [ -z "$(m68k-linux-gnu-nm "$OUT" | awk '$3=="hg_magic" && $2=="D" {print $1}')" ]; then
-	echo "[FAIL] hg_magic missing -> hgfault040.o's counter block is not in the image"; exit 1
-fi
-for hgs in as_map segvn_create zfod_argsp as_segat; do
-	if m68k-linux-gnu-nm "$OUT" | grep -E " U $hgs\$" >/dev/null 2>&1; then
-		echo "[FAIL] $hgs still UND -> the ISSUE-10 grow edge would use address 0"; exit 1
+if [ "$HGFAULT" = 1 ]; then
+	if [ -z "$UXOADDR" ]; then
+		echo "[FAIL] usrxmemflt_orig is not a global T -> wb040's jsr is unbound"; exit 1
 	fi
-done
-echo "[OK] ISSUE-10 cure bound: usrxmemflt_orig (hgfault040 @0x$UXOADDR) -> usrxmemflt_stock @0x$UXSADDR; as_map/segvn_create/zfod_argsp/as_segat resolved."
+	if [ "$UXOADDR" = "0005aede" ]; then
+		echo "[FAIL] usrxmemflt_orig is still the stock body 0x5aede -> hgfault040.o is NOT in the kernel"; exit 1
+	fi
+	if [ -z "$UXSADDR" ] || [ "$UXSADDR" != "0005aede" ]; then
+		echo "[FAIL] usrxmemflt_stock missing or not at 0x5aede (nm: '$UXSADDR') -> the tail call is wrong"; exit 1
+	fi
+	if m68k-linux-gnu-nm "$OUT" | grep -E ' U usrxmemflt_stock$' >/dev/null 2>&1; then
+		echo "[FAIL] usrxmemflt_stock still UND -> every user memory fault would jmp to address 0"; exit 1
+	fi
+	if [ -z "$(m68k-linux-gnu-nm "$OUT" | awk '$3=="hg_magic" && $2=="D" {print $1}')" ]; then
+		echo "[FAIL] hg_magic missing -> hgfault040.o's counter block is not in the image"; exit 1
+	fi
+	for hgs in as_map segvn_create zfod_argsp as_segat; do
+		if m68k-linux-gnu-nm "$OUT" | grep -E " U $hgs\$" >/dev/null 2>&1; then
+			echo "[FAIL] $hgs still UND -> the ISSUE-10 grow edge would use address 0"; exit 1
+		fi
+	done
+	echo "[OK] ISSUE-10 cure bound: usrxmemflt_orig (hgfault040 @0x$UXOADDR) -> usrxmemflt_stock @0x$UXSADDR; as_map/segvn_create/zfod_argsp/as_segat resolved."
+else
+	[ "$UXOADDR" = "0005aede" ] \
+		|| { echo "[FAIL] usrxmemflt_orig is '$UXOADDR', want the stock body 0x5aede (HGFAULT=0)"; exit 1; }
+	[ -z "$(m68k-linux-gnu-nm "$OUT" | awk '$3=="hg_magic"')" ] \
+		|| { echo "[FAIL] hg_magic present with HGFAULT=0 -> hgfault040.o is still linked"; exit 1; }
+	echo "[OK] ISSUE-10 handled by the kept write-backs: usrxmemflt_orig = the stock body @0x$UXOADDR, no break grow."
+fi
 
 if [ "$I10" = 1 ]; then
 # HARD CHECK (2026-08-20, ISSUE-10 genesis introspection PART TEN): wb040.o's usrxmemflt
@@ -1045,6 +1082,24 @@ if [ "$SDQ_SPL" = "1" ]; then
 	SQN=$(m68k-linux-gnu-objdump -r -j .text "$OUT" | awk '$3=="sdqueue"' | wc -l)
 	[ "$SQN" -ge 4 ] || { echo "[FAIL] $SQN relocations name sdqueue, want the four callers at least"; exit 1; }
 	echo "[OK] sdqueue at IPL 2 at least: wrapper @0x$SQADDR -> sdqueue_orig @0x$SQORIG, $SQN callers."
+fi
+# HARD CHECK (2026-11-03, the 68040 write-backs kept across a signal): restorecontext and as_free must be
+# wbkeep040.s's wrappers, the stock bodies reachable at 0x58d76 and 0xadf9a, every relocation that named
+# them must name the wrapper, and wb040.o must call wbk_save from both usrxmemflt sites.
+if [ "$WBKEEP" = "1" ]; then
+	NMO=$(m68k-linux-gnu-nm "$OUT")
+	for p in restorecontext:58d76 as_free:adf9a; do
+		f=${p%%:*}; a=${p#*:}
+		W=$(echo "$NMO" | awk -v f=$f '$3==f && $2=="T" {print $1}')
+		O=$(echo "$NMO" | awk -v f=${f}_orig '$3==f && $2=="T" {print $1}')
+		[ -n "$W" ] && [ "$O" = "$(printf %08x 0x$a)" ] && [ "$W" != "$O" ] \
+			|| { echo "[FAIL] $f '$W' / ${f}_orig '$O' -> the wbkeep wrapper did not take"; exit 1; }
+		[ "$(m68k-linux-gnu-objdump -r -j .text "$OUT" | awk -v f=${f}_orig '$3==f' | wc -l)" -le 1 ] \
+			|| { echo "[FAIL] a caller still names ${f}_orig"; exit 1; }
+	done
+	WN=$(m68k-linux-gnu-objdump -r -j .text "$HERE/build/wb040.o" | awk '$3=="wbk_save"' | wc -l)
+	[ "$WN" = 2 ] || { echo "[FAIL] wb040.o calls wbk_save $WN times, want 2"; exit 1; }
+	echo "[OK] 040 write-backs kept across a signal: restorecontext, as_free wrapped; wbk_save at both sites."
 fi
 
 # HARD CHECK (2026-07-12): the RUNTIME kernel must carry the NATIVE resume (fixed-u

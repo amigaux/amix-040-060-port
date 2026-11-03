@@ -327,7 +327,9 @@ OVERRIDES = [
     ("segvn_faultpage",  0xac01a, "segvn_faultpage_orig","ISSUE-41: per-page permission check"),
     ("as_fault",         0xae108, "as_fault_orig",       "ISSUE-10: as_fault decision audit (i10a)"),
     ("krnxmemflt",       0x5b140, "krnxmemflt_stock",    "native 040 kernel fault resolver (krnxmemflt_orig binds to OURS on purpose)"),
-    ("usrxmemflt",       0x5aede, "usrxmemflt_stock",    "040 user fault path (usrxmemflt_orig binds to the ISSUE-10 cure on purpose, like krnxmemflt)"),
+    ("usrxmemflt",       0x5aede, "usrxmemflt_stock",    "040 user fault path: wb040's replay wrapper (usrxmemflt_orig is the stock body with WBKEEP=1, the ISSUE-10 break grow with WBKEEP=0)"),
+    ("restorecontext",   0x58d76, "restorecontext_orig", "the 68040's kept write-backs complete when setcontext restores the faulted context"),
+    ("as_free",          0xadf9a, "as_free_orig",        "the kept write-backs of an address space go with it"),
     ("nullvect",         0x011b4, "nullvect_orig",       "kvecprobe wrapper"),
     ("sync",             0x5d21a, None,                  "ISSUE-100: stock sync() walks a NULL vsw_vfsops -- any pre-vfsinit panic double-faults"),
     ("page_init",        0xaf42a, "page_init_orig",      "ISSUE-102: the page-frame database is mapped-in DRAM and nothing zeroes it"),
@@ -347,7 +349,9 @@ print()
 # variable that lets this table accept a kernel without it.  Set, the row reads "rolled back" and
 # does not count as failing; unset, the missing override fails as any other would.
 ROLLBACK = {"kzero": "STATUS_ALLOW_NO_KZERO",      # KZERO=0 relink-040.sh: the stock bzero alias
-            "sdqueue": "STATUS_ALLOW_NO_SDQ_SPL"}   # SDQ_SPL=0 relink-040.sh: the stock sdqueue
+            "sdqueue": "STATUS_ALLOW_NO_SDQ_SPL",   # SDQ_SPL=0 relink-040.sh: the stock sdqueue
+            "restorecontext": "STATUS_ALLOW_NO_WBKEEP",  # WBKEEP=0 relink-040.sh: no write-back is kept
+            "as_free": "STATUS_ALLOW_NO_WBKEEP"}
 # Diagnostic overrides, out of the default build since 2026-11-02 (relink-040.sh I10, KVP, DIAG106): each is
 # judged only when its unit is linked, which its magic word says.  Linked, the override must hold as any other.
 DIAGNOSTIC = {"as_fault": ("i10_magic", "I10=1"), "nullvect": ("kvp_magic", "KVP=1"),

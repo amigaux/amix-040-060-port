@@ -96,8 +96,19 @@ usrxmemflt:
 	movel	%d0,%d4			| save return (0 = demand-fault resolved)
 	tstl	%d4
 	beqs	Lu_replay		| resolved: complete the pending write-back below
+.ifdef WBKEEP
+	pea	1			| keep every user write-back for the handler's return to
+	movel	%fp@(8),%sp@-		| this context (wbkeep040.s): the 68040 will not re-run
+	jsr	wbk_save		| the store, as the 68030/68060 do
+	addqw	&8,%sp
+	tstl	%d0
+	bnes	Lu_kept			| kept: nothing is dropped
+.endif
 	moveq	&1,%d0			| UNRESOLVED user fault, ctx = 1: a pending store is
 	bsrw	wbf_dropwarn		| about to be dropped by skipping the replay -- name it
+.ifdef WBKEEP
+Lu_kept:
+.endif
 .ifdef I10
 	movel	&1,%sp@-		| ISSUE-10 genesis introspection (i10c), ctx = 1: this is
 	movel	%fp@(8),%sp@-		| the site that fires exactly once for the dropped store.
@@ -107,7 +118,13 @@ usrxmemflt:
 	braw	Lu_done			| OUTCOME UNCHANGED: still skip replay and signal
 Lu_replay:
 	moveal	%fp@(8),%a2		| a2 = frame
+.ifdef WBKEEP
+	addql	&1,wbk_inreplay		| a fault nested in this replay is ours to keep or report
+.endif
 	bsrw	wb040_replay
+.ifdef WBKEEP
+	subql	&1,wbk_inreplay
+.endif
 	tstl	%d0			| ISSUE-42: 0 = every valid WB completed;
 	bnew	Lu_wbdenied		| nonzero = one was permanently DENIED
 | --- ISSUE-10 write-watch (2026-08-19, src/i10rev040.s).  The store this fault
@@ -146,6 +163,12 @@ Lu_replay:
 Lu_wbdenied:
 	cmpil	&1,%d0
 	bnew	Lu_done			| supervisor-FC WB: stopped and counted, no signal
+.ifdef WBKEEP
+	movel	wbf_slot,%sp@-		| keep the denied write-back and those after it (the
+	movel	%fp@(8),%sp@-		| ones before it completed) for the handler's return
+	jsr	wbk_save
+	addqw	&8,%sp
+.endif
 	bsrw	Lu_wbsiginfo		| k_siginfo_t built from the DENIED BYTE's own address
 	movel	%d0,%d4			| d4 = si_signo, the same contract as the F4 path above
 Lu_done:
@@ -283,6 +306,11 @@ Lk_done:
 | every drop but prints only the first wbf_drop_max, so a fault flood cannot bury the console.
 	.globl	wbf_dropwarn
 wbf_dropwarn:
+.ifdef WBKEEP
+	tstl	wbk_inreplay		| a fault nested in a user replay (usrxmemflt's own, or
+	bnew	Lwd_kept		| wbkeep040.s's of a kept record): the outer one keeps the
+					| store, or reports it if it cannot
+.endif
 	movel	%d2,%sp@-		| d2 = ctx, held across the cmn_err (which preserves it)
 	movel	%d0,%d2
 	moveal	%fp@(8),%a0		| the wrapper's trap frame
@@ -309,6 +337,9 @@ wbf_dropwarn:
 	lea	%sp@(24),%sp
 Lwd_ret:
 	movel	%sp@+,%d2
+.ifdef WBKEEP
+Lwd_kept:
+.endif
 	rts
 
 | wb060_sswsynth (060-B, 2026-07-10; XPAGE unit 2026-07-28): a2 = trap frame.
@@ -658,6 +689,9 @@ Lwx_ret:
 | user function code, 2 = a supervisor one.  The abort does not come back through here: Lwb_fail
 | is entered by k_trap's rte with the trap-time stack, so it drops Lwb_do's return address and
 | returns straight to the wrapper.  That is what "stop the replay" means mechanically.
+.ifdef WBKEEP
+	.globl	wb040_replay		| wbkeep040.s replays a kept record through it
+.endif
 wb040_replay:
 	moveq	&0,%d0
 	moveb	%a2@(70),%d0		| format/vector high byte
@@ -920,13 +954,11 @@ Lwb_ndone:
 |
 | The propagation is unconditional since 2026-11-02 (the wbf_prop_on A/B word and its swallow arm are gone).
 |
-| KNOWN LIMIT, stated rather than hidden.  Contract item 8 also asks that pending write-back state
-| be RETAINED across a signal whose handler repairs the mapping and returns.  This does not do
-| that: the denied write-back and any after it are dropped once the fatal outcome is committed.
-| For a process that dies -- the case ISSUE-42 is about -- that is exactly item 5.  For a handler
-| that repairs and returns, those stores stay lost, as they were before this change, except that
-| now the process was told.  Retaining them needs somewhere to keep per-process WB state, which is
-| a bigger unit than this one and has no measured victim yet.
+| Contract item 8 also asks that pending write-back state be RETAINED across a signal whose handler
+| repairs the mapping and returns.  Since 2026-11-03 wbkeep040.s does that (WBKEEP=1, the default):
+| usrxmemflt keeps the denied write-back and those after it, or every user write-back of an
+| unresolved fault, and setcontext's restore of that context completes them.  The victim that made
+| it necessary: sh grows its heap from a SIGSEGV handler, and its free-list stores vanished.
 Lwb_fail:
 | --- Q3: is this landing OURS?  Checked before a single byte of state is touched. ---
 	movel	%sp,%d0
@@ -956,6 +988,8 @@ Lwbf_nonat:
 					|     record the slot's WBxA for the same reason.
 					|   mode 3 (byte fallback) -- exact, because the faulted
 					|     access really was one byte (the ISSUE-7 shape).
+.ifndef WBQUIET			| (WBKEEP=1 without KDBG: a denial is the handler's cue to grow
+					| further, re-signalled by wbkeep040.s, and not printed)
 	movel	Lwbf_n,%d0
 	cmpil	&8,%d0
 	bccw	Lwbf_q			| print cap -- it caps the MESSAGE, not the propagation
@@ -967,6 +1001,7 @@ Lwbf_nonat:
 	pea	2
 	jsr	cmn_err
 	lea	%sp@(16),%sp
+.endif
 Lwbf_q:
 | --- classify the TRANSFER MODIFIER.  The follow-up audit corrected this: WBS & 7 is a TM, not
 |     universally a logical function code.  TM 1/2 are user data/code, 5/6 supervisor data/code,
@@ -1027,18 +1062,22 @@ Lwbf_alien:
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
 	.data
 	.even
+.ifndef WBQUIET
 Lwbf_msg:
 	.asciz	"DBG wb040 replay UNRESOLVED addr=%x wbs=%x"
 	.balign	4
+.endif
 Lwbs_msg:
 	.asciz	"wb040: KERNEL write-back WB%d unresolvable, wbs=%x addr=%x nofault=%x -- kernel state would be lost silently"
 	.balign	4
 Lwba_msg:
 	.asciz	"wb040: u_nofault landing pad entered with a FOREIGN stack sp=%x (armed replay sp=%x)"
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
+.ifndef WBQUIET
 Lwbf_n:
 	.long	0
 	.balign 4
+.endif
 | --- ISSUE-42 (2026-08-12): write-back denial propagation.  Read wbf_magic FIRST; if it is not
 |     "WBF!" every address below is stale and every value here means nothing.
 |     On a 68060 all of these must stay 0: the replay runs only on a format-7 frame, which only a

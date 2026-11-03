@@ -265,9 +265,10 @@ and reach every image on both CPUs: `sync()` walking a NULL vfs switch on the pa
 (ISSUE-100), a page-frame database nothing zeroes (ISSUE-102), a one-frame panic backtrace
 (ISSUE-104), and `xpanic`'s uninitialised sync decision (ISSUE-105). Only ISSUE-100 has been
 confirmed on hardware, on the Z3660. The ISSUE-10 cure
-(`src/hgfault040.s`, `hg_on` = 1) has also been in the base since the merge of 2026-08-25, proven
-in the emulator only — §5. So have the ISSUE-10 audit instruments (`src/i10rev040.s`): dormant,
-but present.
+(`src/hgfault040.s`) was in the base from the merge of 2026-08-25 to cut -60; since -61 the kept
+write-backs (`src/wbkeep040.s`, ISSUE-114) do its job without growing the break behind the program,
+proven in the emulator only — §5. The ISSUE-10 audit instruments (`src/i10rev040.s`) stay buildable
+with `I10=1`.
 
 **Known panics from ordinary use.** Two are recorded and not fixed: `pollwakeup` calling through a
 freed `polldat` at X session shutdown (ISSUE-63, 68060 hardware, two sightings), and closing
@@ -374,6 +375,7 @@ survives as history but its conclusion has been replaced.
 | 111 | `swap -a` of an area whose anon array has no free kvseg run sleeps for ever on `Km_OsizeWanted` | FIXED, **not yet exercised on hardware** | EMU | stock defect, the 68030 line's guard at 4 KiB slots (`src/swapguard.c`); `SWAP_GUARD=0` restores the previous build byte for byte |
 | 112 | ITT0/DTT0 matched user accesses: a user process read, wrote and executed physical memory below 1 GiB | FIXED, **not yet exercised on hardware** | EMU | `4c6ea89`: S=01 supervisor-only, as DTT1; ships only with ISSUE-110 |
 | 113 | every idle tick was booked as system time to the last process (fsflush about 50 % CPU, sysinfo idle 0) | FIXED, **not yet exercised on hardware** | EMU | `5a0d8cd`: the idle override defines its own `waitloc`; accounting only |
+| 114 | on a 68040 a store repaired by the program's SIGSEGV handler was lost, and the ISSUE-10 break grow took back the page it grew: `sh` "no space", `ifup -n` | FIXED, **not yet exercised on hardware** | EMU | `src/wbkeep040.s` keeps the write-backs until `setcontext` restores the context; `hgfault040.s` out; `WBKEEP=0` is -60's base |
 
 **ISSUE-107's emergency rollback is two variables.** `KZERO=0` builds `relink-040.sh` without `src/kzero_nofault.s`, so `kzero` is the stock `bzero` alias again. On the -61 recipe that reproduces the record `516faa6b` byte for byte. `tools/status-facts.sh` fails that kernel's `kzero` binding, and so the build's status gate refuses it, unless `STATUS_ALLOW_NO_KZERO=1` is also exported; the row then reads "rolled back". Nothing else accepts the missing override.
 
@@ -402,9 +404,9 @@ survives as history but its conclusion has been replaced.
 1. **ISSUE-10 and ISSUE-9** — two intermittent 68040 faults, captured but not attributed. Neither
    blocks normal use; both block a confident release claim. ISSUE-10 additionally carries a
    methodological trap: it is **intermittent**, so a single-boot bisect proves nothing, and July's
-   "retired" verdict turned out to be a debug-instrument artifact. A cure for ISSUE-10 from the
-   second line has been in the base since 2026-08-25; it is proven in the emulator, and a release
-   claim needs it proven on silicon.
+   "retired" verdict turned out to be a debug-instrument artifact. Since -61 ISSUE-10's store is
+   completed by the kept write-backs (ISSUE-114) instead of the 2026-08-25 break grow; that is proven
+   in the emulator, and a release claim needs it proven on silicon.
 2. **Coverage, not correctness** — paths that have never executed anywhere:
    * the **WB1** write-back slot and its ISSUE-11 bus-lane realignment (the emulators never set
      WB1S valid; the A3640 run reached WB3 only);

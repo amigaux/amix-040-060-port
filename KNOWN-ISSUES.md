@@ -11110,3 +11110,40 @@ fsflush, which wakes every second. The 68030 line uses the stock idle and is not
 10 idle minutes; sysinfo idle 4260 → 22265 → 40271 (+18 005 per 5 minutes), kernel 239 → 275. The
 build's `[OK] waitloc @0x000daccc follows the strong idle's stop (idle @0x000dacc8)`; .text, .data and
 the abi are -56's (unix 2424876 bytes either way).
+
+---
+
+## ✅ ISSUE-114 (2026-11-03, a defect of this port: MEASURED in emulation on cut `68060-261102-60` on a 68040; FIXED by `src/wbkeep040.s` with `src/hgfault040.s` out of the default build, verified in emulation on the test builds of `68060-261103-61`; NOT YET ON HARDWARE): a store that faults and is repaired by the program's SIGSEGV handler is lost on a 68040, and the ISSUE-10 break grow takes back what it grew
+
+> **Ledger: FIXED (emulation).** A 68040 keeps the stores of an unresolved user fault (the format-7
+> frame's WB1-WB3) and completes them when `setcontext` restores that context, as the 68030 and the
+> 68060 re-run the store.  `src/hgfault040.s` is linked only with `WBKEEP=0`.  The 68060 is unchanged.
+
+**Defect, first half.** On an access error the 68040 does not re-run the faulted store: its address,
+data and status wait in the frame's write-back slots, and `src/wb040.s` completes them after `as_fault`
+resolved the page.  When the fault is not resolved the process gets SIGSEGV and the frame is discarded,
+stores and all (the "known limit" `src/wb040.s` recorded for contract item 8).  A handler that repairs
+the mapping and returns resumes after a store that never happened.  The 68030 and 68060 re-run the
+instruction, so there the store lands on the retry.  Stock `sh` grows its heap from such a handler.
+
+**Defect, second half.** `src/hgfault040.s` (ISSUE-10's cure, 2026-08-21) completed one such store
+itself: a write one page above the break grew the break by a page inside the kernel, without a signal.
+The program's own break did not move, so its next `brk`, from the break it knew, shrank the segment and
+took the page back with the store in it.  `sh`'s arena sentinel lives there: a NULL free-list link,
+`User BUS ERROR at 3, PC:800023EE` in a flood and `sh: no space` -- `ifup -n` in the installer, any
+large script.
+
+**Measured on -60 (emulation, A4000 with a plain 68040, root on the A4000 IDE):** `test-tools/wbkeep.c`
+loses every repaired store (byte, word, long, a misaligned long and word across the page); `sh -c`
+building a 10 KB string ends `no space`; `wbf_dropped_n` counts the drops; `ifup -a` at boot floods the
+console with the bus errors.  With the write-backs kept but the break grow still linked, `wbkeep` passes
+except "past the break, then sbrk", `sh` still fails, and `hg_grow_n` rises while it does.
+
+**Fix.** `src/wbkeep040.s` (`WBKEEP=1`, the default): `usrxmemflt` keeps the user write-backs of an
+unresolved fault in a table of eight records keyed by the address space, the USP and the PC; the
+wrapped `restorecontext` replays them through `wb040_replay` when it has restored exactly that context;
+a replay denied again raises SIGSEGV and keeps the rest (the handler grows further, as on the 68030); a
+`longjmp` out leaves the record, and the wrapped `as_free` drops it with the address space.  With it,
+`hgfault040.s` is not linked (`usrxmemflt_orig` is the stock body again).  `WBKEEP=0` rebuilds -60's
+base byte for byte.  Counters: `wbk_live`, `wbk_saved_n`, `wbk_replayed_n`, `wbk_refault_n`,
+`wbk_full_n`, `wbk_freed_n`.
