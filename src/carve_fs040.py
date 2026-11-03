@@ -21,7 +21,8 @@
 #      ranges zeroed;
 #   4. every symbol defined in the ranges leaves the symbol table, locals and markers included,
 #      so nothing can bind to them and no name points into the zeros; so do the COMMONs only the
-#      ranges use (ihead, inode, hinode, ...: the modules allocate their own).
+#      ranges use (ihead, hinode, ...: the modules allocate their own), except a core-tier one, which
+#      stays the kernel's and the module binds to (inode, ufs_inode, ...: the kmem readers' names).
 #
 # Gates, each refusing:
 #   A. no relocation outside the ranges reaches into them, before the edit (except the vfssw and
@@ -328,8 +329,8 @@ def main():
             die("usage: --check [--core-list LIST] OUT")
         e = Elf(a[1])
         e.path = a[1]
-        check(e, core, {s["name"] for s in e.syms if s["shndx"] == SHN_COMMON} & {
-            "ihead", "hinode", "inode", "ufs_inode", "updlock", "dquot", "dqhead"})
+        check(e, core, ({s["name"] for s in e.syms if s["shndx"] == SHN_COMMON} & {
+            "ihead", "hinode", "inode", "ufs_inode", "updlock", "dquot", "dqhead"}) - set(core or ()))
         g = e.glob()
         # after relink-040-dlm.sh the stock count is __amix_nfstype (nfstype is the core's live count)
         nn = "__amix_nfstype" if "__amix_nfstype" in g else "nfstype"
@@ -375,6 +376,10 @@ def main():
             if B.syms[si]["shndx"] == SHN_COMMON:
                 users.setdefault(si, set()).add(inside(rng, sec, off))
     private = {si for si, w in users.items() if w == {True}}
+    if core is not None:
+        # a core-tier COMMON stays the kernel's even when only the ranges use it: the modules' COMMON binds to the
+        # kernel's copy (dlm_ld), so kernel-memory readers find it in the namelist (inode, ufs_inode, ...)
+        private = {si for si in private if B.syms[si]["name"] not in set(core)}
     pnames = {B.syms[si]["name"] for si in private}
     if core is not None:
         want = ocommons - set(core)
