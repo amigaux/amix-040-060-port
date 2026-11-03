@@ -11147,3 +11147,9 @@ a replay denied again raises SIGSEGV and keeps the rest (the handler grows furth
 `hgfault040.s` is not linked (`usrxmemflt_orig` is the stock body again).  `WBKEEP=0` rebuilds -60's
 base byte for byte.  Counters: `wbk_live`, `wbk_saved_n`, `wbk_replayed_n`, `wbk_refault_n`,
 `wbk_full_n`, `wbk_freed_n`.
+
+**Verified on `68060-261103-61` (`a483e89`; emulation, the same 68040 row, and the 68LC060/Z3660 row):**
+`wbkeep -j 20` passes on both; ISSUE-10's parse-time repro (`sh -n` on the installer's `install.sh` and `setup.sh`,
+cut before their first top-level loop) rc 0; `ifup -n` rc 0; the 10 KB `sh` string three times. On the 68040 the
+stores of `sh`'s grow loops are kept and replayed (`wbk_saved_n` 0x12f, `wbk_replayed_n` 0x11b, `wbk_live` 0,
+`wbf_dropped_n` 0); on the 68060 every counter stays 0.  See `cuts/68060-261103-61/README.md`.
