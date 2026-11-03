@@ -11153,3 +11153,29 @@ base byte for byte.  Counters: `wbk_live`, `wbk_saved_n`, `wbk_replayed_n`, `wbk
 cut before their first top-level loop) rc 0; `ifup -n` rc 0; the 10 KB `sh` string three times. On the 68040 the
 stores of `sh`'s grow loops are kept and replayed (`wbk_saved_n` 0x12f, `wbk_replayed_n` 0x11b, `wbk_live` 0,
 `wbf_dropped_n` 0); on the 68060 every counter stays 0.  See `cuts/68060-261103-61/README.md`.
+
+---
+
+## ✅ ISSUE-115 (2026-11-03, a defect of the module kernels: MEASURED in emulation on `68060-261102-60` and the k30 line's carved -70; FIXED for sar/timex by `68060-261103-62` with amix `46ef7d1`; crash still OPEN on k46): stock kernel-memory readers lost the names the fs carve took out of the kernel
+
+> **Ledger: sar, timex and sadc FIXED (emulation); crash OPEN on k46.**  Five COMMONs are core tier again and stay
+> in the kernel; with no s5 the inode table is an empty read-only window; kbootset -37's namelist carries
+> `crash_sync` and the modules' globals.  crash then stops at its own 68030 address check.
+
+**Defect.** The carve of ufs and s5 out of the kernel also removed the COMMONs only they use.  `sadc` (and so `sar`,
+`timex -s`, `sa1`/`sa2`) reads s5's inode-table pointer `inode` by name; with it gone, nlist answered 0 and sadc
+read 120 000 bytes at that pointer: `sadc cannot copy inode table: No such device or address`.  `crash` failed on
+every kbootset namelist, carved or not, because the namelist carried no section contents for `crash_sync`.  Of the
+34 binaries that open `/dev/kmem`, `/dev/mem` or the namelist, nothing else names a carved symbol (the audit, both
+lines).
+
+**Fix.**  amix `46ef7d1`: `inode`, `ifreelist`, `ufs_inode`, `inodeNINODE`, `ifreeh` in both lines' core tier; the
+module core's empty window for `inode` when s5 is absent (always on k46); kbootset -37's namelist.  This repository
+(`84b0623`): the carve keeps a core-tier COMMON even when only the fs ranges use it.
+
+**Verified on -62** (A4000 68040 and 68LC060/Z3660, emulation): `sar -v` `0/600`, `sar -u`, `timex -s`, `sadc` rc 0;
+`inode` in the kvseg band reading zeros, `ufs_inode` set by the module.
+
+**Still open on k46: crash.**  With the namelist fixed it prints `could not find timestamps` (a warning) and then
+`<addr> is an invalid address` for kvseg addresses: it validates them by walking the stock 68030 segment tables
+through `kas`'s hat, which the k46 kernel does not keep for region 1.  The same family as `adb -k`.  Not attempted.
