@@ -29,7 +29,9 @@
  * slice pinning several MiB on a 16 MiB machine, and the boot's stepping down (S90swap) relies on the refusal.  It is
  * refused too when it would leave no run of 1 MiB (SWG_KEEP clicks) in kvseg: the other KM_SLEEP allocators over 4 KiB,
  * a large process's anon map first, sleep uninterruptibly when no run is left, and a swap area must not cause that.
- * One area can therefore be up to about 490 MiB at 16 MiB of RAM and about 750 MiB at 128 MiB (ISSUE-111).
+ * One area can therefore be up to about 490 MiB at 16 MiB of RAM and about 750 MiB at 128 MiB (ISSUE-111).  Both
+ * limits apply only when an area exists already: the first is swapconf's at boot, which panics on any error, and on a
+ * 4 MiB arena at 128 MiB it leaves under SWG_KEEP; it gets what kvseg has, as before this file.
  */
 #include <sys/types.h>
 #include <sys/param.h>
@@ -43,6 +45,7 @@
 #define	SWG_KEEP	256			/* clicks: the run kvseg must still have after the array */
 
 extern int sleep(), maxmem;
+extern char *swapinfo;			/* the area list: empty only before swapconf's first area */
 extern long sptmap[];			/* struct map: a header, then (size, start) pairs up to a size of 0 */
 extern void wakeup();
 
@@ -94,8 +97,8 @@ swapadd_guarded(vp, lowblk, nblks, name)
 	end = ((lowblk + nblks) << 9) & ~(SWG_PAGE - 1);
 	size = end > start ? ((end - start) >> SWG_PAGESHIFT) * SWG_ANON : 0;
 	if (size != 0) {
-		swg_block = (u_int)size > (u_int)maxmem << (SWG_PAGESHIFT - 3) ? 0 : (caddr_t)kmem_zalloc(size, KM_NOSLEEP);
-		if (swg_block != 0 && size > SWG_PAGE && swg_largest() < SWG_KEEP) {	/* to a page, the pool serves it */
+		swg_block = swapinfo != 0 && (u_int)size > (u_int)maxmem << (SWG_PAGESHIFT - 3) ? 0 : (caddr_t)kmem_zalloc(size, KM_NOSLEEP);
+		if (swg_block != 0 && swapinfo != 0 && size > SWG_PAGE && swg_largest() < SWG_KEEP) {	/* to a page, the pool serves it */
 			kmem_free(swg_block, size);
 			swg_block = 0;
 		}
