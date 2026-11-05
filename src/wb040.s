@@ -772,7 +772,8 @@ Lw1_byt:
 	beqw	Lw1_ok
 	lsrl	%d0,%d2
 Lw1_ok:
-	movel	&1,wbf_slot		| which write-back, for the fail-fast diagnostics
+	moveal	&0x57424f01,%a0		| which write-back, for the fail-fast diagnostics
+	movel	&1,wbf_slot		| diagnostics: Lwb_fail sets it again from a0, the one that counts
 	bsrw	Lwb_do
 Lwr_2:
 	clrl	%d3
@@ -786,7 +787,8 @@ Lwr_2:
 	beqw	Lwr_3
 	moveal	%a2@(96),%a3		| WB2A
 	movel	%a2@(100),%d2		| WB2D
-	movel	&2,wbf_slot
+	moveal	&0x57424f02,%a0
+	movel	&2,wbf_slot		| diagnostics: Lwb_fail sets it again from a0, the one that counts
 	bsrw	Lwb_do
 Lwr_3:
 	clrl	%d3
@@ -795,7 +797,8 @@ Lwr_3:
 	beqw	Lwr_ret
 	moveal	%a2@(88),%a3		| WB3A
 	movel	%a2@(92),%d2		| WB3D
-	movel	&3,wbf_slot
+	moveal	&0x57424f03,%a0
+	movel	&3,wbf_slot		| diagnostics: Lwb_fail sets it again from a0, the one that counts
 	bsrw	Lwb_do
 Lwr_ret:
 	clrl	%d0			| ISSUE-42: reached only when nothing was denied.  The
@@ -849,13 +852,12 @@ Lwb_do:
 | foreign d2.  The old code would then write that d2 into u_nofault and rts through someone
 | else's stack; this unit's abort would additionally drop a long from it.  Fail-open corruption
 | either way, and the audit's finding is that the static code never established otherwise.
-| So: record WHO armed it and at WHICH stack, and let the pad refuse anything else.  a0/a1 carry
-| the OUTER owner across the loop -- they are trap-time registers at the pad, which is how both
-| the normal disarm and the abort restore a nested arm's parent.
-	moveal	wbf_own_cookie,%a0
-	moveal	wbf_own_sp,%a1
-	movel	&0x57424f21,wbf_own_cookie	| "WBO!"
-	movel	%sp,wbf_own_sp		| set BEFORE arming: never armed without an owner
+| So: record WHO armed it and at WHICH stack, and let the pad refuse anything else.  a0 and a1 hold
+| them across the loop, and they are trap-time registers at the pad.  Registers, not globals: a nested
+| fault can sleep with this replay armed, and another process's replay then runs.  With globals (to -63's
+| trials) two replays asleep that woke out of order left the later one a wrong owner, and its denial
+| panicked as a foreign landing where a signal was right (ISSUE-116).
+	moveal	%sp,%a1			| a0 ("WBO" + the slot) was set by the caller
 	movel	&Lwb_fail,u+0x374	| arm: unresolved nested fault lands at Lwb_fail
 | ===========================================================================
 | ISSUE-65 (2026-09-07): replay a normal write-back with ONE MOVES of its own
@@ -948,8 +950,6 @@ Lwb_loop:
 	bnew	Lwb_loop
 Lwb_ndone:
 	movel	%d2,u+0x374		| disarm: restore the outer u_nofault value
-	movel	%a0,wbf_own_cookie	| ...and the landing pad's outer owner, so a nested
-	movel	%a1,wbf_own_sp		| replay hands the parent's arm back intact
 	rts
 | Lwb_fail: u_nofault landing pad -- k_trap could NOT resolve a fault taken by the moves
 | loop above (as_fault failed for the WB target: e.g. a WB aimed at a range a racing
@@ -995,13 +995,16 @@ Lwb_ndone:
 Lwb_fail:
 | --- Q3: is this landing OURS?  Checked before a single byte of state is touched. ---
 	movel	%sp,%d0
-	cmpil	&0x57424f21,wbf_own_cookie
+	cmpl	%a1,%d0
 	bnew	Lwbf_alien
-	cmpl	wbf_own_sp,%d0
+	movel	%a0,%d1
+	clrb	%d1
+	cmpil	&0x57424f00,%d1
 	bnew	Lwbf_alien
 	movel	%d2,u+0x374		| restore the outer u_nofault value FIRST
-	movel	%a0,wbf_own_cookie	| and the outer owner, BEFORE anything below can fault
-	movel	%a1,wbf_own_sp		| (audit item 5: clear ownership before logging)
+	movel	%a0,%d1
+	andil	&3,%d1
+	movel	%d1,wbf_slot		| the denied slot: read before anything here can sleep
 	addql	&1,wbf_fail_n
 	cmpil	&3,wbn_mode
 	beqs	Lwbf_nonat
@@ -1084,7 +1087,7 @@ Lwbf_stop:
 Lwbf_alien:
 	addql	&1,wbf_alien_n
 	movel	%d0,wbf_alien_sp	| the stack we were handed
-	movel	wbf_own_sp,%sp@-	| the stack the armed replay is actually on
+	movel	%a1,%sp@-		| what a1, the armed replay's stack if it is one, holds
 	movel	%d0,%sp@-
 	pea	Lwba_msg
 	pea	3			| CE_PANIC
@@ -1141,12 +1144,6 @@ wbf_sup_fatal:
 	.long	1			| 1 = a denied KERNEL write-back panics with diagnostics
 					| 0 = the old silent skip.  The audit rejected returning
 					| success there; this is the escape hatch, not the policy.
-	.globl	wbf_own_cookie
-wbf_own_cookie:
-	.long	0			| "WBO!" while a replay owns the u_nofault landing pad
-	.globl	wbf_own_sp
-wbf_own_sp:
-	.long	0			| the stack that replay is on -- the pad's identity check
 	.globl	wbf_alien_n
 wbf_alien_n:
 	.long	0			| landings on the pad that did NOT belong to a replay.
