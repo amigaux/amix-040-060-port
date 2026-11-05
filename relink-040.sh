@@ -592,6 +592,7 @@ m68k-linux-gnu-objcopy \
 	--globalize-symbol pt_waiting \
 	--globalize-symbol usrxmemflt \
 	--globalize-symbol segvn_faultpage \
+	--globalize-symbol trapsig \
 	--globalize-symbol krnxmemflt \
 	--globalize-symbol page_cachelist \
 	--globalize-symbol page_cachelist_size \
