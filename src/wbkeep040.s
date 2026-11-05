@@ -26,9 +26,13 @@
 |
 | The table holds WBK_N records of WBK_SZ bytes: as, usp, pc, then the frame's bytes +76..+111 (SSW,
 | WB3S, WB2S, WB1S, FA, WB3A, WB3D, WB2A, WB2D, WB1A, WB1D) as the CPU stacked them, with the valid
-| bit cleared in every slot that is not to be replayed.  Only write-backs with a user function code
-| (1, 2) are kept.  A full table takes the faulting address space's own record whose signal has gone out, when
-| the new fault has a store to keep; else the new record is dropped, as before this file, and counted.
+| bit cleared in every slot that is not to be replayed, then whether the signal went out and the real uid.
+| Only write-backs with a user function code (1, 2) are kept.  The table is shared, and a record can stay
+| until its process exits (a handler that leaves by longjmp, a signal ignored), so a real uid holds at most
+| WBK_UIDMAX: one user can fill only that much and cannot make another user's stores drop.  A uid at its
+| limit, or a full table, takes the faulting address space's own record whose signal has gone out, when the
+| new fault has a store to keep; never another process's, whose handler may still be running or whose
+| replay may be asleep with it.  Else the new store is dropped, as before this file, and counted.
 |
 | Frame layout (getuvpcb, prsetregs): usp at +0, d0-a6 at +4..+60, SR at +64, PC at +66, the
 | format/vector word at +70; WB3S +78, WB2S +80, WB1S +82 (wb040.s).
@@ -37,8 +41,9 @@
 |
 | Assemble: m68k-cbm-sysv4-gcc -m68040 -c wbkeep040.s -o build/wbkeep040.o
 
-	.set	WBK_N, 8
-	.set	WBK_SZ, 52
+	.set	WBK_N, 32
+	.set	WBK_SZ, 56
+	.set	WBK_UIDMAX, 4
 	.set	E_AS, 0
 	.set	E_USP, 4
 	.set	E_PC, 8
@@ -47,11 +52,14 @@
 	.set	E_WB2S, 16		| frame +80
 	.set	E_WB1S, 18		| frame +82
 	.set	E_SENT, 48		| the fault's signal has gone out
+	.set	E_UID, 52		| the faulting process's real uid
 	.set	P_AS, 124		| proc->p_as
+	.set	P_CRED, 16		| proc->p_cred (getuid)
+	.set	CR_RUID, 12		| cred->cr_ruid (getuid)
 	.set	P_PCB, 252		| restorecontext: prsetregs(curproc's +252, gregs); getuvpcb takes it
 
 	.data
-	.globl	wbk_tab, wbk_live, wbk_saved_n, wbk_replayed_n, wbk_refault_n, wbk_full_n, wbk_freed_n, wbk_stale_n, wbk_evict_n
+	.globl	wbk_tab, wbk_live, wbk_saved_n, wbk_replayed_n, wbk_refault_n, wbk_full_n, wbk_freed_n, wbk_stale_n, wbk_evict_n, wbk_cap_n
 	.balign	4
 wbk_tab:	.space	WBK_N*WBK_SZ
 wbk_live:	.long	0		| records in the table now
@@ -61,7 +69,8 @@ wbk_refault_n:	.long	0		| replays denied again (SIGSEGV, record kept)
 wbk_full_n:	.long	0		| records dropped, the table full
 wbk_freed_n:	.long	0		| records dropped with their address space
 wbk_stale_n:	.long	0		| records dropped: a second signal at the kept context
-wbk_evict_n:	.long	0		| records taken for the same address space's new store, the table full
+wbk_evict_n:	.long	0		| records taken for the same address space's new store, the table full or the uid at its limit
+wbk_cap_n:	.long	0		| records dropped, the uid at its limit
 	.globl	wbk_inreplay
 wbk_inreplay:	.long	0		| user replays in progress (usrxmemflt's and restorecontext's):
 					| wb040.s's wbf_dropwarn stays quiet for a fault nested in one
@@ -93,7 +102,7 @@ Lwk_keep:
 	.globl	wbk_save
 wbk_save:
 	linkw	%fp,&0
-	moveml	%d2-%d3/%a2-%a3,%sp@-
+	moveml	%d2-%d5/%a2-%a3,%sp@-
 	moveal	%fp@(8),%a2		| the trap frame
 	moveq	&0,%d0
 	moveb	%a2@(70),%d0
@@ -105,8 +114,11 @@ wbk_save:
 	bnew	Ls_ret			| taken in supervisor mode: no user context to resume
 	moveal	u+0x730,%a0
 	movel	%a0@(P_AS),%d3		| d3 = curproc->p_as
+	moveal	%a0@(P_CRED),%a0
+	movel	%a0@(CR_RUID),%d4	| d4 = its real uid
 	lea	wbk_tab,%a1
 	subal	%a3,%a3			| a3 = the first free record
+	moveq	&0,%d5			| d5 = live records of this uid
 	moveq	&WBK_N-1,%d2
 Ls_find:
 	movel	%a1@(E_AS),%d0
@@ -116,6 +128,10 @@ Ls_find:
 	moveal	%a1,%a3
 	bras	Ls_next
 Ls_used:
+	cmpl	%a1@(E_UID),%d4
+	bnes	Ls_ouid
+	addql	&1,%d5
+Ls_ouid:
 	cmpl	%d3,%d0
 	bnes	Ls_next
 	movel	%a2@,%d0
@@ -123,16 +139,19 @@ Ls_used:
 	bnes	Ls_next
 	movel	%a2@(66),%d0
 	cmpl	%a1@(E_PC),%d0
-	beqs	Ls_same			| the same context faulted again: refresh its record
+	beqw	Ls_same			| the same context faulted again: refresh its record
 Ls_next:
 	lea	%a1@(WBK_SZ),%a1
 	dbra	%d2,Ls_find
+	moveq	&WBK_UIDMAX,%d0
+	cmpl	%d0,%d5
+	bges	Ls_full			| this uid at its limit
 	tstl	%a3
-	bnes	Ls_new
-| The table is full.  A record whose signal has gone out may be one a handler left by longjmp, which nothing
-| else would ever free, so a process could fill the table with its own.  When this fault has a store to keep,
-| take this address space's own such record; none, and the new store is dropped, counted.  Never another
-| process's: its handler may still be running, or its restorecontext asleep in the replay with the record.
+	bnew	Ls_new
+| The table is full, or this uid at its limit.  When this fault has a store to keep, take this address space's
+| own record whose signal has gone out (a handler left it by longjmp, or this is a fault inside that handler);
+| none, and the new store is dropped, counted.
+Ls_full:
 	movel	%fp@(12),%d1		| first slot to keep
 	lea	%a2@(82),%a0		| WB1S, then WB2S and WB3S below it
 	moveq	&1,%d0
@@ -160,10 +179,18 @@ Ls_ev:
 	tstl	%a1@(E_SENT)
 	beqs	Ls_evn
 	cmpl	%a1@(E_AS),%d3
+	bnes	Ls_evn
+	cmpl	%a1@(E_UID),%d4
 	beqs	Ls_evt
 Ls_evn:
 	lea	%a1@(WBK_SZ),%a1
 	dbra	%d2,Ls_ev
+	moveq	&WBK_UIDMAX,%d0
+	cmpl	%d0,%d5
+	blts	Ls_tfull
+	addql	&1,wbk_cap_n
+	braw	Ls_ret
+Ls_tfull:
 	addql	&1,wbk_full_n
 	braw	Ls_ret
 Ls_evt:
@@ -197,6 +224,7 @@ Ls_copy:
 	movel	%a2@,%a3@(E_USP)
 	movel	%a2@(66),%a3@(E_PC)
 	clrl	%a3@(E_SENT)
+	movel	%d4,%a3@(E_UID)
 	movel	%d3,%a3@(E_AS)		| last: the record is live from here
 	addql	&1,wbk_live
 	addql	&1,wbk_saved_n
@@ -207,7 +235,7 @@ Ls_drop:
 Ls_ret:
 	moveq	&0,%d0			| nothing kept: the caller reports the drop
 Ls_out:
-	moveml	%sp@+,%d2-%d3/%a2-%a3
+	moveml	%sp@+,%d2-%d5/%a2-%a3
 	unlk	%fp
 	rts
 
