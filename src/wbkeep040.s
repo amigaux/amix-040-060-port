@@ -27,7 +27,8 @@
 | The table holds WBK_N records of WBK_SZ bytes: as, usp, pc, then the frame's bytes +76..+111 (SSW,
 | WB3S, WB2S, WB1S, FA, WB3A, WB3D, WB2A, WB2D, WB1A, WB1D) as the CPU stacked them, with the valid
 | bit cleared in every slot that is not to be replayed.  Only write-backs with a user function code
-| (1, 2) are kept.  A full table drops the new record, as before this file, and counts it.
+| (1, 2) are kept.  A full table takes the faulting address space's own record whose signal has gone out, when
+| the new fault has a store to keep; else the new record is dropped, as before this file, and counted.
 |
 | Frame layout (getuvpcb, prsetregs): usp at +0, d0-a6 at +4..+60, SR at +64, PC at +66, the
 | format/vector word at +70; WB3S +78, WB2S +80, WB1S +82 (wb040.s).
@@ -60,7 +61,7 @@ wbk_refault_n:	.long	0		| replays denied again (SIGSEGV, record kept)
 wbk_full_n:	.long	0		| records dropped, the table full
 wbk_freed_n:	.long	0		| records dropped with their address space
 wbk_stale_n:	.long	0		| records dropped: a second signal at the kept context
-wbk_evict_n:	.long	0		| records taken for another store, the table full
+wbk_evict_n:	.long	0		| records taken for the same address space's new store, the table full
 	.globl	wbk_inreplay
 wbk_inreplay:	.long	0		| user replays in progress (usrxmemflt's and restorecontext's):
 					| wb040.s's wbf_dropwarn stays quiet for a fault nested in one
@@ -129,8 +130,30 @@ Ls_next:
 	tstl	%a3
 	bnes	Ls_new
 | The table is full.  A record whose signal has gone out may be one a handler left by longjmp, which nothing
-| else would ever free, so one process could fill the table and other processes' stores would be lost.  Take this
-| address space's own first, else the first there is; none, and the new store is dropped, counted.
+| else would ever free, so a process could fill the table with its own.  When this fault has a store to keep,
+| take this address space's own such record; none, and the new store is dropped, counted.  Never another
+| process's: its handler may still be running, or its restorecontext asleep in the replay with the record.
+	movel	%fp@(12),%d1		| first slot to keep
+	lea	%a2@(82),%a0		| WB1S, then WB2S and WB3S below it
+	moveq	&1,%d0
+Ls_any:
+	cmpl	%d1,%d0
+	blts	Ls_anyn
+	movew	%a0@,%d2
+	btst	&7,%d2
+	beqs	Ls_anyn
+	andiw	&7,%d2
+	cmpiw	&1,%d2
+	beqs	Ls_evs
+	cmpiw	&2,%d2
+	beqs	Ls_evs
+Ls_anyn:
+	subql	&2,%a0
+	addql	&1,%d0
+	cmpiw	&3,%d0
+	bles	Ls_any
+	braw	Ls_ret			| nothing to keep: nothing taken, nothing dropped
+Ls_evs:
 	lea	wbk_tab,%a1
 	moveq	&WBK_N-1,%d2
 Ls_ev:
@@ -138,19 +161,13 @@ Ls_ev:
 	beqs	Ls_evn
 	cmpl	%a1@(E_AS),%d3
 	beqs	Ls_evt
-	tstl	%a3
-	bnes	Ls_evn
-	moveal	%a1,%a3
 Ls_evn:
 	lea	%a1@(WBK_SZ),%a1
 	dbra	%d2,Ls_ev
-	tstl	%a3
-	bnes	Ls_evg
 	addql	&1,wbk_full_n
-	bras	Ls_ret
+	braw	Ls_ret
 Ls_evt:
 	moveal	%a1,%a3
-Ls_evg:
 	addql	&1,wbk_evict_n
 	subql	&1,wbk_live		| counted again below
 	bras	Ls_new
