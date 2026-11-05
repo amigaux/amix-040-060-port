@@ -9,7 +9,9 @@
 # BUILD IDS.  On an unstamped base, run it before relink-040-fpe.sh, which stamps the id.  On an
 # already-stamped kernel (an accepted image, or its serial-mirror twin) it stamps a new id itself,
 # so one build id never names two byte-sets.  Then the only differences from the input are the
-# bytes of mi_hiwat and the id.
+# bytes of mi_hiwat and the id.  Only a 68040 id can be restamped: stamp_buildid.py knows that
+# prefix alone, so a 68060-stamped kernel (every k46 module cut) stops there with nothing written.
+# Those get the mark from the chain (relink-040-fpe.sh step 8.10).
 #
 # The work is done on a scratch copy in build/, and OUT is written only when every check has
 # passed (Codex review, 2026-10-30):
