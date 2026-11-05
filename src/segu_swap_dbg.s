@@ -12,7 +12,7 @@
 | If NEITHER fires for the crashing proc before the panic => the zeroing is NOT swap (some
 | direct write in the trap path).  Both swapinub/swapoutub are GLOBAL T -> --weaken + _orig.
 | Args: swapoutub(proc)@fp@(8), swapinub(proc)@fp@(8).  Guards: proc nonzero+even, p_segu in
-| kvsegu [0x48440000,0x48480000).  cmn_err safe (process context).  Cap 16 each.  Preserve
+| kvsegu [kvsegu, kvsegu+0x40000).  cmn_err safe (process context).  Cap 16 each.  Preserve
 | the callees' return (d0/a0) across the swapinub log.
 
 	.text

@@ -9,7 +9,7 @@
 | Catching the garbage VALUE at the first alloc after the stomp names the corruptor.
 |
 | Validity rule: a `next` pointer is EITHER its own bin head OR an even address inside
-| the kernel heap [0x40040000, 0x40440000) (syssegs..kvsegmap).  Everything else = CORRUPT.
+| the kernel heap [syssegs, kvsegmap).  Everything else = CORRUPT.
 | Every deref is guarded by that range+alignment check first, so this instrument can
 | NEVER itself fault.  The only memory the wrapper writes is the Lkv_n latch (cap 4
 | firings; after 4 the scan is skipped entirely).

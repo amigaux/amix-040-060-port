@@ -424,8 +424,8 @@ Lcr2_skip:
 | every user-trap entry; if 0, the zeroing happened BEFORE this trap (during the run / a prior
 | kernel op) -- vs preempt_dbg (later) which already shows 0.  Brackets the trap path.
 | Process context, sp at entry value, balanced (no reg saved -- uses d0/d1/a0 which u_trap_orig
-| recomputes from its args).  Guards: curproc nonzero+even; p_segu in kvsegu [0x48440000,
-| 0x48480000).  cmn_err safe here.  Cap 12 (Lupz_n).
+| recomputes from its args).  Guards: curproc nonzero+even; p_segu in [kvsegu,
+| kvsegu+0x40000).  cmn_err safe here.  Cap 12 (Lupz_n).
 	movel	Lupz_n,%d0
 	cmpil	&12,%d0
 	bccw	Lupz_done

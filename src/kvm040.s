@@ -27,6 +27,8 @@
 | Leaf tables are 64-PTE / 256 B, contiguous.  Single 4-byte 040 pointer descriptor
 | into kptr040.  (vs Model A this changes: v<<11 -> v<<12, click step 128 -> 64,
 | limit 2047 -> 1023, return round 2047/>>11 -> 4095/>>12.)
+| src/patch_arena8m.py then raises the limit below to 2047 in the linked kernel:
+| 8 MB, 32 entries (ISSUE-80).
 | ============================================================================
 	.globl	sysseginit
 sysseginit:

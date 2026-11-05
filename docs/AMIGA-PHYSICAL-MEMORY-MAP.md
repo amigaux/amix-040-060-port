@@ -109,8 +109,8 @@ which is the last interpretation trap in a map like this. Nothing below is a phy
   VA 0x40000000-0x7FFFFFFF   kernel virtual region 1: kvseg / segmap / sptmap [ours] prfastmap040.s:33
   VA 0x40040000              syssegs; kvseg.s_base is initialised to this      [ours] kvm040.s:21
                              (kvseg is a struct seg; syssegs is the VA symbol) [measured] nm: syssegs
-  VA 0x40440000              kvsegmap                                         [measured] nm: kvsegmap
-  VA 0x48440000              kvsegu                                           [measured] nm: kvsegu
+  VA 0x40840000              kvsegmap (0x40440000 with ARENA8M=0)             [measured] nm: kvsegmap
+  VA 0x48840000              kvsegu   (0x48440000 with ARENA8M=0)             [measured] nm: kvsegu
   VA 0x80000000-0xFFFFFFFF   DTT1 = 0x807fa060, identity, SUPERVISOR-ONLY     [ours] pstart040.s
 ```
 

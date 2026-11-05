@@ -10,7 +10,7 @@
 | sched, the static u-area) is set up ONCE at boot by p0init (file-LOCAL 't'
 | 0x48fcc -- --weaken can't rebind its caller, the anon_decref lesson), whose
 | tail loop writes the alias PTEs with a raw 030 walk (va>>17 SDE, va>>11 leaf,
-| 2KB steps) into st_top1 -- INERT on 040.  So VA p0seguser (0x48440000) has no
+| 2KB steps) into st_top1 -- INERT on 040.  So VA p0seguser (kvsegu) has no
 | live mapping: the first /proc query that looks at pid 0 faults, segu_fault
 | finds slot 0 SEGU_LOCKED and returns FC_MAKE_ERR(EINVAL) (= the logged
 | as_fault ret=0x1605), and prgetpsinfo's raw movel %a5@(0x900) panics

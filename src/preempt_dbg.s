@@ -153,7 +153,7 @@ Lpd_m4p:
 	lea	%sp@(16),%sp
 | --- PREEMPT5: u_procp/ctx via the PERMANENT p_segu window + p_ubptbl[0]/[2] ---
 | Every deref guarded: p_segu (d2, from PREEMPT1) must be nonzero, 4-aligned and inside
-| kvsegu [0x48440000,0x48480000); curproc (a3) nonzero+even before (curproc+95)&~15.
+| kvsegu [kvsegu, kvsegu+0x40000); curproc (a3) nonzero+even before (curproc+95)&~15.
 | Guard failure => the affected field(s) print 0 (never fault: we run moments pre-panic).
 Lpd_m5:
 	moveq	&0,%d3			| d3 = wproc (u_procp via p_segu window)
@@ -194,7 +194,7 @@ Lpd_m5p:
 | isolated to ONE proc or does it hit several at once?  Walk practive (same idiom as
 | mainmarks.s's idle proc-table dump: p_next@276, p_pidp@264, pid_id@+4), read u_procp via
 | EACH live proc's OWN p_segu window (same guarded read PREEMPT5 already uses for curproc
-| alone: p_segu@252 must be nonzero, 4-aligned, inside kvsegu [0x48440000,0x48480000)).
+| alone: p_segu@252 must be nonzero, 4-aligned, inside kvsegu [kvsegu, kvsegu+0x40000)).
 | ZERO risk to the hot dispatch path or resume/swtch -- this is purely additive to the
 | ALREADY-firing Lpd_div divergence path (only reached once ISSUE-7 has already triggered);
 | d2-d5/a2-a4 are restored fresh from the entry save at Lpd_fix regardless of what this scan
