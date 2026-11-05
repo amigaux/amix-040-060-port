@@ -71,9 +71,10 @@ def main():
     user = index_of(syms, 'hat_growsdt_user')
     index_of(syms, 'hat_growsdt')
     left = [fn for o, fn, j in callers(b, sh, syms, 'hat_growsdt') if fn == SITE]
-    done = [fn for o, fn, j in callers(b, sh, syms, 'hat_growsdt_user') if j]   # a `jsr abs.l` R_68K_32, as patch mode requires
+    named = callers(b, sh, syms, 'hat_growsdt_user')
+    done = [fn for o, fn, j in named]
     if check:
-        ok = not left and done == [SITE]
+        ok = not left and done == [SITE] and all(j for o, fn, j in named)   # a `jsr abs.l` R_68K_32, as patch mode requires
         print('hatmap-nosdt-retarget: hat_growsdt_user named from %s; hat_growsdt from %s %d time(s) -- %s'
               % (done or 'nowhere', SITE, len(left), 'OK' if ok else 'NOT RETARGETED'))
         sys.exit(0 if ok else 1)

@@ -2,8 +2,8 @@
  * swapguard.c -- swapadd fails with ENOMEM instead of sleeping forever on its anon array (ISSUE-111).
  *
  * THE BUG.  swapadd allocates a swap area's anon array, 16 bytes per page of the area, as one block:
- * kmem_zalloc(npages * 16, KM_SLEEP).  A block over 4 KiB comes from sptalloc, out of kvseg's fixed 4 MiB
- * (sptmap, 0x400 clicks of 4 KiB).  When no free run of kvseg is large enough, kmem_alloc sleeps on
+ * kmem_zalloc(npages * 16, KM_SLEEP).  A block over 4 KiB comes from sptalloc, out of kvseg's fixed arena
+ * (sptmap; 0x400 clicks of 4 KiB then, 0x800 since ISSUE-80).  When no free run of kvseg is large enough, kmem_alloc sleeps on
  * Km_OsizeWanted until some large kmem_free, which may never come: `swap -a`, or the rc script that adds the swap
  * slice's tail at boot, hangs.  Measured on this kernel (cut 68060-261031-55) in emulation, A4000 LC060/Z3660:
  * the largest free kvseg run at boot is 413 clicks at 64 MB and 636 at 16 MB; with one array click per MiB of swap
@@ -23,6 +23,11 @@
  * exit past this point, and the area is already on swapinfo, so a failure there (nothing freed could serve the
  * smaller block: a pool block larger than what was freed, on a machine out of kernel map and pages) panics.
  * A block swapadd did not take (it failed before allocating) is freed on return.  Nothing else in swapadd changes.
+ *
+ * THE LIMIT.  The array stays allocated for as long as the area exists, so it is refused like a missing run when it
+ * would pin over an eighth of the main store: with an 8 MiB arena nothing else would stop "swap -a" of a whole big
+ * slice pinning several MiB on a 16 MiB machine, and the boot's stepping down (S90swap) relies on the refusal.
+ * 16 MiB of RAM takes up to about 490 MiB of swap in one area, 128 MiB up to about 3.9 GiB.
  */
 #include <sys/types.h>
 #include <sys/param.h>
@@ -34,7 +39,7 @@
 #define	SWG_PAGE	(1 << SWG_PAGESHIFT)
 #define	SWG_ANON	16			/* sizeof (struct anon): bytes of array per page */
 
-extern int sleep();
+extern int sleep(), maxmem;
 extern void wakeup();
 
 long swg_magic = 0x53574721;		/* "SWG!" */
@@ -73,7 +78,7 @@ swapadd_guarded(vp, lowblk, nblks, name)
 	end = ((lowblk + nblks) << 9) & ~(SWG_PAGE - 1);
 	size = end > start ? ((end - start) >> SWG_PAGESHIFT) * SWG_ANON : 0;
 	if (size != 0) {
-		swg_block = (caddr_t)kmem_zalloc(size, KM_NOSLEEP);
+		swg_block = (u_int)size > (u_int)maxmem << (SWG_PAGESHIFT - 3) ? 0 : (caddr_t)kmem_zalloc(size, KM_NOSLEEP);
 		if (swg_block == 0) {
 			swg_nomem++;
 			swg_busy = 0;
