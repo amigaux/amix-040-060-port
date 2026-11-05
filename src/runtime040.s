@@ -110,7 +110,7 @@ hardbus040_core:
 .ifndef LOWUSER
 	beqw	Lrt_hbfixed		| next page mapped -> retry
 .else
-	bnes	Lrt_hbnofar
+	bnew	Lrt_hbnofar
 | The next page resolves, so retry.  Nothing here says the access crosses: a genuine bus error in a page's
 | last 8 bytes with its next page mapped restarted for ever, and from a copyin nothing could kill it.  A
 | real crossing comes back at most once a phase, its page being there now, so the same process at the same
