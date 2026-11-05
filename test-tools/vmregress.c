@@ -6,7 +6,8 @@
  * text (a breakpoint), kernel copies into every kind of page, a core dump, the time a fault takes, then pages the program
  * may not use: PROT_NONE and execute-only, through /proc, kernel copies and a core dump.
  *
- *   vmregress [DIR]       DIR (default /tmp) holds the work files; run it as root, or as anyone for all but the /proc case
+ *   vmregress [DIR]       DIR (default /tmp) holds the work files; run it as root, or as anyone for all but the /proc case;
+ *                         VMR_ONLY=<case> runs that case alone
  *
  * Prints PASS/FAIL per case and "VMREGRESS PASS" or "VMREGRESS FAIL n"; exit status = failures.  A case that hangs dies by
  * alarm and counts as a failure, so a spin shows as FAIL, not as a stuck run (a hang in the kernel's own copy cannot be
@@ -413,7 +414,8 @@ static void timing(void)
 
 static void one(char *name, int (*f)(void), int limit)
 {
-	int st, r; pid_t c;
+	int st, r; pid_t c; char *only = getenv("VMR_ONLY");
+	if (only && strcmp(only, name)) return;
 	printf("%-16s ", name); fflush(stdout);
 	if ((c = fork()) == 0) { alarm(limit); _exit(f()); }
 	waitpid(c, &st, 0);
@@ -436,7 +438,7 @@ int main(int ac, char **av)
 	one("rmw", rmw, 60);
 	one("proc-breakpoint", bpt, 30);
 	one("core-dump", core, 60);
-	timing();
+	if (!getenv("VMR_ONLY")) timing();
 	one("denied-proc", denied_proc, 60);
 	one("denied-copies", denied_copies, 60);
 	one("exec-only", execonly, 60);
