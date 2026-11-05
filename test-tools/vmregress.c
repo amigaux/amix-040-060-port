@@ -244,6 +244,13 @@ static int sig_of(void (*f)(char *), char *p)
 	waitpid(c, &st, 0);
 	return WIFSIGNALED(st) ? WTERMSIG(st) : 0;
 }
+static int st_of(void (*f)(char *), char *p)	/* as sig_of, and a nonzero exit counts: 100 + status */
+{
+	int st; pid_t c;
+	if ((c = fork()) == 0) { alarm(10); f(p); _exit(0); }
+	waitpid(c, &st, 0);
+	return WIFSIGNALED(st) ? WTERMSIG(st) : WEXITSTATUS(st) ? 100 + WEXITSTATUS(st) : 0;
+}
 static void rd1(char *p) { if (*(volatile char *)p == 99) _exit(1); }
 static void wr1(char *p) { *(volatile char *)p = 1; }
 
@@ -277,7 +284,8 @@ static int writeonly(void)	/* a read of a write-only page always succeeds: file,
 	if (p == (char *)-1) return 2;
 	close(fd);
 	if (mprotect(p, 2 * PG, PROT_WRITE)) return 3;
-	if (sig_of(rd2, p)) return 4;
+	if (st_of(rd2, p)) return 4;			/* the file's byte, in user mode */
+	if (((volatile char *)p)[1] != 7) return 10;
 	sprintf(work, "%s/vmr.wo2", dir);
 	if ((fd = open(work, O_RDWR | O_CREAT | O_TRUNC, 0666)) < 0) return 5;
 	if (write(fd, p + PG, 4) != 4) return 6;		/* a copyin from it */
