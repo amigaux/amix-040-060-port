@@ -1,10 +1,10 @@
 /* wbkev.c -- the kept-store table (a 68040's stores kept across a SIGSEGV handler) must not lose one process's store
  * for another's.  Run as root; exit status = stores lost.
  *
- *   wbkev fill   two unprivileged users fill what they can and keep it: uid 100 leaves a record at each of 8 stack depths
- *                by leaving its handler with longjmp, uid 101 the same with SIGSEGV ignored; both then wait.  Then 4 root
- *                processes each store into a PROT_NONE page, sleep in their handler (all 4 at once), repair the page and
- *                return: every root store must land.
+ *   wbkev fill   four unprivileged users fill what they can and keep it: uids 100 and 102 leave a record at each of 8 stack
+ *                depths by leaving their handler with longjmp, uids 101 and 103 the same with SIGSEGV ignored; all then wait.
+ *                That is 32 records, the whole table without a per-uid limit.  Then 4 root processes each store into a
+ *                PROT_NONE page, sleep in their handler (all 4 at once), repair the page and return: every root store must land.
  *   wbkev live   4 root processes sleep in their handlers with a store kept; meanwhile C reads a PROT_NONE page with no
  *                handler (nothing to keep) and D, also root, stores and repairs (its own store may be dropped: reported).
  *                The 4 stores must land.
@@ -26,6 +26,7 @@
 #define NV 4
 #define SLP 12
 #define NPIN 8
+#define NF 4
 static int zfd, pfd[2]; static char *pg; static int slp; static jmp_buf jb;
 static char *anon(int prot) { char *p = mmap(0, PG, prot, MAP_PRIVATE, zfd, 0); if (p == (char *)-1) { perror("mmap"); _exit(90); } return p; }
 static void h(int s) { if (slp) { write(pfd[1], "r", 1); sleep(slp); } mprotect(pg, PG, PROT_READ | PROT_WRITE); }
@@ -46,17 +47,16 @@ static void filler(int uid, int ign)	/* NPIN records, one per stack depth, none 
 static char *how(int st, char *b) { sprintf(b, "%s %d", WIFSIGNALED(st) ? "signal" : "exit", WIFSIGNALED(st) ? WTERMSIG(st) : WEXITSTATUS(st)); return b; }
 int main(int ac, char **av)
 {
-	pid_t v[NV], f1 = 0, f2 = 0, c, d; int i, st, lost = 0; char b, w[32]; struct rlimit rl;
+	pid_t v[NV], f[NF], c, d; int i, st, lost = 0; char b, w[32]; struct rlimit rl;
 	int fill = ac > 1 && !strcmp(av[1], "fill");
 	if (ac < 2 || (!fill && strcmp(av[1], "live"))) { printf("usage: wbkev fill|live\n"); return 99; }
 	if (getuid() != 0) { printf("run as root\n"); return 99; }
 	zfd = open("/dev/zero", O_RDWR); pipe(pfd);
 	rl.rlim_cur = rl.rlim_max = 0; setrlimit(RLIMIT_CORE, &rl);
 	if (fill) {
-		if ((f1 = fork()) == 0) filler(100, 0);
-		if ((f2 = fork()) == 0) filler(101, 1);
-		for (i = 0; i < 2; i++) if (read(pfd[0], &b, 1) != 1 || b != 'f') { printf("filler failed\n"); return 99; }
-		printf("uid 100 (longjmp) and uid 101 (SIGSEGV ignored) each left %d records and wait\n", NPIN); fflush(stdout);
+		for (i = 0; i < NF; i++) if ((f[i] = fork()) == 0) filler(100 + i, i & 1);
+		for (i = 0; i < NF; i++) if (read(pfd[0], &b, 1) != 1 || b != 'f') { printf("filler failed\n"); return 99; }
+		printf("uids 100, 102 (longjmp) and 101, 103 (SIGSEGV ignored) each left %d records and wait\n", NPIN); fflush(stdout);
 	}
 	for (i = 0; i < NV; i++) if ((v[i] = fork()) == 0) { alarm(60); _exit(storer(SLP)); }
 	for (i = 0; i < NV; i++) if (read(pfd[0], &b, 1) != 1 || b != 'r') { printf("pipe\n"); return 99; }
@@ -71,8 +71,7 @@ int main(int ac, char **av)
 		waitpid(v[i], &st, 0);
 		if (!WIFEXITED(st) || WEXITSTATUS(st)) { lost++; printf("root %d: %s: STORE LOST\n", i, how(st, w)); }
 	}
-	if (f1) { kill(f1, SIGKILL); waitpid(f1, &st, 0); }
-	if (f2) { kill(f2, SIGKILL); waitpid(f2, &st, 0); }
+	if (fill) for (i = 0; i < NF; i++) { kill(f[i], SIGKILL); waitpid(f[i], &st, 0); }
 	printf(lost ? "WBKEV %s FAIL %d\n" : "WBKEV %s PASS\n", av[1], lost);
 	return lost;
 }
