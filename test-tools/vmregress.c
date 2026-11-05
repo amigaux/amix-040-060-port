@@ -363,14 +363,18 @@ static int execonly(void)	/* execute-only: runs, a write is refused; the whole m
 	return 0;
 }
 
-static int denied_core(void)	/* good pages on both sides of a denied one all reach the file */
+/* a mark no literal holds, so that finding it in the file means the page itself was written */
+static void markup(char *d, int c) { int i; for (i = 0; i < 4; i++) d[i] = "vmr-"[i]; for (i = 4; i < 8; i++) d[i] = c; for (i = 8; i < 11; i++) d[i] = 'x' + i; }
+static int markin(char *b, int c) { char m[11]; markup(m, c); return !memcmp(b, m, 11); }
+
+static int denied_core(void)	/* good pages on both sides of a denied one reach the file; the denied page's does not */
 {
-	int st, fd, n, a = 0, b = 0, i; pid_t c; char nm[300]; static char buf[PG];
+	int st, fd, n, a = 0, b = 0, d = 0, i; pid_t c; char nm[300]; static char buf[PG];
 	sprintf(nm, "%s/core", dir); unlink(nm);
 	if ((c = fork()) == 0) {
 		char *m = anon(3 * PG, PROT_READ | PROT_WRITE);
 		memset(m, 0, 3 * PG);
-		strcpy(m, "vmrAAAAmark"); strcpy(m + 2 * PG, "vmrBBBBmark");
+		markup(m, 'A'); markup(m + PG, 'D'); markup(m + 2 * PG, 'B');
 		if (mprotect(m + PG, PG, PROT_NONE)) _exit(1);
 		chdir(dir);
 		*(volatile int *)0x7ffe0000 = 1;
@@ -381,12 +385,13 @@ static int denied_core(void)	/* good pages on both sides of a denied one all rea
 	if (!WCOREDUMP(st)) return 2;
 	if ((fd = open(nm, O_RDONLY)) < 0) return 3;
 	while ((n = read(fd, buf, PG)) > 0)
-		for (i = 0; i + 11 <= n; i += 4) {
-			if (!memcmp(buf + i, "vmrAAAAmark", 11)) a = 1;
-			if (!memcmp(buf + i, "vmrBBBBmark", 11)) b = 1;
+		for (i = 0; i + 11 <= n; i += 2) {
+			if (markin(buf + i, 'A')) a = 1;
+			if (markin(buf + i, 'B')) b = 1;
+			if (markin(buf + i, 'D')) d = 1;
 		}
 	close(fd); unlink(nm);
-	return a ? (b ? 0 : 5) : 4;
+	return a ? (b ? (d ? 6 : 0) : 5) : 4;
 }
 
 static void timing(void)
@@ -403,6 +408,7 @@ static void timing(void)
 	for (i = 0; i < n; i++) if (p[i * PG] == 77) break;
 	b = times(&t);
 	printf("timing: %d zero-page read faults, %ld us each\n", n, (long)(b - a) * (1000000L / hz) / n);
+	munmap(p, n * PG);	/* the cases after this dump core, under a 1 MiB limit */
 }
 
 static void one(char *name, int (*f)(void), int limit)
