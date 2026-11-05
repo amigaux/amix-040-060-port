@@ -56,7 +56,10 @@ waitloc:
 | OK, returns 0, the CPU retries -> infinite loop (the `date` hang).  For USER
 | addresses within 8 bytes of a page end: as_fault BOTH the operand's page AND the
 | next page (read, F_INVAL); either resolving -> return 0 and retry.  Both fail ->
-| genuine hardbus.
+| genuine hardbus.  LOWUSER (ISSUE-116): no address test, because a user page can sit below
+| 0x80000000 since the TT windows are supervisor-only.  hardbus's one caller is usrxmemflt_orig,
+| which only a fault with a user function code reaches (userspace040.s, k_trap and u_trap), and
+| the as_fault is on curproc's address space, so a kernel access is not pulled in by this.
 | --weaken-symbol hardbus + --add-symbol hardbus_orig=.text:0x5b3c2.
 | hardbus040_core is the SINGLE copy of the decision -- the page-crossing fix and the
 | ISSUE-47 unprobeable-band guard both live here and nowhere else.  The dbg build weakens
@@ -72,8 +75,10 @@ hardbus040_core:
 	linkw	%fp,&0
 	moveml	%d2-%d3,%sp@-
 	movel	%fp@(8),%d0		| addr
+.ifndef LOWUSER
 	cmpil	&0x80000000,%d0
 	bcsw	Lrt_hbnorm		| kernel/low address -> normal hardbus
+.endif
 	movel	%d0,%d1
 	andil	&0xfff,%d1
 	cmpil	&0xff8,%d1

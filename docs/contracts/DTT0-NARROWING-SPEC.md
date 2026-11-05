@@ -73,8 +73,8 @@ Current register decode:
 
 | Register | Value | Logical match | Mode |
 |---|---:|---|---|
-| ITT0 | `0x003fc000` | instruction `0x00000000..0x3fffffff` | WT |
-| DTT0 | `0x003fc060` | data `0x00000000..0x3fffffff`, user and supervisor | NC |
+| ITT0 | `0x003fa000` | supervisor instruction `0x00000000..0x3fffffff` | WT |
+| DTT0 | `0x003fa060` | supervisor data `0x00000000..0x3fffffff` | NC |
 | DTT1 | `0x807fa060` | supervisor data `0x80000000..0xffffffff` | NC |
 
 The TTR base/mask is a logical-address test. A load through `0x40326000`, for

@@ -29,11 +29,16 @@
 |
 |   proc == 0   va <  0x40000000  -> identity (DTT0)                  [unchanged]
 |               va >= 0x40000000  -> vtop_orig -> svirtophys          [unchanged]
-|   proc != 0   va <  0x40000000  -> identity                         [unchanged; this is
-|                                    the live shape -- dma_pageio 0x20c90 COPIES b_proc
-|                                    into its ngeteblk bounce buffer, whose b_addr is
-|                                    SCN0 identity RAM (amiga_dma_pageio 0xdbee clears
-|                                    b_proc instead)]
+|   proc != 0   va <  0x40000000  -> uvatopte040: the process's frame when it maps the
+|                                    page; else identity [LOWUSER, ISSUE-116.  Since the
+|                                    TT windows match supervisor accesses only (ISSUE-112)
+|                                    a user page down here has its own frame, so identity
+|                                    would aim DMA at the numeric VA.  dma_pageio 0x20c90
+|                                    COPIED b_proc into its ngeteblk bounce buffer, whose
+|                                    b_addr is SCN0 identity RAM; src/patch_dma_bounce.py
+|                                    clears it, as amiga_dma_pageio 0xdbee always did.
+|                                    The identity arm stays for a kernel buffer, so a
+|                                    proc that maps nothing there behaves as before.]
 |               va in SCN1        -> force proc = 0 -> svirtophys      [FIX + capped log:
 |                                    a kernel VA is not per-process, and stock vtop_orig
 |                                    tests the PROC ARGUMENT FIRST (0xb7592), so a stale
@@ -70,8 +75,19 @@ Lvt_proc:
 	movel	%fp@(8),%d0		| d0 = va
 	cmpil	&0x40000000,%d0
 	bccw	Lvt_phigh
+.ifdef LOWUSER
+	movel	%fp@(12),%sp@-		| proc
+	movel	%d0,%sp@-		| va
+	jsr	uvatopte040
+	addqw	&8,%sp
+	tstl	%d0
+	bnew	Lvt_frame		| the process maps it: its own frame (ISSUE-116)
+	movel	%fp@(8),%d2		| it does not: a kernel buffer, the identity window
+	braw	Lvt_log
+.else
 	movel	%d0,%d2			| SCN0 identity (bounce buffer with a stale b_proc)
 	braw	Lvt_log
+.endif
 Lvt_phigh:
 	cmpil	&0x80000000,%d0
 	bccw	Lvt_user
@@ -89,6 +105,7 @@ Lvt_user:
 	addqw	&8,%sp
 	tstl	%d0
 	beqw	Lvt_zero		| not resident -> 0 (stock's failure value)
+Lvt_frame:
 	movel	%d0,%d2
 	andil	&0xfffff000,%d2		| 040 PTE bits 31:12 = physical page
 	movel	%fp@(8),%d0
