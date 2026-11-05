@@ -162,9 +162,9 @@ Lpd_m5:
 	beqw	Lpd_m5u
 	andil	&3,%d0
 	bnew	Lpd_m5u			| not 4-aligned
-	cmpil	&0x48440000,%d2
+	cmpil	&kvsegu,%d2
 	bcsw	Lpd_m5u			| below kvsegu
-	cmpil	&0x48480000,%d2
+	cmpil	&kvsegu+0x40000,%d2
 	bccw	Lpd_m5u			| above kvsegu
 	moveal	%d2,%a0
 	movel	%a0@(0x730),%d3		| wproc = u_procp through the p_segu window
@@ -217,9 +217,9 @@ Lpd_scan_loop:
 	andil	&3,%d1
 	bnew	Lpd_scan_next		| not 4-aligned -> skip
 	movel	%a2@(252),%d1
-	cmpil	&0x48440000,%d1
+	cmpil	&kvsegu,%d1
 	bcsw	Lpd_scan_next		| below kvsegu -> skip
-	cmpil	&0x48480000,%d1
+	cmpil	&kvsegu+0x40000,%d1
 	bccw	Lpd_scan_next		| above kvsegu -> skip
 	moveal	%d1,%a3
 	tstl	%a3@(0x730)

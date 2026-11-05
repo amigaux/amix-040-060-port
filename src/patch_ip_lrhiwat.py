@@ -14,7 +14,7 @@
 # (solon, A2065, NFSv2/UDP rsize 8192): 156 drops in a 149 MB read; a live poke of the instantiated
 # queue's q_hiwat to 0x10000 took them to 0 (KNOWN-ISSUES.md, ISSUE-81).
 #
-# THE FIX.  Entry [3]'s mi_hiwat only, 0x2000 -> 0x10000: four bytes of .data, no relocation, no
+# THE FIX.  Entry [3]'s mi_hiwat only, 0x2000 -> FIXED (IPLR_HIWAT in the environment names another value): four bytes of .data, no relocation, no
 # layout change.  mi_minpsz, mi_maxpsz and mi_lowat are untouched, and so are the other four
 # entries -- [2] (HDRQ) is what ipopen sends to the stream head in M_SETOPTS, which is a different
 # queue.  The 32-bit field holds 0x10000; setq copies all 32 bits.  INITQPARMS can still overwrite
@@ -32,7 +32,7 @@ from kelf import Elf, R_68K_32, u32  # noqa: E402
 ENTSZ, NENT = 24, 5                  # sizeof(struct module_info), entries in ipm_info
 QI_SRVP, QI_MINFO = 4, 20            # struct qinit
 MI_MINPSZ, MI_MAXPSZ, MI_HIWAT, MI_LOWAT = 8, 12, 16, 20
-STOCK, FIXED = 0x2000, 0x10000
+STOCK, FIXED = 0x2000, int(os.environ.get("IPLR_HIWAT", "0x4000"), 0)
 
 
 def data_sym(e, name):

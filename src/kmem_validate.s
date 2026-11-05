@@ -44,9 +44,9 @@ Lkv_loop:
 	movel	%a3,%d0
 	btst	&0,%d0
 	bnew	Lkv_badhead		| misaligned
-	cmpil	&0x40040000,%d0
+	cmpil	&syssegs,%d0
 	bcsw	Lkv_badhead		| below heap
-	cmpil	&0x40440000,%d0
+	cmpil	&kvsegmap,%d0
 	bccw	Lkv_badhead		| at/above heap end
 | a3 is in-heap and aligned -> safe to deref its next (THE field that crashes kmem_alloc)
 	moveal	%a3@(0),%a4		| a4 = block->next
@@ -55,9 +55,9 @@ Lkv_loop:
 	movel	%a4,%d0
 	btst	&0,%d0
 	bnew	Lkv_badnext
-	cmpil	&0x40040000,%d0
+	cmpil	&syssegs,%d0
 	bcsw	Lkv_badnext
-	cmpil	&0x40440000,%d0
+	cmpil	&kvsegmap,%d0
 	bccw	Lkv_badnext
 Lkv_next:
 	lea	%a2@(0x14),%a2		| next bin head

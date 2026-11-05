@@ -4,17 +4,21 @@
 #   patch_kmemwake.py KERNEL           write; idempotent
 #   patch_kmemwake.py --check KERNEL   say which form KERNEL has; write nothing
 #
-# THE DEFECT, stock.  kmem_alloc sleeps on Km_OsizeWanted, the largest size in bytes anyone waits for, when sptalloc
+# THE DEFECT, stock.  kmem_alloc sleeps on Km_OsizeWanted, the smallest size in bytes anyone waits for, when sptalloc
 # finds no run.  kmem_freepool wakes it only when `clicks returned >= Km_OsizeWanted`: clicks (1 or 4 here) against
 # bytes (over 4096), so never.  kmem_free's oversize path compares bytes with bytes, but a free smaller than the
 # request can complete a run too, by joining free space next to it, and that wakes nobody.  Both are upstream's
 # reading (Antti Sokero, its ISSUE-82), where the fix was to make kmem_freepool's compare bytes.  That leaves the
 # smaller frees asleep, so here neither path compares.
 #
-# THE CHANGE.  The `bcs.w` after each compare becomes two nops, so any return of kernel map wakes every oversize
-# sleeper while one waits; the `ble.w` before the compare still skips the wakeup when nobody does.  kmem_alloc's
-# sleeper goes back to its sptalloc (.text 0x420a0, `bra` to its top) and sleeps again if the run is not there yet.
-# Frees that do not pass through kmem (sptfree directly, unkseg, bp_mapout) wake nobody, as before.
+# Nor does kmem_alloc hold an spl between storing Km_OsizeWanted and sleep(): an oversize free at interrupt level in
+# that window clears it and wakes nobody, and with the stock `ble.w` every later free then skips the wakeup.
+#
+# THE CHANGE.  The `ble.w` before each compare and the `bcs.w` after it become nops, so every pool retirement and
+# every direct oversize free wakes the channel: an empty wakeup when nobody waits, and a sleeper that missed one return
+# is woken by the next.  kmem_alloc's sleeper goes back to its sptalloc (.text 0x420a0, `bra` to its top) and sleeps
+# again if the run is not there yet.  Frees that do not pass through kmem (sptfree directly, unkseg, bp_mapout) wake
+# nobody, as before.
 
 import os, sys
 
@@ -36,20 +40,20 @@ def func(e, name):
 
 
 def site(e, rt, name):
-    """the offset of the 4 bytes after `tstl Wanted; ble.w x; cmpl Wanted,%dN`: (.text offset, is_new)"""
+    """the `tstl Wanted; ble.w x; cmpl Wanted,%dN; bcs.w y` in a function: (.text offset of the tstl, is_new)"""
     start, size = func(e, name)
     found = []
     for off in range(start, start + size - 20, 2):
         b = e.text(off, 20)
-        if b[:2] != b"\x4a\xb9" or b[6:8] != b"\x6f\x00" or b[10] & 0xf1 != 0xb0 or b[11] != 0xb9:
+        if b[:2] != b"\x4a\xb9" or b[10] & 0xf1 != 0xb0 or b[11] != 0xb9:
             continue
         r1, r2 = rt.get(off + 2), rt.get(off + 12)
         if r1 is None or r2 is None or e.sym(r1[1])["name"] != WANTED or e.sym(r2[1])["name"] != WANTED:
             continue
-        if b[16:18] == b"\x65\x00":
-            found.append((off + 16, False))
-        elif b[16:20] == NOP2:
-            found.append((off + 16, True))
+        if b[6:8] == b"\x6f\x00" and b[16:18] == b"\x65\x00":
+            found.append((off, False))
+        elif b[6:10] == NOP2 and b[16:20] == NOP2:
+            found.append((off, True))
     if len(found) != 1:
         raise SystemExit("ABORT: %s: %d wake compares, want one" % (name, len(found)))
     return found[0]
@@ -68,15 +72,16 @@ def main():
     if len(new) not in (0, len(s)):
         raise SystemExit("ABORT: one of %s is patched and the other not" % (FUNCS,))
     if check:
-        print("  %s kmem wake: %s" % ("[ok]  " if new else "[stock]", "any return wakes" if new else "stock compares"))
+        print("  %s kmem wake: %s" % ("[ok]  " if new else "[stock]", "every return wakes" if new else "stock compares"))
         sys.exit(0 if new else 1)
     if new:
         print("  [skip] the kmem wake is already patched")
         return
     t = e.sec[".text"]["offset"]
     for (off, _), n in zip(s, FUNCS):
-        e.b[t + off:t + off + 4] = NOP2
-        print("  [ok]   %s .text 0x%x: bcs.w -> nop nop" % (n, off))
+        e.b[t + off + 6:t + off + 10] = NOP2
+        e.b[t + off + 16:t + off + 20] = NOP2
+        print("  [ok]   %s .text 0x%x: ble.w and bcs.w -> nops" % (n, off))
     open(path, "wb").write(e.b)
 
 

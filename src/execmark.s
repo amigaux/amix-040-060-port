@@ -439,9 +439,9 @@ Lcr2_skip:
 	andil	&3,%d1
 	bnew	Lupz_done
 	movel	%a0@(252),%d1
-	cmpil	&0x48440000,%d1
+	cmpil	&kvsegu,%d1
 	bcsw	Lupz_done
-	cmpil	&0x48480000,%d1
+	cmpil	&kvsegu+0x40000,%d1
 	bccw	Lupz_done
 	moveal	%d1,%a0
 	movel	%a0@(0x730),%d0		| u_procp via the stable p_segu window

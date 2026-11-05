@@ -34,9 +34,9 @@ swapoutub:
 	andil	&3,%d0
 	bnew	Lsso_call
 	movel	%a2@(252),%d2
-	cmpil	&0x48440000,%d2
+	cmpil	&kvsegu,%d2
 	bcsw	Lsso_call
-	cmpil	&0x48480000,%d2
+	cmpil	&kvsegu+0x40000,%d2
 	bccw	Lsso_call
 	moveal	%d2,%a0
 	movel	%a0@(0x730),%d1		| u_procp before swap-out
@@ -80,9 +80,9 @@ swapinub:
 	andil	&3,%d0
 	bnew	Lssi_ret
 	movel	%a2@(252),%d2
-	cmpil	&0x48440000,%d2
+	cmpil	&kvsegu,%d2
 	bcsw	Lssi_ret
-	cmpil	&0x48480000,%d2
+	cmpil	&kvsegu+0x40000,%d2
 	bccw	Lssi_ret
 	moveal	%d2,%a0
 	movel	%a0@(0x730),%d1		| u_procp after swap-in

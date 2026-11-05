@@ -43,9 +43,9 @@ hat_pteload:
 |     distinct 2KB page per 2KB of file -> they share the 4KB MMU leaf -> collision.  Gated 16,
 |     CE_WARN, a2/d2 preserved.  Remove once the page-granularity fix lands. ---
 .ifdef KDBG
-	cmpil	&0x40448000,%d2
+	cmpil	&kvsegmap+0x8000,%d2
 	bcsw	Lpo_no
-	cmpil	&0x4044a000,%d2
+	cmpil	&kvsegmap+0xa000,%d2
 	bccw	Lpo_no
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lpo_no
