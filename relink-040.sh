@@ -418,9 +418,10 @@ if [ "$SWAP_GUARD" = "1" ]; then
 		-c "$HERE/src/swapguard.c" -o "$HERE/build/swapguard.o"
 	SWG_IN=$(m68k-linux-gnu-nm "$HERE/build/swapguard.o" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ')
 	SWG_EX=$(m68k-linux-gnu-nm "$HERE/build/swapguard.o" | awk '$2 ~ /^[TDB]$/{print $3}' | LC_ALL=C sort | tr '\n' ' ')
-	[ "$SWG_IN" = "kmem_free kmem_zalloc sleep wakeup " ] || { echo "[FAIL] swapguard.o imports '$SWG_IN'"; exit 1; }
+	[ "$SWG_IN" = "cmn_err kmem_free kmem_zalloc sleep wakeup " ] || { echo "[FAIL] swapguard.o imports '$SWG_IN'"; exit 1; }
 	[ "$SWG_EX" = "swapadd_guarded swapguard_swapadd swapguard_take swg_calls swg_last swg_magic swg_nomem swg_resized swg_swapadd " ] \
 		|| { echo "[FAIL] swapguard.o exports '$SWG_EX'"; exit 1; }
+	sh "$HERE/src/check_page_geometry.sh" "$HERE/build/swapguard.o" || { echo "[FAIL] swapguard.o: page geometry"; exit 1; }
 	SWG_OBJ="$HERE/build/swapguard.o"
 else
 	echo "[*] SWAP_GUARD=0 -- building WITHOUT the swapadd guard (rollback control)"

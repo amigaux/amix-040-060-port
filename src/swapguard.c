@@ -19,13 +19,16 @@
  * swapadd does (+0xfff, & ~0xfff, >> 12, * 16), allocates the array with KM_NOSLEEP -- ENOMEM when kvseg has no run
  * that large -- and leaves it for swapguard_take, which hands it over.  When swapadd clamped the area to its device
  * (the first area only) the size differs: swapguard_take frees the block and allocates the smaller one with
- * KM_NOSLEEP, which fits in the run just freed.  A block swapadd did not take (it failed before allocating) is
- * freed on return.  Nothing else in swapadd changes.
+ * KM_NOSLEEP, both at spl7, so no interrupt can take the run between them.  It never sleeps: swapadd has no failure
+ * exit past this point, and the area is already on swapinfo, so a failure there (nothing freed could serve the
+ * smaller block: a pool block larger than what was freed, on a machine out of kernel map and pages) panics.
+ * A block swapadd did not take (it failed before allocating) is freed on return.  Nothing else in swapadd changes.
  */
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/errno.h>
 #include <sys/kmem.h>
+#include <sys/cmn_err.h>
 
 #define	SWG_PAGESHIFT	12			/* swapadd's page: 4 KiB on this line (patch_swapgeom.py) */
 #define	SWG_PAGE	(1 << SWG_PAGESHIFT)
@@ -96,6 +99,7 @@ swapguard_take(size, flag)
 	int flag;
 {
 	caddr_t p;
+	register int s;
 
 	if (swg_block != 0 && size == swg_size) {
 		p = swg_block;
@@ -103,11 +107,14 @@ swapguard_take(size, flag)
 		return p;
 	}
 	swg_resized++;
+	__asm__ __volatile__ ("movew %%sr,%0; movew &0x2700,%%sr" : "=d" (s));
 	if (swg_block != 0) {
 		kmem_free(swg_block, swg_size);
 		swg_block = 0;
 	}
-	if ((p = (caddr_t)kmem_zalloc(size, KM_NOSLEEP)) != 0)
-		return p;
-	return (caddr_t)kmem_zalloc(size, flag);	/* only when the run just freed was taken meanwhile */
+	p = (caddr_t)kmem_zalloc(size, KM_NOSLEEP);
+	__asm__ __volatile__ ("movew %0,%%sr" : : "d" (s));
+	if (p == 0)
+		cmn_err(CE_PANIC, "swapadd: no kernel memory for a swap map of %d bytes", size);
+	return p;
 }
