@@ -42,11 +42,11 @@ hat_pteload:
 |     poff=0 and the collider (7A51) at va 40448800 with poff=0x800, the page cache produces a
 |     distinct 2KB page per 2KB of file -> they share the 4KB MMU leaf -> collision.  Gated 16,
 |     CE_WARN, a2/d2 preserved.  Remove once the page-granularity fix lands. ---
+.ifdef KDBG
 	cmpil	&0x40448000,%d2
 	bcsw	Lpo_no
 	cmpil	&0x4044a000,%d2
 	bccw	Lpo_no
-.ifdef KDBG
 	tstl	kdbg_on			| base is SILENT; dbg flips this (kdbg040.s)
 	beqw	Lpo_no
 	movel	Lpo_n,%d0
