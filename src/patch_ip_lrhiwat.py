@@ -14,11 +14,21 @@
 # (solon, A2065, NFSv2/UDP rsize 8192): 156 drops in a 149 MB read; a live poke of the instantiated
 # queue's q_hiwat to 0x10000 took them to 0 (KNOWN-ISSUES.md, ISSUE-81).
 #
-# THE FIX.  Entry [3]'s mi_hiwat only, 0x2000 -> FIXED (IPLR_HIWAT in the environment names another value): four bytes of .data, no relocation, no
-# layout change.  mi_minpsz, mi_maxpsz and mi_lowat are untouched, and so are the other four
-# entries -- [2] (HDRQ) is what ipopen sends to the stream head in M_SETOPTS, which is a different
+# THE FIX.  Entry [3]'s mi_hiwat only, 0x2000 -> 0x10000 (IPLR_HIWAT in the environment names another value):
+# four bytes of .data, no layout change.  mi_minpsz, mi_maxpsz and mi_lowat are untouched, and so are the
+# other four entries -- [2] (HDRQ) is what ipopen sends to the stream head in M_SETOPTS, which is a different
 # queue.  The 32-bit field holds 0x10000; setq copies all 32 bits.  INITQPARMS can still overwrite
 # the table, but its value is 16-bit and cannot express 0x10000.
+#
+# THE VALUE, measured in emulation (A2065 to A2065 at MTU 1500, NFSv2/UDP rsize 8192, a 52 MB read, a
+# tree copied from the mount to the mount, and a 52 MB ftp get; one pair per row, 2026-11-05):
+#     mark       A2065 drops (Failed putq)   RPC retransmissions   ftp get   TCP retransmitted by the sender
+#     0x2000     77, 87                      77, 87                161-162 s 0
+#     0x4000     0, 1                        0, 1                  164 s     0
+#     0x10000    0, 0                        0, 0                  155 s     0
+# Every drop came in the copy, where read and write replies interleave: two 8 KiB replies queued at once
+# need about 16.9 KB, just over 0x4000.  TCP's own lower read queue (tcpm_info[3]) is 0x4000; a larger IP
+# mark lets one ipintr pass hand TCP more than that, but the sender retransmitted nothing at 0x10000.
 #
 # The entry is found through the relocation, not by index: iplrinit's qi_minfo (+20) must point
 # into ipm_info at a 24-byte entry boundary, and iplrinit's qi_srvp (+4) must be ipintr.  The
@@ -32,7 +42,7 @@ from kelf import Elf, R_68K_32, u32  # noqa: E402
 ENTSZ, NENT = 24, 5                  # sizeof(struct module_info), entries in ipm_info
 QI_SRVP, QI_MINFO = 4, 20            # struct qinit
 MI_MINPSZ, MI_MAXPSZ, MI_HIWAT, MI_LOWAT = 8, 12, 16, 20
-STOCK, FIXED = 0x2000, int(os.environ.get("IPLR_HIWAT", "0x4000"), 0)
+STOCK, FIXED = 0x2000, int(os.environ.get("IPLR_HIWAT", "0x10000"), 0)
 
 
 def data_sym(e, name):

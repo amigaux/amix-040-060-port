@@ -66,6 +66,9 @@
 |                              succeed: a resident writable translation never faults on a read anyway, so refusing
 |                              only what is not resident worked until pageout, and stock's body with write alone
 |                              loaded no translation for a private file page and restarted for ever.
+|                              A raw write from a write-only buffer is refused by useracc, which checks the
+|                              stored protection without a fault, until a read fault has added read here; a raw
+|                              read into one works.
 |     F_SOFTLOCK with S_OTHER  passes, as stock: mlock of a page it will not touch (segvn_lockop).
 |     anything else            needs some permission.
 | A soft lock of a denied page must not succeed for /proc: the body loads no valid translation for it, and
