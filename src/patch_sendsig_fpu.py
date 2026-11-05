@@ -77,7 +77,12 @@ def main():
     op = bytes(b[TEXT_FILE_OFF + CALL_OP: TEXT_FILE_OFF + CALL_OP + 2])
     if op != JSR_ABS_L:
         raise SystemExit("ABORT: 0x%x is %s, not `jsr xxx.l`" % (CALL_OP, op.hex()))
-    want = sym_value("sendsig") + 0x1f8
+    # With WBKEEP the name sendsig is wbkeep040.s's wrapper and the stock body is sendsig_orig.
+    try:
+        body = sym_value("sendsig_orig")
+    except SystemExit:
+        body = sym_value("sendsig")
+    want = body + 0x1f8
     if CALL_OP != want:
         raise SystemExit("ABORT: sendsig+0x1f8 is 0x%x, not 0x%x" % (want, CALL_OP))
 
