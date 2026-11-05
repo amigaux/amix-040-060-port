@@ -46,7 +46,7 @@ if [ "$WBKEEP" = "1" ]; then
 	WBK_AS="-Wa,--defsym,WBKEEP=1"
 	m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/wbkeep040.s" -o "$HERE/build/wbkeep040.o"
 	WBK_OBJ="$HERE/build/wbkeep040.o"
-	WBK_OC="--weaken-symbol restorecontext --add-symbol restorecontext_orig=.text:0x58d76,function,global --weaken-symbol as_free --add-symbol as_free_orig=.text:0xadf9a,function,global"
+	WBK_OC="--weaken-symbol restorecontext --add-symbol restorecontext_orig=.text:0x58d76,function,global --weaken-symbol as_free --add-symbol as_free_orig=.text:0xadf9a,function,global --weaken-symbol sendsig --add-symbol sendsig_orig=.text:0x59022,function,global"
 fi
 # KDBG=1 builds the VM debug prints (the `tstl kdbg_on` blocks in hat040.s, hat_dup040.s,
 # hat_chgprot040.s, vtop040.s and getfault040.s, still gated at run time by kdbg_on).  Since
@@ -423,7 +423,7 @@ if [ "$SWAP_GUARD" = "1" ]; then
 		-c "$HERE/src/swapguard.c" -o "$HERE/build/swapguard.o"
 	SWG_IN=$(m68k-linux-gnu-nm "$HERE/build/swapguard.o" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ')
 	SWG_EX=$(m68k-linux-gnu-nm "$HERE/build/swapguard.o" | awk '$2 ~ /^[TDB]$/{print $3}' | LC_ALL=C sort | tr '\n' ' ')
-	[ "$SWG_IN" = "cmn_err kmem_free kmem_zalloc maxmem sleep wakeup " ] || { echo "[FAIL] swapguard.o imports '$SWG_IN'"; exit 1; }
+	[ "$SWG_IN" = "cmn_err kmem_free kmem_zalloc maxmem sleep sptmap wakeup " ] || { echo "[FAIL] swapguard.o imports '$SWG_IN'"; exit 1; }
 	[ "$SWG_EX" = "swapadd_guarded swapguard_swapadd swapguard_take swg_calls swg_last swg_magic swg_nomem swg_resized swg_swapadd " ] \
 		|| { echo "[FAIL] swapguard.o exports '$SWG_EX'"; exit 1; }
 	sh "$HERE/src/check_page_geometry.sh" "$HERE/build/swapguard.o" || { echo "[FAIL] swapguard.o: page geometry"; exit 1; }
@@ -1114,7 +1114,7 @@ fi
 # them must name the wrapper, and wb040.o must call wbk_save from both usrxmemflt sites.
 if [ "$WBKEEP" = "1" ]; then
 	NMO=$(m68k-linux-gnu-nm "$OUT")
-	for p in restorecontext:58d76 as_free:adf9a; do
+	for p in restorecontext:58d76 as_free:adf9a sendsig:59022; do
 		f=${p%%:*}; a=${p#*:}
 		W=$(echo "$NMO" | awk -v f=$f '$3==f && $2=="T" {print $1}')
 		O=$(echo "$NMO" | awk -v f=${f}_orig '$3==f && $2=="T" {print $1}')

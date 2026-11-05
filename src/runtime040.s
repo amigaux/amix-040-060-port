@@ -107,7 +107,39 @@ hardbus040_core:
 	jsr	as_fault
 	lea	%sp@(20),%sp
 	tstl	%d0
+.ifndef LOWUSER
 	beqw	Lrt_hbfixed		| next page mapped -> retry
+.else
+	bnes	Lrt_hbnofar
+| The next page resolves, so retry, once.  Nothing here says the access crosses: a genuine bus error in
+| a page's last 8 bytes with its next page mapped restarted for ever, and from a copyin nothing could
+| kill it.  A real crossing does not come back, its page now being there, so the same process at the same
+| address within a tick is not one: that goes to the hard-error decision.  (A page lost again in
+| that tick costs a bprobe of the near page, which answers, and another retry.)
+	moveal	u+0x730,%a0
+	movel	%fp@(8),%d0
+	movel	lbolt,%d1
+	subl	hb_last_tick,%d1
+	subql	&1,%d1			| 0 or 1 tick ago?  (0 wraps to the top)
+	bcss	Lrt_hbnear
+	subql	&1,%d1
+	bcss	Lrt_hbnear
+	bras	Lrt_hbnew
+Lrt_hbnear:
+	cmpl	hb_last_addr,%d0
+	bnes	Lrt_hbnew
+	cmpal	hb_last_proc,%a0
+	bnes	Lrt_hbnew
+	clrl	hb_last_proc
+	addql	&1,hbu_again_n
+	braw	Lrt_hbnorm
+Lrt_hbnew:
+	movel	%d0,hb_last_addr
+	movel	%a0,hb_last_proc
+	movel	lbolt,hb_last_tick
+	braw	Lrt_hbfixed
+Lrt_hbnofar:
+.endif
 .ifdef LOWUSER
 | The next page will not resolve.  ptest already found the current page resident when this code is
 | reached, so as_fault on it proves nothing and is no reason to retry (ISSUE-116): a misaligned read
@@ -115,7 +147,15 @@ hardbus040_core:
 | says so itself, FA is the near page with SSW MA set (the 060's MA is wb060_xpage's, and its frame
 | is format 4): that is the program's fault on the far page, SIGSEGV naming it, EFAULT from a copyin.
 | Anything else goes to the hard-error decision.
-	moveal	%fp@,%a1		| usrxmemflt_orig's frame
+	moveal	%fp@,%a1		| usrxmemflt_orig's frame, or the debug build's hardbus twin's:
+	movel	%fp@(4),%d1		| called from anywhere but usrxmemflt_orig, go one further
+	cmpil	&usrxmemflt_orig,%d1
+	bcss	Lrt_hbup
+	cmpil	&usrxmemflt_orig+0x262,%d1
+	bcss	Lrt_hbfr
+Lrt_hbup:
+	moveal	%a1@,%a1
+Lrt_hbfr:
 	moveal	%a1@(8),%a0		| the trap frame
 	moveb	%a0@(70),%d1
 	andib	&0xf0,%d1
@@ -207,6 +247,12 @@ hbu_pte:
 hbu_xpage_n:
 	.long	0			| page-crossing resolves (the 2026-07-04 date-hang path)
 .ifdef LOWUSER
+	.globl	hbu_again_n
+hbu_again_n:				| ISSUE-116: the same retry again within a tick: sent to the hard-error decision
+	.long	0
+hb_last_addr:	.long	0
+hb_last_proc:	.long	0
+hb_last_tick:	.long	0
 	.globl	hbu_farsegv_n
 hbu_farsegv_n:
 	.long	0			| misaligned 68040 reads denied on their far page

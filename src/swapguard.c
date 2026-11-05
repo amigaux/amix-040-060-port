@@ -24,10 +24,12 @@
  * smaller block: a pool block larger than what was freed, on a machine out of kernel map and pages) panics.
  * A block swapadd did not take (it failed before allocating) is freed on return.  Nothing else in swapadd changes.
  *
- * THE LIMIT.  The array stays allocated for as long as the area exists, so it is refused like a missing run when it
+ * THE LIMITS.  The array stays allocated for as long as the area exists, so it is refused like a missing run when it
  * would pin over an eighth of the main store: with an 8 MiB arena nothing else would stop "swap -a" of a whole big
- * slice pinning several MiB on a 16 MiB machine, and the boot's stepping down (S90swap) relies on the refusal.
- * 16 MiB of RAM takes up to about 490 MiB of swap in one area, 128 MiB up to about 3.9 GiB.
+ * slice pinning several MiB on a 16 MiB machine, and the boot's stepping down (S90swap) relies on the refusal.  It is
+ * refused too when it would leave no run of 1 MiB (SWG_KEEP clicks) in kvseg: the other KM_SLEEP allocators over 4 KiB,
+ * a large process's anon map first, sleep uninterruptibly when no run is left, and a swap area must not cause that.
+ * One area can therefore be up to about 490 MiB at 16 MiB of RAM and about 750 MiB at 128 MiB (ISSUE-111).
  */
 #include <sys/types.h>
 #include <sys/param.h>
@@ -38,8 +40,10 @@
 #define	SWG_PAGESHIFT	12			/* swapadd's page: 4 KiB on this line (patch_swapgeom.py) */
 #define	SWG_PAGE	(1 << SWG_PAGESHIFT)
 #define	SWG_ANON	16			/* sizeof (struct anon): bytes of array per page */
+#define	SWG_KEEP	256			/* clicks: the run kvseg must still have after the array */
 
 extern int sleep(), maxmem;
+extern long sptmap[];			/* struct map: a header, then (size, start) pairs up to a size of 0 */
 extern void wakeup();
 
 long swg_magic = 0x53574721;		/* "SWG!" */
@@ -60,6 +64,18 @@ swapguard_swapadd()
 }
 int (*swg_swapadd)() = swapguard_swapadd;
 
+/* the largest free run of kvseg; a stale answer only moves a refusal by one run */
+static long
+swg_largest()
+{
+	long *m, big = 0;
+
+	for (m = sptmap + 2; *m != 0; m += 2)
+		if (*m > big)
+			big = *m;
+	return big;
+}
+
 int
 swapadd_guarded(vp, lowblk, nblks, name)
 	caddr_t vp;
@@ -71,7 +87,7 @@ swapadd_guarded(vp, lowblk, nblks, name)
 
 	swg_calls++;
 	while (swg_busy)
-		(void) sleep((caddr_t)&swg_busy, PZERO + 1);
+		(void) sleep((caddr_t)&swg_busy, PZERO);	/* not interruptible: swapctl has no way to clean up a longjmp */
 	swg_busy = 1;
 	/* swapadd's own rounding: the byte range [lowblk, lowblk + nblks) * 512 narrowed to whole pages */
 	start = ((lowblk << 9) + SWG_PAGE - 1) & ~(SWG_PAGE - 1);
@@ -79,6 +95,10 @@ swapadd_guarded(vp, lowblk, nblks, name)
 	size = end > start ? ((end - start) >> SWG_PAGESHIFT) * SWG_ANON : 0;
 	if (size != 0) {
 		swg_block = (u_int)size > (u_int)maxmem << (SWG_PAGESHIFT - 3) ? 0 : (caddr_t)kmem_zalloc(size, KM_NOSLEEP);
+		if (swg_block != 0 && swg_largest() < SWG_KEEP) {
+			kmem_free(swg_block, size);
+			swg_block = 0;
+		}
 		if (swg_block == 0) {
 			swg_nomem++;
 			swg_busy = 0;

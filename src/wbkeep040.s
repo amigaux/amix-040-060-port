@@ -19,6 +19,10 @@
 |     handler is called again, as the re-run does on the 68030/68060.  Any other restore (a longjmp
 |     out of the handler, another context) leaves the record alone.
 | as_free                 the address space dies (exit, exec): its records go.
+| sendsig                 a signal is delivered at a kept context.  The first is the signal of the fault.
+|     A second means the first handler left without restoring that context (longjmp) and the program is
+|     past the store, so the record goes; left there, this signal's return would replay an old store over
+|     newer data.
 |
 | The table holds WBK_N records of WBK_SZ bytes: as, usp, pc, then the frame's bytes +76..+111 (SSW,
 | WB3S, WB2S, WB1S, FA, WB3A, WB3D, WB2A, WB2D, WB1A, WB1D) as the CPU stacked them, with the valid
@@ -33,7 +37,7 @@
 | Assemble: m68k-cbm-sysv4-gcc -m68040 -c wbkeep040.s -o build/wbkeep040.o
 
 	.set	WBK_N, 8
-	.set	WBK_SZ, 48
+	.set	WBK_SZ, 52
 	.set	E_AS, 0
 	.set	E_USP, 4
 	.set	E_PC, 8
@@ -41,11 +45,12 @@
 	.set	E_WB3S, 14		| frame +78
 	.set	E_WB2S, 16		| frame +80
 	.set	E_WB1S, 18		| frame +82
+	.set	E_SENT, 48		| the fault's signal has gone out
 	.set	P_AS, 124		| proc->p_as
 	.set	P_PCB, 252		| restorecontext: prsetregs(curproc's +252, gregs); getuvpcb takes it
 
 	.data
-	.globl	wbk_tab, wbk_live, wbk_saved_n, wbk_replayed_n, wbk_refault_n, wbk_full_n, wbk_freed_n
+	.globl	wbk_tab, wbk_live, wbk_saved_n, wbk_replayed_n, wbk_refault_n, wbk_full_n, wbk_freed_n, wbk_stale_n
 	.balign	4
 wbk_tab:	.space	WBK_N*WBK_SZ
 wbk_live:	.long	0		| records in the table now
@@ -54,6 +59,7 @@ wbk_replayed_n:	.long	0		| records completed by a matching restorecontext
 wbk_refault_n:	.long	0		| replays denied again (SIGSEGV, record kept)
 wbk_full_n:	.long	0		| records dropped, the table full
 wbk_freed_n:	.long	0		| records dropped with their address space
+wbk_stale_n:	.long	0		| records dropped: a second signal at the kept context
 	.globl	wbk_inreplay
 wbk_inreplay:	.long	0		| user replays in progress (usrxmemflt's and restorecontext's):
 					| wb040.s's wbf_dropwarn stays quiet for a fault nested in one
@@ -148,6 +154,7 @@ Ls_copy:
 	beqs	Ls_drop			| none to keep: the record stays free
 	movel	%a2@,%a3@(E_USP)
 	movel	%a2@(66),%a3@(E_PC)
+	clrl	%a3@(E_SENT)
 	movel	%d3,%a3@(E_AS)		| last: the record is live from here
 	addql	&1,wbk_live
 	addql	&1,wbk_saved_n
@@ -234,6 +241,7 @@ Lr_copy:
 	bras	Lr_ret
 Lr_again:
 	addql	&1,wbk_refault_n	| keep the slots from the denied one on, signal again
+	clrl	%a1@(E_SENT)
 	movel	wbf_slot,%d1
 	moveq	&0,%d2
 	lea	%a1@(E_WB1S),%a0
@@ -255,6 +263,45 @@ Lr_ret:
 	unlk	%fp
 	moveal	%d0,%a0
 	rts
+
+| ---------------------------------------------------------------------------------------------
+| sendsig(...): the stock body (sendsig_orig) after the record of the context being interrupted, if any,
+| is marked or dropped.  The frame is u_ar0 (u+0x864), as sendsig_orig reads it: USP at +0, PC at +66.
+	.globl	sendsig
+sendsig:
+	tstl	wbk_live
+	beqs	Lg_go
+	movel	%d2,%sp@-
+	moveal	u+0x864,%a0
+	moveal	u+0x730,%a1
+	movel	%a1@(P_AS),%d0
+	lea	wbk_tab,%a1
+	moveq	&WBK_N-1,%d1
+Lg_loop:
+	cmpl	%a1@(E_AS),%d0
+	bnes	Lg_next
+	movel	%a0@,%d2
+	cmpl	%a1@(E_USP),%d2
+	bnes	Lg_next
+	movel	%a0@(66),%d2
+	cmpl	%a1@(E_PC),%d2
+	bnes	Lg_next
+	tstl	%a1@(E_SENT)
+	bnes	Lg_stale
+	movel	&1,%a1@(E_SENT)
+	bras	Lg_done
+Lg_stale:
+	clrl	%a1@(E_AS)
+	subql	&1,wbk_live
+	addql	&1,wbk_stale_n
+	bras	Lg_done
+Lg_next:
+	lea	%a1@(WBK_SZ),%a1
+	dbra	%d1,Lg_loop
+Lg_done:
+	movel	%sp@+,%d2
+Lg_go:
+	jmp	sendsig_orig
 
 | ---------------------------------------------------------------------------------------------
 | as_free(as): drop the address space's records, then the stock body (as_free_orig).
