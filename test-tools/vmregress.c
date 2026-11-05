@@ -265,21 +265,52 @@ static int denied_proc(void)	/* /proc refuses a denied page: a read must not ret
 	return 0;
 }
 
-static int writeonly(void)	/* a read of a write-only private page is refused, not restarted for ever */
+static int rd_ok;
+static void rd2(char *p) { rd_ok = *(volatile char *)p; if (rd_ok != 7) _exit(1); }
+static int writeonly(void)	/* a read of a write-only page always succeeds: file, zero fill, a copy, a page out */
 {
-	char *p; int fd;
+	char *p, *z, b[4]; int fd;
 	file("wo", 2, 7);
 	if ((fd = open(work, O_RDONLY)) < 0) return 1;
-	p = mmap((caddr_t)0, PG, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+	p = mmap((caddr_t)0, 2 * PG, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
 	if (p == (char *)-1) return 2;
 	close(fd);
-	if (mprotect(p, PG, PROT_WRITE)) return 3;
-	if (sig_of(rd1, p) != SIGSEGV) return 4;
+	if (mprotect(p, 2 * PG, PROT_WRITE)) return 3;
+	if (sig_of(rd2, p)) return 4;
 	sprintf(work, "%s/vmr.wo2", dir);
-	if ((fd = open(work, O_RDWR | O_CREAT | O_TRUNC, 0666)) < 0) return 6;
-	if (write(fd, p, 4) != -1 || errno != EFAULT) return 7;
+	if ((fd = open(work, O_RDWR | O_CREAT | O_TRUNC, 0666)) < 0) return 5;
+	if (write(fd, p + PG, 4) != 4) return 6;		/* a copyin from it */
+	lseek(fd, 0L, 0);
+	if (read(fd, b, 4) != 4 || b[0] != 7) return 7;
 	close(fd); unlink(work);
+	p[0] = 9;
+	if (p[0] != 9) return 8;
+	z = anon(PG, PROT_WRITE);
+	if (*(volatile char *)z != 0) return 9;			/* zero fill */
 	return 0;
+}
+
+static void tas1(char *p) { __asm__ __volatile__ ("tas %0@" : : "a" (p) : "memory", "cc"); }
+static void cas1(char *p) { int o = 0, v = 1; __asm__ __volatile__ ("casl %0,%1,%2@" : "=d" (o) : "d" (v), "a" (p), "0" (o) : "memory", "cc"); }
+static int rmw(void)	/* tas and cas: refused on a read-only page; a page first touched by one, or shared by fork, must work */
+{
+	char *r = anon(PG, PROT_READ), *w = anon(2 * PG, PROT_READ | PROT_WRITE); pid_t c; int st;
+	if (sig_of(tas1, r) != SIGSEGV) return 1;
+	if (sig_of(cas1, r) != SIGSEGV) return 2;
+	tas1(w);			/* first touched by a tas */
+	if (((unsigned char *)w)[0] != 0x80) return 3;
+	cas1(w + PG);			/* by a cas */
+	if (*(int *)(w + PG) != 1) return 4;
+	if ((c = fork()) == 0) {	/* shared with the child: a copy on write under each */
+		alarm(10);
+		((unsigned char *)w)[1] = 0;
+		tas1(w + 1);
+		_exit(((unsigned char *)w)[1] == 0x80 ? 0 : 5);
+	}
+	tas1(w + 2);
+	if (((unsigned char *)w)[2] != 0x80) return 6;
+	waitpid(c, &st, 0);
+	return st ? 7 : 0;
 }
 
 static int rt_n;
@@ -396,6 +427,7 @@ int main(int ac, char **av)
 	one("exec-shared", execs, 120);
 	one("mprotect", mprot, 90);
 	one("kernel-copies", copies, 60);
+	one("rmw", rmw, 60);
 	one("proc-breakpoint", bpt, 30);
 	one("core-dump", core, 60);
 	timing();

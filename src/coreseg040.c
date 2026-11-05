@@ -21,8 +21,6 @@
 #define	CS_WRITE	1		/* enum uio_rw, as the stock body pushes it */
 #define	CS_USER		0		/* enum uio_seg */
 #define	CS_KERNEL	1
-#define	CS_READ		1		/* PROT_READ, PROT_EXEC */
-#define	CS_EXEC		4
 
 extern int as_memory(), as_getprot(), vn_rdwr();
 
@@ -50,7 +48,7 @@ core_seg(p, vp, offset, addr, size, rlimit, cr)
 			prot = as_getprot(as, (caddr_t)((u_int)a & ~(CS_PAGE - 1)), &next);
 			if (next > end)
 				next = end;
-			denied = (prot & (CS_READ | CS_EXEC)) == 0;
+			denied = (prot & 7) == 0;
 			if (denied) {
 				core_holes++;
 				continue;

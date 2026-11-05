@@ -60,9 +60,12 @@
 |                              type: the 68040's SSW RW and the 68060's FSLW are defined for every access.
 |                              /proc raises the protection first (prusrio's as_setprot), so a breakpoint in
 |                              private text passes; where that fails (read-only shared file), so does this.
-|     S_READ                   needs PROT_READ or PROT_EXEC.  No caller passes S_EXEC: a fetch arrives as S_READ,
-|                              so an execute-only page must pass.  A read of a write-only private page would
-|                              load no translation and restart for ever.
+|     S_READ                   needs PROT_READ or PROT_EXEC, or PROT_WRITE, in which case read is added to the stored
+|                              protection and the body serves it.  No caller passes S_EXEC: a fetch arrives as
+|                              S_READ, so an execute-only page must pass.  A read of a write-only page must always
+|                              succeed: a resident writable translation never faults on a read anyway, so refusing
+|                              only what is not resident worked until pageout, and stock's body with write alone
+|                              loaded no translation for a private file page and restarted for ever.
 |     F_SOFTLOCK with S_OTHER  passes, as stock: mlock of a page it will not touch (segvn_lockop).
 |     anything else            needs some permission.
 | A soft lock of a denied page must not succeed for /proc: the body loads no valid translation for it, and
@@ -108,8 +111,21 @@ Lsp_w:
 	bnes	Lsp_pass
 	bras	Lsp_deny
 Lsp_r:
-	andib	&5,%d0			| PROT_READ or PROT_EXEC?
+	moveb	%d0,%d1
+	andib	&5,%d1			| PROT_READ or PROT_EXEC?
 	bnes	Lsp_pass
+	btst	&1,%d0			| PROT_WRITE alone: it may read from now on
+	beqs	Lsp_deny
+	moveal	%sp@(4),%a0
+	moveal	%a0@(28),%a0
+	tstb	%a0@(2)
+	bnes	Lsp_rv
+	orib	&1,%a0@(3)		| svd->prot
+	bras	Lsp_pass
+Lsp_rv:
+	moveal	%sp@(20),%a0
+	orib	&0x10,%a0@		| vp_prot, the top nibble
+	bras	Lsp_pass
 Lsp_deny:
 	moveq	&0,%d1
 	movel	%sp@(8),segvn_prot_last_addr	| arg2 = the denied address
