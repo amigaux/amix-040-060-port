@@ -95,7 +95,7 @@ swapadd_guarded(vp, lowblk, nblks, name)
 	size = end > start ? ((end - start) >> SWG_PAGESHIFT) * SWG_ANON : 0;
 	if (size != 0) {
 		swg_block = (u_int)size > (u_int)maxmem << (SWG_PAGESHIFT - 3) ? 0 : (caddr_t)kmem_zalloc(size, KM_NOSLEEP);
-		if (swg_block != 0 && swg_largest() < SWG_KEEP) {
+		if (swg_block != 0 && size > SWG_PAGE && swg_largest() < SWG_KEEP) {	/* to a page, the pool serves it */
 			kmem_free(swg_block, size);
 			swg_block = 0;
 		}

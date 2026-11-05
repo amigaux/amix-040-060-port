@@ -444,7 +444,7 @@ if [ "$CORESEG" = "1" ]; then
 	m68k-cbm-sysv4-gcc $(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/') \
 		-c "$HERE/src/coreseg040.c" -o "$HERE/build/coreseg040.o"
 	CSG_IN=$(m68k-linux-gnu-nm "$HERE/build/coreseg040.o" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ')
-	[ "$CSG_IN" = "as_memory vn_rdwr " ] || { echo "[FAIL] coreseg040.o imports '$CSG_IN'"; exit 1; }
+	[ "$CSG_IN" = "as_getprot as_memory vn_rdwr " ] || { echo "[FAIL] coreseg040.o imports '$CSG_IN'"; exit 1; }
 	CSG_OBJ="$HERE/build/coreseg040.o"
 else
 	echo "[*] CORESEG=0 -- the stock core_seg"

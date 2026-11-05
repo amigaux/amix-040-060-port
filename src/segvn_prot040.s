@@ -54,18 +54,19 @@
 |     `moveq #4,%d0`, so the value is confirmed twice.
 |
 | THE RULE (ISSUE-116).  Effective protection p = the page's vp_prot when the segment has per-page
-| protections, else svd->prot.
-|     F_SOFTLOCK                       passes, as stock.  /proc reads a denied page with it (prusrio:
-|                                      F_SOFTLOCK, S_READ) and segvn_lockop locks one (S_OTHER).
-|     p has no bit                     FC_PROT.  segvn_fault@0xac46a tests only a write under F_PROT, so a
-|                                      PROT_NONE segment reached the body and restarted for ever.
-|     S_WRITE and no PROT_WRITE in p   FC_PROT, at F_INVAL too: 0xac46a tests (prot & 3) == 1, so PROT_EXEC
-|                                      alone passed it and a write restarted for ever.  The 68040's SSW RW and
-|                                      the 68060's FSLW W are defined for every access, fetches included.
-|     anything else                    passes.  The hardware cannot refuse a read of a write-only page or a
-|                                      fetch of an execute-only one, and no caller passes S_EXEC: a fetch
-|                                      arrives as S_READ, so testing the selected bit, as the references do,
-|                                      refused to run an mprotect(PROT_EXEC) page.
+| protections, else svd->prot, masked to 7 (PROT_USER, 8, is not a permission).
+|     S_WRITE                  needs PROT_WRITE.  0xac46a tests (prot & 3) == 1 under F_PROT only, so
+|                              PROT_EXEC alone passed it and a write restarted for ever.  Refused at every
+|                              type: the 68040's SSW RW and the 68060's FSLW are defined for every access.
+|                              /proc raises the protection first (prusrio's as_setprot), so a breakpoint in
+|                              private text passes; where that fails (read-only shared file), so does this.
+|     S_READ                   needs PROT_READ or PROT_EXEC.  No caller passes S_EXEC: a fetch arrives as S_READ,
+|                              so an execute-only page must pass.  A read of a write-only private page would
+|                              load no translation and restart for ever.
+|     F_SOFTLOCK with S_OTHER  passes, as stock: mlock of a page it will not touch (segvn_lockop).
+|     anything else            needs some permission.
+| A soft lock of a denied page must not succeed for /proc: the body loads no valid translation for it, and
+| prusrio's vtop then answers with a kernel address, low memory, so the read would return kernel memory.
 |
 | SHAPE.  A tail-call wrapper: no stack frame, so the argument block and return address stay
 | exactly where the original expects them and control simply falls through with `jmp`.  d0/d1/a0
@@ -76,9 +77,6 @@
 	.text
 	.globl	segvn_faultpage
 segvn_faultpage:
-	moveq	&2,%d0
-	cmpl	%sp@(32),%d0		| type == F_SOFTLOCK?
-	beqw	Lsp_pass
 	moveal	%sp@(4),%a0		| a0 = seg              (arg1)
 	moveal	%a0@(28),%a0		| a0 = svd = seg->s_data
 	tstb	%a0@(2)			| svd->pageprot: per-page protections present?
@@ -93,12 +91,24 @@ Lsp_page:
 	moveb	%a0@,%d0		| the vpage byte: vp_prot is its TOP nibble
 	lsrb	&4,%d0
 Lsp_have:
-	andib	&7,%d0
-	beqs	Lsp_deny		| no permission at all
+	andib	&7,%d0			| p
+	movel	%sp@(36),%d1		| rw                    (arg9)
+	cmpil	&2,%d1
+	beqs	Lsp_w
+	cmpil	&1,%d1
+	beqs	Lsp_r
+	moveq	&2,%d1
+	cmpl	%sp@(32),%d1		| another rw: type == F_SOFTLOCK?  (arg8)
+	beqs	Lsp_pass
+	tstb	%d0
+	bnes	Lsp_pass
+	bras	Lsp_deny
+Lsp_w:
 	btst	&1,%d0			| PROT_WRITE?
 	bnes	Lsp_pass
-	moveq	&2,%d1
-	cmpl	%sp@(36),%d1		| rw == S_WRITE?        (arg9)
+	bras	Lsp_deny
+Lsp_r:
+	andib	&5,%d0			| PROT_READ or PROT_EXEC?
 	bnes	Lsp_pass
 Lsp_deny:
 	moveq	&0,%d1

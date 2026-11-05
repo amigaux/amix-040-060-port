@@ -125,15 +125,24 @@ Lu_replay:
 | ISSUE-116: a limit on nested replays.  as_fault can answer 0 and leave a store that still faults: nothing then ended
 | the recursion, each level took 0xEC bytes, and the stack ran over struct user below it.  On -62 (a 68040, a store
 | across into a PROT_NONE page) it overwrote u_procp, and the next read of it jumped to 0.  A frame taken inside a
-| replay has PC = Lwb_fail (k_trap's u_nofault pad) and a2 = the replay's own frame, so the chain counts the levels
-| with no state; a page lost between as_fault and the moves costs one level.  Past the limit the store is denied like
-| any other: the outer replay lands on Lwb_fail and the process gets SIGSEGV.
+| replay is a supervisor frame with PC in Lwb_do and a2 = the replay's own frame, so the chain counts the levels with no
+| state; a page lost between as_fault and the moves costs one level.  Past the limit the store is denied like any
+| other: the outer replay lands on Lwb_fail and the process gets SIGSEGV.
 	moveal	%a2,%a0
 	moveq	&WB_NEST_MAX,%d1
 Lu_nest:
-	cmpil	&Lwb_fail,%a0@(66)	| taken inside a replay?
-	bnes	Lu_nestok
+	btst	&5,%a0@(64)		| a supervisor frame?  a user's PC and a2 are the user's to choose
+	beqs	Lu_nestok
+	movel	%a0@(66),%d0
+	cmpil	&Lwb_do,%d0		| taken inside a replay?
+	bcss	Lu_nestok
+	cmpil	&Lwb_ndone,%d0
+	bhis	Lu_nestok
 	moveal	%a0@(44),%a0		| the trap-time a2: the frame of the replay it interrupted
+	cmpal	&u,%a0			| on this stack, or it is not one
+	bcss	Lu_nestok
+	cmpal	&u+0x2000-0x70,%a0
+	bccs	Lu_nestok
 	subql	&1,%d1
 	bnes	Lu_nest
 	addql	&1,wb_nest_n

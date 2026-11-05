@@ -240,19 +240,39 @@ static int sig_of(void (*f)(char *), char *p)
 static void rd1(char *p) { if (*(volatile char *)p == 99) _exit(1); }
 static void wr1(char *p) { *(volatile char *)p = 1; }
 
-static int denied_proc(void)	/* /proc reads a denied page as stock did, and that opens nothing for the program itself */
+static int denied_proc(void)	/* /proc refuses a denied page: a read must not return memory that is not the program's */
 {
-	char *p = anon(PG, PROT_READ | PROT_WRITE), b[8], nm[32]; int fd;
+	char *p = anon(PG, PROT_READ | PROT_WRITE), *lo, b[8], nm[32]; int fd;
 	memset(p, 0x5a, PG);
 	if (mprotect(p, PG, PROT_NONE)) return 1;
+	lo = mmap((caddr_t)0x00100000, PG, PROT_NONE, MAP_PRIVATE | MAP_FIXED, zfd, 0);
+	if (lo == (char *)-1) return 2;
 	sprintf(nm, "/proc/%05d", (int)getpid());
-	if ((fd = open(nm, O_RDONLY)) < 0) return errno == EACCES ? 0 : 2;
+	if ((fd = open(nm, O_RDONLY)) < 0) return errno == EACCES ? 0 : 3;
 	lseek(fd, (long)p, 0);
-	if (read(fd, b, 8) != 8) return 3;
-	if (b[0] != 0x5a) return 4;
+	if (read(fd, b, 8) != -1) return 4;
+	lseek(fd, (long)lo, 0);
+	if (read(fd, b, 8) != -1) return 5;
 	close(fd);
-	if (sig_of(rd1, p) != SIGSEGV) return 5;
-	if (sig_of(wr1, p) != SIGSEGV) return 6;
+	if (sig_of(rd1, p) != SIGSEGV) return 6;
+	if (sig_of(wr1, p) != SIGSEGV) return 7;
+	return 0;
+}
+
+static int writeonly(void)	/* a read of a write-only private page is refused, not restarted for ever */
+{
+	char *p; int fd;
+	file("wo", 2, 7);
+	if ((fd = open(work, O_RDONLY)) < 0) return 1;
+	p = mmap((caddr_t)0, PG, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+	if (p == (char *)-1) return 2;
+	close(fd);
+	if (mprotect(p, PG, PROT_WRITE)) return 3;
+	if (sig_of(rd1, p) != SIGSEGV) return 4;
+	sprintf(work, "%s/vmr.wo2", dir);
+	if ((fd = open(work, O_RDWR | O_CREAT | O_TRUNC, 0666)) < 0) return 6;
+	if (write(fd, p, 4) != -1 || errno != EFAULT) return 7;
+	close(fd); unlink(work);
 	return 0;
 }
 
@@ -359,6 +379,7 @@ int main(int ac, char **av)
 	one("denied-proc", denied_proc, 60);
 	one("denied-copies", denied_copies, 60);
 	one("exec-only", execonly, 60);
+	one("write-only", writeonly, 60);
 	one("denied-core", denied_core, 60);
 	if (fails) printf("VMREGRESS FAIL %d\n", fails); else printf("VMREGRESS PASS\n");
 	return fails;

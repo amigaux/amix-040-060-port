@@ -111,32 +111,35 @@ hardbus040_core:
 	beqw	Lrt_hbfixed		| next page mapped -> retry
 .else
 	bnes	Lrt_hbnofar
-| The next page resolves, so retry, once.  Nothing here says the access crosses: a genuine bus error in
-| a page's last 8 bytes with its next page mapped restarted for ever, and from a copyin nothing could
-| kill it.  A real crossing does not come back, its page now being there, so the same process at the same
-| address within a tick is not one: that goes to the hard-error decision.  (A page lost again in
-| that tick costs a bprobe of the near page, which answers, and another retry.)
+| The next page resolves, so retry.  Nothing here says the access crosses: a genuine bus error in a page's
+| last 8 bytes with its next page mapped restarted for ever, and from a copyin nothing could kill it.  A
+| real crossing comes back at most once a phase, its page being there now, so the same process at the same
+| address HB_AGAIN times with no tick between is not one: hardbus_orig's own hard error, no probe.
 	moveal	u+0x730,%a0
 	movel	%fp@(8),%d0
 	movel	lbolt,%d1
 	subl	hb_last_tick,%d1
-	subql	&1,%d1			| 0 or 1 tick ago?  (0 wraps to the top)
-	bcss	Lrt_hbnear
-	subql	&1,%d1
-	bcss	Lrt_hbnear
-	bras	Lrt_hbnew
-Lrt_hbnear:
+	cmpil	&1,%d1
+	bhis	Lrt_hbnew
 	cmpl	hb_last_addr,%d0
 	bnes	Lrt_hbnew
 	cmpal	hb_last_proc,%a0
 	bnes	Lrt_hbnew
+	movel	lbolt,hb_last_tick
+	addql	&1,hb_again
+	cmpil	&HB_AGAIN,hb_again
+	bcsw	Lrt_hbfixed
 	clrl	hb_last_proc
 	addql	&1,hbu_again_n
-	braw	Lrt_hbnorm
+	moveq	&9,%d0
+	moveml	%fp@(-8),%d2-%d3
+	unlk	%fp
+	rts
 Lrt_hbnew:
 	movel	%d0,hb_last_addr
 	movel	%a0,hb_last_proc
 	movel	lbolt,hb_last_tick
+	clrl	hb_again
 	braw	Lrt_hbfixed
 Lrt_hbnofar:
 .endif
@@ -247,9 +250,11 @@ hbu_pte:
 hbu_xpage_n:
 	.long	0			| page-crossing resolves (the 2026-07-04 date-hang path)
 .ifdef LOWUSER
+	.set	HB_AGAIN, 8
 	.globl	hbu_again_n
-hbu_again_n:				| ISSUE-116: the same retry again within a tick: sent to the hard-error decision
+hbu_again_n:				| ISSUE-116: the same retry HB_AGAIN times within a tick: a hard error
 	.long	0
+hb_again:	.long	0
 hb_last_addr:	.long	0
 hb_last_proc:	.long	0
 hb_last_tick:	.long	0
