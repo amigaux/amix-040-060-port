@@ -62,6 +62,10 @@
 | registers unchanged.
 | ===========================================================================================
 
+	.set	WB_NEST_MAX, 4
+	.data
+	.globl	wb_nest_n
+wb_nest_n:	.long	0		| stores denied at the limit on nested replays
 	.text
 	.globl	usrxmemflt
 usrxmemflt:
@@ -118,6 +122,26 @@ Lu_kept:
 	braw	Lu_done			| OUTCOME UNCHANGED: still skip replay and signal
 Lu_replay:
 	moveal	%fp@(8),%a2		| a2 = frame
+| ISSUE-116: a limit on nested replays.  as_fault can answer 0 and leave a store that still faults: nothing then ended
+| the recursion, each level took 0xEC bytes, and the stack ran over struct user below it.  On -62 (a 68040, a store
+| across into a PROT_NONE page) it overwrote u_procp, and the next read of it jumped to 0.  A frame taken inside a
+| replay has PC = Lwb_fail (k_trap's u_nofault pad) and a2 = the replay's own frame, so the chain counts the levels
+| with no state; a page lost between as_fault and the moves costs one level.  Past the limit the store is denied like
+| any other: the outer replay lands on Lwb_fail and the process gets SIGSEGV.
+	moveal	%a2,%a0
+	moveq	&WB_NEST_MAX,%d1
+Lu_nest:
+	cmpil	&Lwb_fail,%a0@(66)	| taken inside a replay?
+	bnes	Lu_nestok
+	moveal	%a0@(44),%a0		| the trap-time a2: the frame of the replay it interrupted
+	subql	&1,%d1
+	bnes	Lu_nest
+	addql	&1,wb_nest_n
+	moveq	&4,%d0			| FC_PROT
+	bsrw	Lu_siginfo
+	movel	%d0,%d4
+	braw	Lu_done
+Lu_nestok:
 .ifdef WBKEEP
 	addql	&1,wbk_inreplay		| a fault nested in this replay is ours to keep or report
 .endif

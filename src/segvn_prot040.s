@@ -53,49 +53,53 @@
 |   FC_PROT 4 (vm/faultcode.h) -- and segvn_fault's own segment-wide path returns exactly
 |     `moveq #4,%d0`, so the value is confirmed twice.
 |
+| THE RULE (ISSUE-116).  Effective protection p = the page's vp_prot when the segment has per-page
+| protections, else svd->prot.
+|     F_SOFTLOCK                       passes, as stock.  /proc reads a denied page with it (prusrio:
+|                                      F_SOFTLOCK, S_READ) and segvn_lockop locks one (S_OTHER).
+|     p has no bit                     FC_PROT.  segvn_fault@0xac46a tests only a write under F_PROT, so a
+|                                      PROT_NONE segment reached the body and restarted for ever.
+|     S_WRITE and no PROT_WRITE in p   FC_PROT, at F_INVAL too: 0xac46a tests (prot & 3) == 1, so PROT_EXEC
+|                                      alone passed it and a write restarted for ever.  The 68040's SSW RW and
+|                                      the 68060's FSLW W are defined for every access, fetches included.
+|     anything else                    passes.  The hardware cannot refuse a read of a write-only page or a
+|                                      fetch of an execute-only one, and no caller passes S_EXEC: a fetch
+|                                      arrives as S_READ, so testing the selected bit, as the references do,
+|                                      refused to run an mprotect(PROT_EXEC) page.
+|
 | SHAPE.  A tail-call wrapper: no stack frame, so the argument block and return address stay
 | exactly where the original expects them and control simply falls through with `jmp`.  d0/d1/a0
 | are scratch in this ABI and the original reloads every argument itself, so nothing is saved.
-| Since sp@(0) is the return address, argument N sits at sp@(4N).
+| Since sp@(0) is the return address, argument N sits at sp@(4N): type is arg 8, rw arg 9
+| (segvn_fault@0xac6a2 pushes them last-first from its own type and rw).
 
 	.text
 	.globl	segvn_faultpage
 segvn_faultpage:
+	moveq	&2,%d0
+	cmpl	%sp@(32),%d0		| type == F_SOFTLOCK?
+	beqw	Lsp_pass
 	moveal	%sp@(4),%a0		| a0 = seg              (arg1)
 	moveal	%a0@(28),%a0		| a0 = svd = seg->s_data
 	tstb	%a0@(2)			| svd->pageprot: per-page protections present?
-	bnew	Lsp_page
-	moveb	%a0@(3),%d0		| no: svd->prot.  segvn_fault@0xac46a rejects only a
-	andib	&7,%d0			| write under F_PROT, so a PROT_NONE segment reaches the
-	beqw	Lsp_deny		| fault body and restarts for ever (ISSUE-116).
-	braw	Lsp_pass
+	bnes	Lsp_page
+	moveb	%a0@(3),%d0		| no: svd->prot
+	bras	Lsp_have
 Lsp_page:
 	moveal	%sp@(20),%a0		| a0 = vpage            (arg5)
 	movel	%a0,%d0
 	beqw	Lsp_pass		| defensive: pageprot set but no vpage array -> do not
 					| invent a verdict; let the stock body decide
-	movel	%sp@(36),%d1		| d1 = rw               (arg9)
-	moveq	&7,%d0			| default protchk = PROT_READ|PROT_WRITE|PROT_EXEC
-	cmpil	&1,%d1
-	bnes	Lsp_nread
-	moveq	&1,%d0			| S_READ  -> PROT_READ
-	bras	Lsp_have
-Lsp_nread:
-	cmpil	&2,%d1
-	bnes	Lsp_nwrite
-	moveq	&2,%d0			| S_WRITE -> PROT_WRITE
-	bras	Lsp_have
-Lsp_nwrite:
-	cmpil	&3,%d1
-	bnes	Lsp_have
-	moveq	&4,%d0			| S_EXEC  -> PROT_EXEC
+	moveb	%a0@,%d0		| the vpage byte: vp_prot is its TOP nibble
+	lsrb	&4,%d0
 Lsp_have:
-	moveq	&0,%d1
-	moveb	%a0@,%d1		| the vpage byte
-	lsrl	&4,%d1			| vp_prot is its TOP nibble
-	andil	&0x0f,%d1
-	andl	%d0,%d1			| vp_prot & protchk
-	bnew	Lsp_pass		| access permitted -> ordinary fault handling
+	andib	&7,%d0
+	beqs	Lsp_deny		| no permission at all
+	btst	&1,%d0			| PROT_WRITE?
+	bnes	Lsp_pass
+	moveq	&2,%d1
+	cmpl	%sp@(36),%d1		| rw == S_WRITE?        (arg9)
+	bnes	Lsp_pass
 Lsp_deny:
 	moveq	&0,%d1
 	movel	%sp@(8),segvn_prot_last_addr	| arg2 = the denied address

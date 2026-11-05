@@ -436,6 +436,19 @@ if [ "$SWAP_GUARD" = "1" ]; then
 else
 	echo "[*] SWAP_GUARD=0 -- building WITHOUT the swapadd guard (rollback control)"
 fi
+# coreseg (ISSUE-116): a core dump steps over the pages its process may not read, instead of stopping at the first.
+# CORESEG=0 omits the unit (the stock core_seg, which ends the dump at a PROT_NONE page).
+CORESEG="${CORESEG:-1}"
+CSG_OBJ=""
+if [ "$CORESEG" = "1" ]; then
+	m68k-cbm-sysv4-gcc $(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/') \
+		-c "$HERE/src/coreseg040.c" -o "$HERE/build/coreseg040.o"
+	CSG_IN=$(m68k-linux-gnu-nm "$HERE/build/coreseg040.o" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ')
+	[ "$CSG_IN" = "as_memory vn_rdwr " ] || { echo "[FAIL] coreseg040.o imports '$CSG_IN'"; exit 1; }
+	CSG_OBJ="$HERE/build/coreseg040.o"
+else
+	echo "[*] CORESEG=0 -- the stock core_seg"
+fi
 # pageinitzero (2026-08-20, ISSUE-102): the page-frame database is sptalloc'd with a
 # non-zero base, which is segkmem_mapin -- it MAPS existing DRAM and clears nothing --
 # and page_init only ORs p_lock into each struct.  Every other field arrives as
@@ -650,6 +663,8 @@ m68k-linux-gnu-objcopy \
 	$HG_OC \
 	--weaken-symbol segvn_faultpage \
 	--add-symbol segvn_faultpage_orig=.text:0xac01a,function,global \
+	--weaken-symbol core_seg \
+	--add-symbol core_seg_stock=.text:0x3ef12,function,global \
 	$I10_OC \
 	--weaken-symbol krnxmemflt \
 	--add-symbol krnxmemflt_stock=.text:0x5b140,function,global \
@@ -719,7 +734,7 @@ m68k-cbm-sysv4-ld -r -o "$OUT" "$HERE/build/unix-stage1" \
 	"$HERE/build/config040.o" "$HERE/build/cb_icode040.o" "$HERE/build/kdbg040.o" \
 	"$HERE/build/dbgpublish040.o" "$HERE/build/codepub040.o" "$HERE/build/issue39_040.o" \
 	$LSDT_OBJ "$HERE/build/ptdatfree040.o" \
-	"$HERE/build/syncguard.o" "$HERE/build/pageinitzero.o" $SMU_OBJ $KZERO_OBJ $FQG_OBJ $SWG_OBJ \
+	"$HERE/build/syncguard.o" "$HERE/build/pageinitzero.o" $SMU_OBJ $KZERO_OBJ $FQG_OBJ $SWG_OBJ $CSG_OBJ \
 	"$HERE/build/btwalk.o" $DIAG106_OBJ \
 	$HG_OBJ \
 	$I10_OBJ
@@ -1567,6 +1582,17 @@ if [ "$LOWUSER" = "1" ] && [ "$HGFAULT" = "0" ]; then
 	HBCALLERS=$(m68k-linux-gnu-objdump -dr "$OUT" | awk '/^[0-9a-f]+ <[^>]+>:$/{fn=$2} /R_68K_32[ \t]+hardbus$/{gsub(/[<>:]/,"",fn); printf "%s ", fn}')
 	[ "$HBCALLERS" = "usrxmemflt_orig " ] || { echo "[FAIL] hardbus callers are '$HBCALLERS', expected usrxmemflt_orig"; exit 1; }
 	echo "[OK] ISSUE-116: hardbus from $HBCALLERS"
+fi
+
+# HARD CHECK (ISSUE-116): core_seg is coreseg040.c's, elfcore's three calls name it, and nothing names the stock body.
+if [ "$CORESEG" = "1" ]; then
+	NMO=$(m68k-linux-gnu-nm "$OUT")
+	CSW=$(echo "$NMO" | awk '$3=="core_seg" && $2=="T" {print $1}')
+	CSO=$(echo "$NMO" | awk '$3=="core_seg_stock" && $2=="T" {print $1}')
+	[ -n "$CSW" ] && [ "$CSO" = "0003ef12" ] && [ "$CSW" != "$CSO" ] || { echo "[FAIL] core_seg '$CSW' / core_seg_stock '$CSO'"; exit 1; }
+	[ "$(m68k-linux-gnu-objdump -r -j .text "$OUT" | awk '$3=="core_seg"' | wc -l)" = 3 ] || { echo "[FAIL] core_seg's callers changed"; exit 1; }
+	[ "$(m68k-linux-gnu-objdump -r -j .text "$OUT" | awk '$3=="core_seg_stock"' | wc -l)" = 0 ] || { echo "[FAIL] a caller names core_seg_stock"; exit 1; }
+	echo "[OK] ISSUE-116: core_seg @0x$CSW, stock body @0x$CSO unnamed"
 fi
 
 # HARD CHECK (2026-11-01, ISSUE-111): swapadd's callers name swapadd_guarded, its anon-array kmem_zalloc names
