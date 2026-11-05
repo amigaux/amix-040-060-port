@@ -57,7 +57,8 @@ waitloc:
 | addresses within 8 bytes of a page end: as_fault BOTH the operand's page AND the
 | next page (read, F_INVAL); either resolving -> return 0 and retry.  Both fail ->
 | genuine hardbus.  LOWUSER (ISSUE-116): no address test, because a user page can sit below
-| 0x80000000 since the TT windows are supervisor-only.  hardbus's one caller is usrxmemflt_orig,
+| 0x80000000 since the TT windows are supervisor-only, and the next page's answer alone decides.
+| hardbus's one caller is usrxmemflt_orig,
 | which only a fault with a user function code reaches (userspace040.s, k_trap and u_trap), and
 | the as_fault is on curproc's address space, so a kernel access is not pulled in by this.
 | --weaken-symbol hardbus + --add-symbol hardbus_orig=.text:0x5b3c2.
@@ -107,9 +108,37 @@ hardbus040_core:
 	lea	%sp@(20),%sp
 	tstl	%d0
 	beqw	Lrt_hbfixed		| next page mapped -> retry
+.ifdef LOWUSER
+| The next page will not resolve.  ptest already found the current page resident when this code is
+| reached, so as_fault on it proves nothing and is no reason to retry (ISSUE-116): a misaligned read
+| across into an unmappable page restarted for ever, in the kernel too when a copyin did it.  A 68040
+| says so itself, FA is the near page with SSW MA set (the 060's MA is wb060_xpage's, and its frame
+| is format 4): that is the program's fault on the far page, SIGSEGV naming it, EFAULT from a copyin.
+| Anything else goes to the hard-error decision.
+	moveal	%fp@,%a1		| usrxmemflt_orig's frame
+	moveal	%a1@(8),%a0		| the trap frame
+	moveb	%a0@(70),%d1
+	andib	&0xf0,%d1
+	cmpib	&0x70,%d1		| format 7?
+	bnew	Lrt_hbnorm
+	movew	%a0@(76),%d1		| SSW
+	andiw	&0x0900,%d1		| MA and RW
+	cmpiw	&0x0900,%d1		| a misaligned read?
+	bnew	Lrt_hbnorm
+	moveal	%a1@(12),%a0		| the siginfo usrxmemflt_orig fills
+	moveq	&1,%d1
+	movel	%d1,%a0@(4)		| si_code SEGV_MAPERR
+	movel	%d3,%a0@(12)		| si_addr: the far page
+	addql	&1,hbu_farsegv_n
+	moveq	&11,%d0			| SIGSEGV
+	moveml	%fp@(-8),%d2-%d3
+	unlk	%fp
+	rts
+.else
 	tstl	%d2
 	beqw	Lrt_hbfixed		| current page (re)resolved -> retry
 	braw	Lrt_hbnorm		| both failed -> genuine hard-error path
+.endif
 Lrt_hbfixed:
 	addql	&1,hbu_xpage_n		| the dbg twin used to print this per event; count it instead
 	clrl	%d0			| return 0 = not a hard error, retry
@@ -177,6 +206,11 @@ hbu_pte:
 	.globl	hbu_xpage_n
 hbu_xpage_n:
 	.long	0			| page-crossing resolves (the 2026-07-04 date-hang path)
+.ifdef LOWUSER
+	.globl	hbu_farsegv_n
+hbu_farsegv_n:
+	.long	0			| misaligned 68040 reads denied on their far page
+.endif
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)
 	.text
 

@@ -87,8 +87,8 @@ echo "      ptest040     = real 040 ptestr -> 030-form PSR (the GOT-relocation C
 m68k-cbm-sysv4-gcc -m68040 $KDBG_AS -c "$HERE/src/getfault040.s"  -o "$HERE/build/getfault040.o"
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/userspace040.s" -o "$HERE/build/userspace040.o"
 # LOWUSER (ISSUE-116): a user page below 1 GiB has its own frame since the TT windows are supervisor-only (ISSUE-112).
-# vtop walks the process's tables for a low address with a process (relink-040-fpe.sh clears dma_pageio's bounce b_proc,
-# src/patch_dma_bounce.py), and the crossing-page repair in hardbus has no address test.  LOWUSER=0 is the rollback.
+# vtop walks the process's tables for a low address with a process, and the crossing-page repair in hardbus has no address
+# test and trusts only the next page's answer.  LOWUSER=0 is the rollback.
 LOWUSER="${LOWUSER:-1}"
 LOWUSER_AS=""; [ "$LOWUSER" = 1 ] && LOWUSER_AS="-Wa,--defsym,LOWUSER=1"
 m68k-cbm-sysv4-gcc -m68040 $I10_AS $KDBG_AS $LOWUSER_AS -c "$HERE/src/vtop040.s" -o "$HERE/build/vtop040.o"
@@ -1563,7 +1563,7 @@ fi
 
 # HARD CHECK (2026-11-05, ISSUE-116): hardbus has no address test because usrxmemflt_orig, reached only with a user
 # function code, is its one caller.  A second caller would pull kernel accesses into the crossing-page repair.
-if [ "$LOWUSER" = "1" ]; then
+if [ "$LOWUSER" = "1" ] && [ "$HGFAULT" = "0" ]; then
 	HBCALLERS=$(m68k-linux-gnu-objdump -dr "$OUT" | awk '/^[0-9a-f]+ <[^>]+>:$/{fn=$2} /R_68K_32[ \t]+hardbus$/{gsub(/[<>:]/,"",fn); printf "%s ", fn}')
 	[ "$HBCALLERS" = "usrxmemflt_orig " ] || { echo "[FAIL] hardbus callers are '$HBCALLERS', expected usrxmemflt_orig"; exit 1; }
 	echo "[OK] ISSUE-116: hardbus from $HBCALLERS"

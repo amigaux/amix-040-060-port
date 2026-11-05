@@ -19,7 +19,6 @@
 #   ARENA8M=0 sh relink-040-fpe.sh ...    opt out of step 8.10: the 4 MiB kernel arena (ISSUE-80)
 #   KMEMWAKE=0 sh relink-040-fpe.sh ...   opt out of step 8.10: stock oversize wakeups (ISSUE-82)
 #   IPLRHIWAT=0 sh relink-040-fpe.sh ...  opt out of step 8.10: stock IP lower read hiwat (ISSUE-81)
-#   LOWUSER=0 sh relink-040-fpe.sh ...    opt out of step 8.10: dma_pageio's bounce keeps b_proc (with the base's LOWUSER=0)
 #
 #   FPE_REQUIRE_QUEUE=z3660queue FPE_REQUIRE_CARD=1 sh relink-040-fpe.sh ...
 #                                         refuse a base whose root-storage family is not the
@@ -385,8 +384,7 @@ fi
 
 # ---------------------------------------------------------------- 8.10 kernel map and queues
 # ISSUE-80: the kernel's virtual arena 4 -> 8 MiB.  ISSUE-82: any return of kernel map wakes an oversize sleeper.
-# ISSUE-81: IP's lower read queue 0x2000 -> 0x10000.  ISSUE-116: dma_pageio's bounce buffer carries no b_proc, which
-# vtop040.s's LOWUSER arm relies on.  All are same-size bytes found by symbol, so after the link.
+# ISSUE-81: IP's lower read queue.  All are same-size bytes found by symbol, so after the link.
 if [ "${ARENA8M:-1}" = 0 ]; then
 	echo "[*] ISSUE-80: 8 MiB arena SKIPPED (ARENA8M=0)"
 else
@@ -404,16 +402,9 @@ fi
 if [ "${IPLRHIWAT:-1}" = 0 ]; then
 	echo "[*] ISSUE-81: IP lower read hiwat SKIPPED (IPLRHIWAT=0)"
 else
-	echo "[*] ISSUE-81: IP lower read hiwat 0x2000 -> 0x10000"
+	echo "[*] ISSUE-81: IP lower read hiwat"
 	run_step all python3 "$HERE/src/patch_ip_lrhiwat.py" "$OUT"
 	run_step all python3 "$HERE/src/patch_ip_lrhiwat.py" --check "$OUT"
-fi
-if [ "${LOWUSER:-1}" = 0 ]; then
-	echo "[*] ISSUE-116: dma_pageio's bounce b_proc SKIPPED (LOWUSER=0)"
-else
-	echo "[*] ISSUE-116: dma_pageio's bounce buffer carries no b_proc"
-	run_step all python3 "$HERE/src/patch_dma_bounce.py" "$OUT"
-	run_step all python3 "$HERE/src/patch_dma_bounce.py" --check "$OUT"
 fi
 
 # ---------------------------------------------------------------- 9. packaging guards

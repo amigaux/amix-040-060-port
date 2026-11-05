@@ -64,8 +64,12 @@ segvn_faultpage:
 	moveal	%sp@(4),%a0		| a0 = seg              (arg1)
 	moveal	%a0@(28),%a0		| a0 = svd = seg->s_data
 	tstb	%a0@(2)			| svd->pageprot: per-page protections present?
-	beqw	Lsp_pass		| no -> segment-wide, and segvn_fault@0xac46a already
-					|       rejects that case correctly.  Unchanged.
+	bnew	Lsp_page
+	moveb	%a0@(3),%d0		| no: svd->prot.  segvn_fault@0xac46a rejects only a
+	andib	&7,%d0			| write under F_PROT, so a PROT_NONE segment reaches the
+	beqw	Lsp_deny		| fault body and restarts for ever (ISSUE-116).
+	braw	Lsp_pass
+Lsp_page:
 	moveal	%sp@(20),%a0		| a0 = vpage            (arg5)
 	movel	%a0,%d0
 	beqw	Lsp_pass		| defensive: pageprot set but no vpage array -> do not
@@ -92,6 +96,8 @@ Lsp_have:
 	andil	&0x0f,%d1
 	andl	%d0,%d1			| vp_prot & protchk
 	bnew	Lsp_pass		| access permitted -> ordinary fault handling
+Lsp_deny:
+	moveq	&0,%d1
 	movel	%sp@(8),segvn_prot_last_addr	| arg2 = the denied address
 	movel	%d1,segvn_prot_last_prot	| 0 here by construction; kept so a future
 						| reader sees the tested value, not a claim

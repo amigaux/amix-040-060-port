@@ -33,12 +33,12 @@
 |                                    page; else identity [LOWUSER, ISSUE-116.  Since the
 |                                    TT windows match supervisor accesses only (ISSUE-112)
 |                                    a user page down here has its own frame, so identity
-|                                    would aim DMA at the numeric VA.  dma_pageio 0x20c90
-|                                    COPIED b_proc into its ngeteblk bounce buffer, whose
-|                                    b_addr is SCN0 identity RAM; src/patch_dma_bounce.py
-|                                    clears it, as amiga_dma_pageio 0xdbee always did.
-|                                    The identity arm stays for a kernel buffer, so a
-|                                    proc that maps nothing there behaves as before.]
+|                                    would aim the I/O at the numeric VA.  Who passes a
+|                                    proc: uiophysio's pbuf (b_proc, live for the I/O) and
+|                                    prmapin.  amiga_dma_pageio clears b_proc on its bounce
+|                                    buffer; dma_pageio, which copied it, has no caller.
+|                                    The identity arm stays for a kernel buffer, so a proc
+|                                    that maps nothing there behaves as before.]
 |               va in SCN1        -> force proc = 0 -> svirtophys      [FIX + capped log:
 |                                    a kernel VA is not per-process, and stock vtop_orig
 |                                    tests the PROC ARGUMENT FIRST (0xb7592), so a stale
