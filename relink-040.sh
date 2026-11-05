@@ -439,13 +439,14 @@ fi
 # coreseg (ISSUE-116): a core dump steps over the pages its process may not read, instead of stopping at the first.
 # CORESEG=0 omits the unit (the stock core_seg, which ends the dump at a PROT_NONE page).
 CORESEG="${CORESEG:-1}"
-CSG_OBJ=""
+CSG_OBJ=""; CSG_OC=""
 if [ "$CORESEG" = "1" ]; then
 	m68k-cbm-sysv4-gcc $(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/') \
 		-c "$HERE/src/coreseg040.c" -o "$HERE/build/coreseg040.o"
 	CSG_IN=$(m68k-linux-gnu-nm "$HERE/build/coreseg040.o" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ')
 	[ "$CSG_IN" = "as_getprot as_memory vn_rdwr " ] || { echo "[FAIL] coreseg040.o imports '$CSG_IN'"; exit 1; }
 	CSG_OBJ="$HERE/build/coreseg040.o"
+	CSG_OC="--weaken-symbol core_seg --add-symbol core_seg_stock=.text:0x3ef12,function,global"
 else
 	echo "[*] CORESEG=0 -- the stock core_seg"
 fi
@@ -663,8 +664,7 @@ m68k-linux-gnu-objcopy \
 	$HG_OC \
 	--weaken-symbol segvn_faultpage \
 	--add-symbol segvn_faultpage_orig=.text:0xac01a,function,global \
-	--weaken-symbol core_seg \
-	--add-symbol core_seg_stock=.text:0x3ef12,function,global \
+	$CSG_OC \
 	$I10_OC \
 	--weaken-symbol krnxmemflt \
 	--add-symbol krnxmemflt_stock=.text:0x5b140,function,global \

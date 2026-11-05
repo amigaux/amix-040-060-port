@@ -713,7 +713,7 @@ Lwx_ret:
 	rts
 
 | wb040_replay: a2 = trap frame.  If it is an 040 format-7 access-error frame, re-issue every
-| valid write-back (WB1, then WB2, then WB3).  Clobbers d0-d3/a3; preserves d4 (the orig return)
+| valid write-back (WB1, then WB2, then WB3).  Clobbers d0-d3/a0/a1/a3; preserves d4 (the orig return)
 | and a2 (the frame) for the calling wrapper.  No stack frame (leaf-ish; only bsr to Lwb_do).
 |
 | ISSUE-42 (2026-08-12) -- RETURN VALUE.  d0 = 0 means every valid write-back completed.  Nonzero

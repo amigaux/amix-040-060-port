@@ -18,7 +18,13 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#define _POSIX_SOURCE 1	/* struct sigaction, with __STDC__ set */
 #include <signal.h>
+#undef _POSIX_SOURCE
+#include <siginfo.h>
+#ifndef SA_SIGINFO
+#define SA_SIGINFO 8
+#endif
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -276,6 +282,23 @@ static int writeonly(void)	/* a read of a write-only private page is refused, no
 	return 0;
 }
 
+static int rt_n;
+static void rt_h(int sig, siginfo_t *si, void *uc)
+{
+	if (si == 0) _exit(7);
+	rt_n++;
+	if (mprotect((caddr_t)((long)si->si_addr & ~(long)(PG - 1)), PG, PROT_READ | PROT_WRITE)) _exit(8);
+}
+static int repair_twice(void)	/* a handler with siginfo repairs a store across two denied pages, one page a call */
+{
+	struct sigaction sa; char *p = anon(2 * PG, PROT_NONE); volatile long *q = (volatile long *)(p + PG - 2);
+	memset(&sa, 0, sizeof sa); sa.sa_flags = SA_SIGINFO; sa.sa_handler = (void (*)())rt_h;
+	if (sigaction(SIGSEGV, &sa, 0)) return 1;
+	*q = 0x11223344;
+	if (*q != 0x11223344) return 2;
+	return rt_n >= 1 ? 0 : 3;
+}
+
 static int denied_copies(void)	/* a regular file: /dev/null never touches the buffer */
 {
 	char *p = anon(PG, PROT_NONE), *x; int fd;
@@ -380,6 +403,7 @@ int main(int ac, char **av)
 	one("denied-copies", denied_copies, 60);
 	one("exec-only", execonly, 60);
 	one("write-only", writeonly, 60);
+	one("repair-twice", repair_twice, 60);
 	one("denied-core", denied_core, 60);
 	if (fails) printf("VMREGRESS FAIL %d\n", fails); else printf("VMREGRESS PASS\n");
 	return fails;

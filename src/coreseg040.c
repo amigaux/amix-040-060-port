@@ -16,6 +16,7 @@
 #include <sys/param.h>
 #include <sys/errno.h>
 
+#define	CS_PAGE		4096
 #define	CS_P_AS		124
 #define	CS_WRITE	1		/* enum uio_rw, as the stock body pushes it */
 #define	CS_USER		0		/* enum uio_seg */
@@ -45,7 +46,8 @@ core_seg(p, vp, offset, addr, size, rlimit, cr)
 		end = base + len;
 		denied = 0;
 		for (a = base; a < end; a = next) {
-			prot = as_getprot(as, a, &next);
+			/* from the page's start: as_getprot steps by 2 KiB from what it is given, and COFF data can start anywhere */
+			prot = as_getprot(as, (caddr_t)((u_int)a & ~(CS_PAGE - 1)), &next);
 			if (next > end)
 				next = end;
 			denied = (prot & (CS_READ | CS_EXEC)) == 0;

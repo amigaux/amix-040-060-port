@@ -50,7 +50,7 @@
 	.set	P_PCB, 252		| restorecontext: prsetregs(curproc's +252, gregs); getuvpcb takes it
 
 	.data
-	.globl	wbk_tab, wbk_live, wbk_saved_n, wbk_replayed_n, wbk_refault_n, wbk_full_n, wbk_freed_n, wbk_stale_n
+	.globl	wbk_tab, wbk_live, wbk_saved_n, wbk_replayed_n, wbk_refault_n, wbk_full_n, wbk_freed_n, wbk_stale_n, wbk_evict_n
 	.balign	4
 wbk_tab:	.space	WBK_N*WBK_SZ
 wbk_live:	.long	0		| records in the table now
@@ -60,6 +60,7 @@ wbk_refault_n:	.long	0		| replays denied again (SIGSEGV, record kept)
 wbk_full_n:	.long	0		| records dropped, the table full
 wbk_freed_n:	.long	0		| records dropped with their address space
 wbk_stale_n:	.long	0		| records dropped: a second signal at the kept context
+wbk_evict_n:	.long	0		| records taken for another store, the table full
 	.globl	wbk_inreplay
 wbk_inreplay:	.long	0		| user replays in progress (usrxmemflt's and restorecontext's):
 					| wb040.s's wbf_dropwarn stays quiet for a fault nested in one
@@ -127,8 +128,32 @@ Ls_next:
 	dbra	%d2,Ls_find
 	tstl	%a3
 	bnes	Ls_new
+| The table is full.  A record whose signal has gone out may be one a handler left by longjmp, which nothing
+| else would ever free, so one process could fill the table and other processes' stores would be lost.  Take this
+| address space's own first, else the first there is; none, and the new store is dropped, counted.
+	lea	wbk_tab,%a1
+	moveq	&WBK_N-1,%d2
+Ls_ev:
+	tstl	%a1@(E_SENT)
+	beqs	Ls_evn
+	cmpl	%a1@(E_AS),%d3
+	beqs	Ls_evt
+	tstl	%a3
+	bnes	Ls_evn
+	moveal	%a1,%a3
+Ls_evn:
+	lea	%a1@(WBK_SZ),%a1
+	dbra	%d2,Ls_ev
+	tstl	%a3
+	bnes	Ls_evg
 	addql	&1,wbk_full_n
 	bras	Ls_ret
+Ls_evt:
+	moveal	%a1,%a3
+Ls_evg:
+	addql	&1,wbk_evict_n
+	subql	&1,wbk_live		| counted again below
+	bras	Ls_new
 Ls_same:
 	moveal	%a1,%a3
 	subql	&1,wbk_live		| counted again below
@@ -172,10 +197,10 @@ Ls_out:
 | ---------------------------------------------------------------------------------------------
 | restorecontext(ucp): the stock body (restorecontext_orig), then the replay of a kept record whose
 | context it has just restored.  fp@(-112) is the synthetic frame, fp@(-116)/(-120) the caller's
-| DFC/SFC (wb040_replay sets DFC and leaves it), fp@(-124) the record.
+| DFC/SFC (wb040_replay sets DFC and leaves it), fp@(-124) the record, fp@(-156) a siginfo.
 	.globl	restorecontext
 restorecontext:
-	linkw	%fp,&-124
+	linkw	%fp,&-156
 	moveml	%d2-%d4/%a2-%a3,%sp@-
 	movel	%fp@(8),%sp@-
 	jsr	restorecontext_orig
@@ -238,7 +263,7 @@ Lr_copy:
 	clrl	%a1@(E_AS)
 	subql	&1,wbk_live
 	addql	&1,wbk_replayed_n
-	bras	Lr_ret
+	braw	Lr_ret
 Lr_again:
 	addql	&1,wbk_refault_n	| keep the slots from the denied one on, signal again
 	clrl	%a1@(E_SENT)
@@ -253,9 +278,27 @@ Lr_again:
 	lea	%a1@(E_WB3S),%a0
 	moveq	&3,%d0
 	bsrw	Lwk_slot
-	pea	11			| SIGSEGV
+	lea	%fp@(-156),%a0		| a siginfo from the nested verdict, as the fault's own signal has: psignal
+	moveq	&7,%d0			| would leave an SA_SIGINFO handler a null pointer, and the re-run on
+Lr_si:					| the 68030/68060 gives it the far page
+	clrl	%a0@+
+	dbra	%d0,Lr_si
+	lea	%fp@(-156),%a0
+	movel	wbf_signo,%d0
+	bnes	Lr_sih
+	moveq	&11,%d0			| nothing recorded
+	movel	&2,wbf_code
+Lr_sih:
+	movel	%d0,%a0@		| si_signo
+	movel	wbf_code,%a0@(4)	| si_code
+	movel	wbf_fa,%d0
+	bnes	Lr_sia
+	movel	wbf_addr,%d0
+Lr_sia:
+	movel	%d0,%a0@(12)		| si_addr
+	movel	%a0,%sp@-
 	movel	u+0x730,%sp@-
-	jsr	psignal
+	jsr	trapsig
 	addql	&8,%sp
 Lr_ret:
 	movel	%d4,%d0

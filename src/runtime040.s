@@ -98,6 +98,13 @@ hardbus040_core:
 	movel	%d0,%d2			| remember current-page result
 | -- resolve the NEXT page (the actual crossing target) --
 	addil	&0x1000,%d3
+.ifdef LOWUSER
+	movel	u+0x730,%sp@-		| was it already there?  d2: its PTE or 0
+	movel	%d3,%sp@-
+	jsr	uvatopte040
+	addql	&8,%sp
+	movel	%d0,%d2
+.endif
 	pea	1			| rw = read
 	clrl	%sp@-			| type = F_INVAL
 	pea	4			| len
@@ -112,11 +119,14 @@ hardbus040_core:
 .else
 	bnew	Lrt_hbnofar
 | The next page resolves, so retry.  Nothing here says the access crosses: a genuine bus error in a page's
-| last 8 bytes with its next page mapped restarted for ever, and from a copyin nothing could kill it.  A
-| real crossing comes back at most once a phase, its page being there now, so the same process at the same
-| address HB_AGAIN times with no tick between is not one: hardbus_orig's own hard error, no probe.
+| last 8 bytes with its next page mapped restarted for ever, and from a copyin nothing could kill it.  When
+| the next page was not there this was a crossing, and it makes progress however often a program takes it
+| away again.  When it was already there the resolve changed nothing, so the same process at the same address
+| HB_AGAIN times with no tick between is not a crossing: hardbus_orig's own hard error, no probe.
 	moveal	u+0x730,%a0
 	movel	%fp@(8),%d0
+	andil	&3,%d2			| the next page's PTE was valid?
+	beqs	Lrt_hbnew
 	movel	lbolt,%d1
 	subl	hb_last_tick,%d1
 	cmpil	&1,%d1
