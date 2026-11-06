@@ -11275,7 +11275,7 @@ shape checked; the other entries and `mi_lowat` are untouched. TCP's own lower r
 one `ipintr` pass hand TCP more than that, and the sender retransmitted nothing at 0x10000.
 
 **Memory.** The higher mark lets IP's queue hold more message blocks while memory is short. On a 16 MiB box paging hard (a memory checker
-beside a 128 MB file, free memory sampled every second), four interleaved pairs against the stock mark gave the lowest free page counts
+beside a 128 MB file, free memory sampled every second), four pairs against the stock mark (three interleaved on one slot, the fourth run at the same time on two) gave the lowest free page counts
 10 against 13, 8 against 2, 8 against 11 and 10 against 0 (0x10000 first), and 2 s against 3 s below 10 pages in all; no page went bad and
 nothing faulted or stalled at either mark. The dips are observed and harmless.
 **Not counted, recorded:** `ipintr`'s own `canput` refusals toward UDP and TCP have no counter, so a loss there shows only as a retransmission.
@@ -11368,7 +11368,7 @@ still be running or whose replay may be asleep with it. A second signal at a kep
 signals with a siginfo. `HGFAULT` stays out with `WBKEEP`: it grew the break behind the program, whose next `brk` took the page back (ISSUE-114).
 
 **Regression run:** `test-tools/vmregress.c`, one line per case: copy on write after fork, private and shared file mappings, stack growth, exec of shared text, mprotect, kernel copies,
-tas and cas, /proc breakpoints, core dumps, then the denied pages. Every case passes in emulation on `68060-261105-63` and `68060-261106-64`: the 68LC060 on the Z3660 at 16 and 64 MiB, and a plain 68040.
+tas and cas, /proc breakpoints, core dumps, then the denied pages. Every case passes in emulation: on `68060-261105-63` with the 68LC060 on the Z3660 at 16 and 64 MiB and with a plain 68040; on `68060-261106-64` with the 68LC060 at 16 and 64 MiB (no plain 68040 run of -64).
 
 **Recorded, not fixed:**
 
@@ -11406,20 +11406,48 @@ nothing. **Avoided by** SO_LINGER with a time, or shutdown(1) before close.
 SO_LINGER 60, 0 of 30; shutdown(1), 0 of 10. Every write whole, close took 0 s, FIN after; about 9 KB unsent at close (the last 8 KiB write and
 part of the one before). scp and rsync, which wait for the receiver before closing, 0 of 20 each.
 
-## ✅ ISSUE-119 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63`; FIXED by `fa24df6` in the ufs module, verified in emulation on `68060-261106-64`; NOT YET ON HARDWARE): writing whole pages into an 8 KiB UFS block anywhere but at its start could leave the block's first pages reading old memory contents
+## ✅ ISSUE-119 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63`; FIXED by `fa24df6` in the ufs module, verified in emulation on `68060-261106-64`; NOT YET ON HARDWARE): a whole-page write that starts past the start of its 8 KiB segmap window could leave the window's first pages reading old memory contents
 
 **Defect.** Writing whole pages into an 8 KiB UFS block anywhere but at its start could leave the block's first pages reading old memory
 contents while the disk held the right data (stock, both lines; seen with 2 KiB and 4 KiB writes, never with 8 KiB). Amix's ufs rwip passed the
 segmap window's base to segmap_pagecreate instead of base + offset, as SVR4's source does, so the pages created unread were the window's first ones.
-Fixed in the ufs module (4 bytes).
+Fixed in the ufs module (4 bytes). Exactly: the trigger is the write's offset in the 8 KiB segmap window (mapon, `uio_offset & 8191`), not in the
+file system block, so on a 4 KiB-block file system a write to the start of an odd block does it too. On this line pages are 4 KiB: `as_iolock`
+grants pagecreate (the write skips the read) to a page-aligned write of whole 4 KiB pages, or one that reaches end of file, so a 2 KiB rewrite
+here takes the read path; the 2 KiB case is the 68030 line's. This fix does not cover ISSUE-120 (a hole in the middle of a file), which stays open.
 **Where.** The stock ufs object (`fs/ufs/exp`) `.text 0x8a4c` (rwip + 0x3d6): `movel %fp@(-108),%sp@-` pushes the window base; SVR4's
-`ufs_vnops.c:460` has `segmap_pagecreate(segkmap, base + mapon, n, 0)`, as s5, nfs and specfs do. `as_iolock` grants pagecreate to any
-page-aligned whole-page write, rewrites included, so a 4 KiB write to a block's second half created its first page (when not cached) with no
-read: valid, clean, the frame's old contents; the written page faulted in through uiomove and was right, and the clean page was never written.
+`ufs_vnops.c:460` has `segmap_pagecreate(segkmap, base + mapon, n, 0)`, as s5, nfs and specfs do. A 4 KiB write at mapon 4096 created the
+window's first page (when not cached) with no read: valid, clean, the frame's old contents; the written page faulted in through uiomove and was
+right, and the clean page was never written.
 **Fix.** `tools/fsobj-patch.py`'s module-only site `rwip`: `pea %a0@(0,%d3:l)` (`48703800`), a0 segmap_getmap's return, d3 mapon; same length,
 no relocation; its surrounding instructions and relocations are checked, and `UFS_RWIP_FIX=0` builds the module without it.
 **Measured** (one process: append 4 KiB blocks tagged with number and generation, then random 4 KiB rewrites, appends and reads, every byte
-checked; 16384 blocks, 200000 operations): without the fix every run at 64 MiB reads wrong data from operation 30174 on (at 32 MiB from about
-34 MB of file, at 128 MiB from about 127 MB; at 128 MiB a 64 MB file is clean), always an even 4 KiB block; the disk held the right data at every
-bad block; a burst of 47 cached pages of the file held other contents as the file filled the cache. 8 KiB writes, and appends with reads only,
-0 bad. With the fix: 0 bad in three runs at 64 MiB, and no cached page of the file holding another block.
+checked; 16384 blocks, 200000 operations), without the fix: at 64 MiB on `68060-261105-63` the first run after each boot first read wrong data at
+operation 30174, a second run in the same boot at 32720; at 32 MiB from about 34 MB of file; on `68060-261103-62` at 128 MiB from about 127 MB
+(a 64 MB file at 128 MiB is clean); always an even 4 KiB block (the window's first page). In the one run whose disk was read back after sync, the
+disk held the right block and generation at all 10 bad blocks; in another, 47 cached pages of the file held other contents, appearing in one burst
+as the file filled the cache. 8 KiB writes, and appends with reads only, 0 bad; 4 KiB writes with O_SYNC fail like plain ones. With the fix:
+0 bad in three runs at 64 MiB on the -63 kernel, and on `68060-261106-64` at 32, 64 and 128 MiB (a 144 MB file at 128 MiB). Paused checks of every
+cached page of the file found none holding another block; a page of zeros at the append frontier (being written when the emulator paused, gone
+at the next check) showed in 4 of 46 checks.
+
+## ⚠ ISSUE-120 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261106-64` and on the 68030 line; OPEN, no fix chosen yet): a whole-page write into a hole in the middle of a file leaves the rest of the new block reading the disk's old contents
+
+**Defect.** A whole-page write into a hole among a file's 12 direct blocks leaves the rest of the newly allocated block reading the disk's old
+contents: `ufs_bmap` skips zeroing for an allocation-only request whose old size is 0 (SVR4 `ufs_bmap.c:246`). A block mapped through an
+indirect block is read in, and so zeroed, unless the write reaches the block's last page (`:384-385`). On this line pages are 4 KiB, so a
+one-page write into the second 4 KiB of an 8 KiB block reaches it, and the indirect block is exposed too. Whatever a removed file left in those
+disk blocks becomes readable. Rwip's own zeroing covers only a gap past the old end of file, never a hole in the middle. ISSUE-31's note that
+skipping the read is safe because the caller fills whole pages holds only when the write fills the whole block.
+**Where.** The stock ufs object's `ufs_bmap`, direct path `.text 0x32e8-0x32f2` (`tstl` alloc-only, `tstl` old size, `beqw` past the read);
+indirect path `0x3640-0x3656` (the size rounded up to 4 KiB, ISSUE-31, then the read skipped when it is not below the block size). rwip passes
+the pagecreate flag as alloc-only and on + n as the size.
+**Measured** (`68060-261106-64`, 16 MiB; a 24 MB file of 0x5a written and removed, then 16 files of 41 blocks of 8 KiB with holes, one 4 KiB
+page of 0x22 written into blocks 1-11 (direct) and 15-25 (indirect), 24 MB written and read back to push the pages out, then each block read):
+
+| Page written | Direct: pages wrong (removed file's 0x5a) | Indirect: pages wrong (0x5a) |
+|---|---|---|
+| the block's second (offset 4096) | 16 of 96 (8) | 86 of 96 (49) |
+| the block's first (offset 0) | 96 of 96 (8; the rest the first pass's removed files) | 0 of 96 |
+
+The 68030 line shows the direct case with 2 KiB writes. Not touched by ISSUE-119's fix.
