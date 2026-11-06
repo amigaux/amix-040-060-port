@@ -11414,7 +11414,7 @@ segmap window's base to segmap_pagecreate instead of base + offset, as SVR4's so
 Fixed in the ufs module (4 bytes). Exactly: the trigger is the write's offset in the 8 KiB segmap window (mapon, `uio_offset & 8191`), not in the
 file system block, so on a 4 KiB-block file system a write to the start of an odd block does it too. On this line pages are 4 KiB: `as_iolock`
 grants pagecreate (the write skips the read) to a page-aligned write of whole 4 KiB pages, or one that reaches end of file, so a 2 KiB rewrite
-here takes the read path; the 2 KiB case is the 68030 line's. This fix does not cover ISSUE-120 (a hole in the middle of a file), which stays open.
+here takes the read path; the 2 KiB case is the 68030 line's. This fix does not cover ISSUE-120 (a hole in the middle of a file), fixed separately.
 **Where.** The stock ufs object (`fs/ufs/exp`) `.text 0x8a4c` (rwip + 0x3d6): `movel %fp@(-108),%sp@-` pushes the window base; SVR4's
 `ufs_vnops.c:460` has `segmap_pagecreate(segkmap, base + mapon, n, 0)`, as s5, nfs and specfs do. A 4 KiB write at mapon 4096 created the
 window's first page (when not cached) with no read: valid, clean, the frame's old contents; the written page faulted in through uiomove and was
@@ -11431,8 +11431,9 @@ as the file filled the cache. 8 KiB writes, and appends with reads only, 0 bad; 
 cached page of the file found none holding another block; a page of zeros at the append frontier (being written when the emulator paused, gone
 at the next check) showed in 4 of 46 checks.
 **On hardware** (A4000D, Z3660 68060, the 4g image on the card's piscsi unit 6, a 144 MB file, 36864 blocks and 400000 operations on its
-1.4 GB data slice): `68060-261103-62` first read wrong data at operation 62376 at 127 MB, as in emulation at 128 MiB, 10 bad, all even
-blocks; `68060-261106-64` 0 bad (239839 writes, 160161 reads), the same counts as in emulation.
+1.4 GB data slice): `68060-261103-62` first read wrong data at operation 62376 at 127 MB, as in emulation at 128 MiB, and the test stopped at
+its limit of 10 bad (5 operations from 62376 to 68821, then 5 blocks in its final scan; 41257 writes and 27565 reads, all even blocks);
+`68060-261106-64` ran all 400000 operations with 0 bad (239839 writes, 160161 reads), the same counts as in emulation.
 
 ## ✅ ISSUE-120 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261106-64` and on the 68030 line; FIXED by `8629d20` in the ufs module, verified in emulation on `68060-261106-65`'s build; NOT YET ON HARDWARE): a whole-page write into a hole in the middle of a file leaves the rest of the new block reading the disk's old contents
 
@@ -11456,46 +11457,68 @@ page of 0x22 written into blocks 1-11 (direct) and 15-25 (indirect), 24 MB writt
 The 68030 line shows the direct case with 2 KiB writes. Not touched by ISSUE-119's fix.
 **Fix.** `src/ufs_bmap_hf.c` (the 030 line's routine, the same code), linked into the ufs module by `tools/ufs-holefix.sh` after the tail
 zeroing; `tools/bmaphf.py` retargets rwip's one `ufs_bmap` relocation (module object `.text 0x8934`, rwip + 0x2be) to it, rwip pinned by its
-digest and the call's bytes. `ufs_bmap_hf` looks the block up first (`ufs_bmap` with `S_READ`, which allocates nothing, under the inode lock rwip
-holds for the real call): a hole or an error turns alloc-only off, so `ufs_bmap` reads the new block before setting it and every page of it is
-zero-filled in the cache; an allocated block keeps alloc-only, which then allocates nothing, so a rewrite runs as stock with no read. `as_iolock`
-and every other caller of `ufs_bmap` are stock. `UFS_HOLE_FIX=0` builds the module without it, byte for byte the object before.
+digest and the call's bytes. `ufs_bmap_hf` looks the block up first (`ufs_bmap` with `S_READ`, which allocates nothing and changes no inode field,
+under the inode lock rwip holds for the real call). A hole or an error turns alloc-only off: `ufs_bmap` then reads the newly allocated block
+(`fbread`) before setting it, so the pages it allocates (the whole block, or up to the fragment the write ends in when the block is the file's
+last) are zero-filled in the cache, and the write's own pages are found there and overwritten. An allocated block keeps alloc-only: for a full
+block `ufs_bmap` then allocates nothing and a rewrite runs as stock, with no read (right only with ISSUE-119's fix); the file's last block, held
+as a fragment, is grown by `realloccg` and read whatever alloc-only says (old size not 0). `as_iolock` and every other caller of `ufs_bmap` are
+stock. `UFS_HOLE_FIX=0` builds the module without it, byte for byte the object before.
+A new block past the end of the file was never exposed: rwip zeroes the gap from the old end of file up to the write (the past-end mode of the
+test reads 0 of 16 wrong on stock too).
 A simpler rule (pagecreate only for a write that starts at the 8 KiB window and covers it or reaches end of file, Solaris's) also closed the hole
 but made uncached 4 KiB rewrites 2.5-4 times slower; it was not kept.
-**Measured with the fix** (`68060-261106-65`'s build): the same test 0 of 96 wrong in both cases, direct and indirect, and 0 of 16 for a page
-written past the end of file; the file test of ISSUE-119 0 bad at 32, 64 and 128 MiB (a 144 MB file at 128 MiB). Write cost at 64 MiB (64 MB
-written by 4 KiB pages, copied by 8 KiB, 20000 random 4 KiB rewrites in a 96 MB file; seconds, two passes), run beside `68060-261106-64`:
+**Cost.** `ufs_bmap_hf` sees only the write's end (on + n), so a write that covers a whole new block (an 8 KiB append) also takes the zero-fill
+before the write overwrites it: an in-memory clear of each new block, no disk I/O. Rewrites of allocated blocks cost one lookup.
+**Measured with the fix** (`68060-261106-65`'s build): the same test 0 of 96 wrong with either page written, direct and indirect (no page held
+the filler's 0x5a either); the file test of ISSUE-119 0 bad at 32, 64 and
+128 MiB (a 144 MB file at 128 MiB). Write cost at 64 MiB (64 MB written by 4 KiB pages, copied by 8 KiB, 20000 random 4 KiB rewrites in a 96 MB
+file; seconds by `time()`, two passes, two runs each, beside `68060-261106-64` on a loaded host):
 
 | Kernel | Write | Copy | Rewrites |
 |---|---|---|---|
 | `68060-261106-64` | 12/12, 11/12 | 26/29, 27/29 | 8/8, 7/11 |
 | the fix | 12/13, 11/11 | 29/30, 29/30 | 9/8, 7/8 |
 
-## ✅ ISSUE-121 (2026-11-06, a stock defect on both lines: MEASURED on hardware on `68060-261103-62` and in emulation; FIXED by `eabeadc` in the base kernel, verified in emulation on `68060-261106-65`'s build; NOT YET ON HARDWARE): a raw SCSI disk request that starts past the end of its slice fails wrongly or sleeps for good
+Writes and rewrites are equal; the copy is 2-3 s (7-11 %) slower in the first pass and 1 s in the second, the zero-fill of each new block.
+`ufs_bmap_hf`'s counters (`modadmin -p ufs_hf_magic:4`; calls, holes, kept) on the same build: 496, 148, 8 after boot; 6910, 6534, 9 after
+the test with the second page written; 13307, 12918, 10 after the first-page pass; 58184, 45686, 12107 after 16 MB written and copied and 8000
+random 4 KiB rewrites. A hole is any block not yet allocated, appends included; kept counts the rewrites of allocated blocks.
 
-**Defect.** A read or write of a raw SCSI disk slice (`/dev/rdsk/c*d*s*`: the Z3660, A4091 and A3091/A2091 disks, all through `dd.c`) that
-starts past the slice's end fails with EIO or never returns (`kill -9` does not end it). Stock `ddread` and `ddwrite` return 0 at the end
-exactly, but past it they clamp the residue to `size * 512 - offset`, which is negative; `uiophysio` takes it as a byte count of about 4 GB, and on
-the A4000D `kmem_alloc` slept on `Km_OsizeWanted` at PRIBIO for ever. No request reaches the disk. The IDE disks (`hd.c`) are not affected. The compare is unsigned, so offsets of
-2^31 and above count as past the end of a smaller slice. A wrap seen with `dd iseek=8388608 bs=512` is dd(1)'s own 32-bit offset (0), not the kernel.
+## ✅ ISSUE-121 (2026-11-06, a stock defect on both lines: MEASURED on hardware on `68060-261103-62` and in emulation; FIXED by `eabeadc` in the base kernel, verified in emulation on `68060-261106-65`'s build; NOT YET ON HARDWARE): a raw disk request that starts past the end of its slice fails with EIO or sleeps for good
+
+**Defect.** A read or write of a raw disk slice served by `dd.c` (`/dev/rdsk/c*d*s*`: the SCSI disks on the Z3660, A4091 and A3091/A2091, and
+the A4000's Gayle IDE disk, which is registered with the sd layer) that starts past the slice's end fails with EIO or never returns (`kill -9`
+does not end it). Stock `ddread` and `ddwrite` return 0 at the end exactly, but past it they clamp the residue to `size * 512 - offset`, which is
+negative; `uiophysio` takes it as a byte count of about 4 GB. What follows depends on the kernel and the user buffer; on the A4000D,
+`kmem_alloc` slept on `Km_OsizeWanted` at PZERO (priority 25) for ever. `hd.c`, the A2090 ST-506 driver, has no such clamp and is not affected.
+The compare is unsigned, so offsets of 2^31 and above count as past the end of a smaller slice. A wrap seen with `dd iseek=8388608 bs=512` is
+dd(1)'s own 32-bit offset (0), not the kernel.
 **Where.** The stock kernel's `ddread` (`.text 0xbd06`) and `ddwrite` (`0xbd84`), the end-of-slice test at + 0x1e (`cmpl`, `bnew`, `clrl`,
 `braw` to the epilogue).
 **Fix.** `src/patch_ddeof.py`, 14 bytes in each function, in place: `subl %a2@(8),%d0` (end - offset; carry when the offset is past the end),
 `bhis` to the stock path, `subxl %d0,%d0` and `andl #6` (ENXIO past the end, 0 at it), `bras` to the stock epilogue; the 68030 line's
 `dd.c.patch` does the same in C. Both functions, their symbols and their eight relocations are checked before writing; `DD_EOF=0` builds them
 stock. `tools/test-ddeof.py` runs a kernel image's own stock and patched bytes on qemu-m68k against stub `sddevsize` and `uiophysio`: inside the
-slice the stock arguments (the residue clamped at the end), at the end 0, past the end ENXIO with no transfer, a slice above 2 GiB served at an
+slice the stock arguments (the residue clamped at the end), at the end 0, past the end ENXIO with no transfer, a 2.86 GiB slice served at an
 offset above 2^31, the callee-saved registers kept; stock starts a transfer past the end in all ten past-the-end cases.
-**Measured** on the A4000D (Z3660 68060, `68060-261103-62`, piscsi unit 6): `dd if=/dev/rdsk/c6d0s3 bs=512 iseek=N count=1` for N past the
-64 MiB slice (262143, 1048575, 2916351, 12582912) and `bs=1024k iseek=128` hung, state S, WCHAN `&Km_OsizeWanted`; the disk kept working beside
-them; the Z3660 firmware's request log shows no read for the 1 MiB request (it never left the kernel). A power cycle clears them.
-In emulation (A4000, 68LC060 on the Z3660, piscsi root; c6d0s3 is the 4g layout's 64 MiB boot slice, 131072 sectors), the same requests:
+**Inherited limits** (stock's end, `sddevsize(dev) * 512` in 32 bits; the 030 line's C patch has them too): for s0, the whole disk,
+`sdpartition` sets no length and `sddevsize` answers 4194303 sectors, so the end is 0x7ffffe00 whatever the disk's size, and a raw request
+past it now gets ENXIO where stock failed or slept; for a slice of 8388608 sectors (4 GiB) or more the product wraps, so the end is the size
+less a multiple of 4 GiB (a slice of exactly 4 GiB reads as empty).
+**Measured** on the A4000D (Z3660 68060, `68060-261103-62`, piscsi unit 6, c6d0s3 the 64 MiB boot slice): `dd if=/dev/rdsk/c6d0s3 bs=512
+iseek=N count=1` for N past the end (262143, 1048575, 2916351, 12582912) never returned: six processes in state S, priority 25, WCHAN
+`&Km_OsizeWanted`. A later `bs=1024k iseek=128` did not return either (seven dd processes a minute later). The disk kept working beside them;
+a power cycle cleared them.
+In emulation (A4000, 68LC060 on the Z3660, piscsi root; c6d0s3 the same 64 MiB boot slice, 131072 sectors), the same kinds of request:
 
-| Kernel | Last sector | At the end | Read 512 B past | Read 1 MiB past | Write 512 B past | Read in s4 (past 2 GiB) |
+| Kernel | Last sector | At the end | Read 512 B past | Read 1 MiB past | Write 512 B past | Read inside s4 |
 |---|---|---|---|---|---|---|
-| `68060-261103-62` | 1+0 | 0+0, rc 0 | EIO | hangs | EIO | 8+0 |
+| `68060-261103-62` | 1+0 | 0+0, rc 0 | EIO | never returns | EIO | 8+0 |
 | `68060-261106-64` (16 and 128 MiB) | 1+0 | 0+0, rc 0 | EIO | EIO | EIO | 8+0 |
 | the fix (`68060-261106-65`'s build) | 1+0 | 0+0, rc 0 | ENXIO | ENXIO | ENXIO | 8+0 |
 
-Stock's outcome past the end depends on what `uiophysio` does with the ~4 GB count (the user buffer's place, the kernel's allocator): an
-error that is not the right one, or a sleep that never ends; the fix returns ENXIO before it, with nothing left asleep.
+s4 starts past 2 GiB on the disk, but `ddread` compares offsets within the slice, and this read is 51 MB into it; an offset of 2^31 or more
+within a slice is tested only by `tools/test-ddeof.py` (no slice of the 4g layout reaches 2 GiB). Stock's outcome past the end depends on what
+`uiophysio` does with the ~4 GB count: an error that is not the right one, or a sleep that never ends; the fix returns ENXIO before it, with
+nothing left asleep.
