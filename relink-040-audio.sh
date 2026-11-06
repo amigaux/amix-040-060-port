@@ -21,8 +21,9 @@
 #                                       sleep between test and set
 # Each patcher finds its places by the SHA-256 of the stock lines and refuses any other audio.c.
 # Commodore's source is not in this repository.  The compile and the link are those of amix-paula's
-# port/relink-040-audio-paula.sh at the same revision: the output is byte-identical to that script's
-# run with AUDIO_SRC = the stock driver already patched with the safe close and the bounded wait.
+# port/relink-040-audio-paula.sh at the same revision: with AUDIO_REPLIES=0 the output is byte-identical to
+# that script's run with AUDIO_SRC = the stock driver already patched with the safe close and the bounded wait.
+# By default src/patch_audio_replies.py (ISSUE-122) runs after the three, so the driver differs by its two fixes.
 #
 # The rebuilt object is linked after the base, whose audioinfo, audioinit and audiointr are
 # weakened: cdevsw and the level-4 interrupt bind to the new driver, the stock one stays as dead code.
@@ -95,6 +96,16 @@ chmod u+w "$B"/*
 run_step 1 python3 "$P/patch_audio_safeclose.py" "$B/audio.c"
 run_step 1 python3 "$P/patch_audio_initwait.py" "$B/audio.c"
 run_step 1 python3 "$P/patch_audio_paula.py" "$B/audio.c"
+# ISSUE-122 (2026-11-06): the stock driver answers each AUDIO_VOLUME/AUDIO_PERIOD request twice (a refusal arrives as
+# success) and replays the head of a write longer than its free channel buffer.  src/patch_audio_replies.py, the
+# same file as the 68030 line's, pins its input (the three patchers' result) and its output by SHA-256.
+# AUDIO_REPLIES=0 leaves the driver as amix-paula's patchers make it.
+if [ "${AUDIO_REPLIES:-1}" = 1 ]; then
+	run_step 1 python3 "$HERE/src/patch_audio_replies.py" --selftest "$B/audio.c"
+	run_step 1 python3 "$HERE/src/patch_audio_replies.py" "$B/audio.c"
+else
+	echo "[*] AUDIO_REPLIES=0 -- the audio driver without the one-reply and refill fixes (rollback control)"
+fi
 CF=$(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/')
 # -traditional knows no "signed"; audio.h and audiohw.h use "signed char"
 CF="$CF -Dsigned=__signed__"
