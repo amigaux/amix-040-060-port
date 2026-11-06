@@ -10949,9 +10949,12 @@ beyond page zero):**
 - read word `0xDFF004` (VPOSR) = `0xa301`, then `0xa300`: the live custom chips;
 - read kernel text `kzero` at `0x080dd09c` = `0x2f022f0a`, the same longword adb reads from /dev/kmem;
 - control: `0x40000000` (outside both windows) SIGSEGV, si_code 1.
-- A dynamic executable linked by SVR4 ld carries a read-only zero page (PT_LOAD vaddr 0, filesz 0,
-  memsz 0x1000, R; 193 of amix-system's ET_EXEC files). DTT0 hid it: such a program read chip RAM
-  through NULL, not zeros.
+- 193 of amix-system's 434 ET_EXEC files carry a read-only zero page (PT_LOAD vaddr 0, filesz 0,
+  memsz 0x1000, R), among them `etc/devnm`, `usr/ccs/bin/ld` and most of `usr/X/bin`. It is not what the
+  SVR4 link makes: those files have six program headers and every file offset moved on by 0x20 (PT_PHDR's
+  offset 0x54, the text's p_offset 0x20 past its congruent value), so the header went in after the link.
+  `ls`, `cat`, `sh`, and on the box `cc`, `cc -s`, `cc -O -dy`, `strip` and `mcs -d` output have five and no
+  zero page; nor does gcc14's ld produce one. DTT0 hid it: such a program read chip RAM through NULL, not zeros.
 
 **Verified on -91 (-55 with `4c6ea89`; unix differs from -55 in the two TT immediates and the two
 build-id digits) and -93:** every access above faults (si_code 1 for an unmapped address, 2 for a
@@ -11179,3 +11182,244 @@ module core's empty window for `inode` when s5 is absent (always on k46); kboots
 **Still open on k46: crash.**  With the namelist fixed it prints `could not find timestamps` (a warning) and then
 `<addr> is an invalid address` for kvseg addresses: it validates them by walking the stock 68030 segment tables
 through `kas`'s hat, which the k46 kernel does not keep for region 1.  The same family as `adb -k`.  Not attempted.
+
+---
+
+## ⚠ ISSUE-117 (2026-11-06, a configuration defect of the system, not of the kernel: MEASURED red/green in emulation on `68060-261105-63`; the k30 line has the same exposure by reading; KEPT RIGHT by the 1.1 base's ifup and DHCP hook (measured on base 1.0-30); a stale hosts line still meets it): an NFS server whose /etc/hosts names it by another address than its interface's answers no remote RPC
+
+**Defect.** When /etc/hosts maps the node name (`uname -n`) to an address other than the one on the interface, a client's mounts and its `rpcinfo -u SERVER` calls to rpcbind, mountd and nfsd hang, while ping answers and the same programs answer `rpcinfo -u localhost` on the server. mountd and nfsd are registered on the wildcard address. A remote caller asks rpcbind for a program's address (GETADDR), and rpcbind fills the wildcard
+with its own host name's address from /etc/hosts: asked from the host, a guest whose aen0 is 192.0.2.11 and whose hosts line says 192.0.2.99 answered
+`192.0.2.99.0.111` for rpcbind itself (an rpcbind v3 GETADDR over UDP from the host; a NULL call to its port 111 is answered from 192.0.2.11). The client then sends its
+mount to an address nobody holds.
+
+**Measured (`68060-261105-63` as the server, rpcbind from boot, `nfs start` once, no restart; client mounts 25-44 min later):**
+
+| Server's hosts line for its node name | Mounts | `rpcinfo -u` from the client |
+|---|---|---|
+| rewritten to the interface address before `nfs start` | 3 of 3 rc 0 | mountd v1, nfsd v2 ready |
+| as shipped, the disk's first-boot address (192.0.2.99, aen0 192.0.2.17) | 0 of 3, each hung past 260 s | hung past 200 s |
+
+rpcbind's age and NFS idle time do not matter (both rows: rpcbind about 40 minutes old). A restart of rpcbind and NFS alone does not cure it; a restart after the hosts line is right does.
+
+**Who meets it.** Any NFS server whose address changed after /etc/hosts was written: a DHCP lease, an `ifconfig` by hand, or the test rig's per-boot address on a disk built at another address (the rig now rewrites the line at each boot: a pair of
+such disks mounts with no hand edit, and hangs again with the rewrite turned off). On a 1.1 disk nothing in the installer writes the node's hosts line: it writes /etc/inet/interfaces, and base's `ifup` writes the hosts row from it at boot (S69inet).
+
+**A correct hosts line is all NFS needs.** rpcbind fills the wildcard per query, not when a program registers: on base 1.0-30 with
+`* dhcp name uaeamix`, a lease that came 4 minutes after S69inet (rpcbind already running with no address) was applied by the DHCP hook,
+which rewrote the hosts line, and rpcbind's GETADDR answered the new address at once, mountd's too after `nfs start`; no restart. A lease
+at boot gives the same (ifup rewrites the line). So 1.1's ifup and DHCP hook keep NFS right; a disk whose hosts line is stale and that
+runs neither still meets the defect. Not measured: a lease that moves to another address while up, because the base's dhcpc did not renew or
+rebind a 120 s lease (no request in 8 minutes).
+
+---
+
+## ✅ ISSUE-80 (2026-11-05, a limit of the stock kernel: MEASURED in emulation on `68060-261103-62`; FIXED by `src/patch_arena8m.py`, verified in emulation on the test builds of `68060-261105-63`; NOT YET ON HARDWARE): the kernel's virtual arena is 4 MiB, and at 128 MiB of RAM almost nothing is left of it
+
+> **Ledger: FIXED (emulation).** The number and the design are from the 040/060 port's upstream (Antti Sokero, its KNOWN-ISSUES at
+> 62df063); the patch is written here from that description and this image. `ARENA8M=0` builds the 4 MiB arena.
+
+**Defect.** `sptmap` is 1024 clicks of 4 KiB from `syssegs`. `kvm_init`'s page_t array and page hash take about 4.6 clicks per MiB of
+RAM, a swap area's anon array one click per MiB of swap. A KM_SLEEP `kmem_alloc` over 4 KiB that finds no run sleeps, uninterruptibly,
+on `Km_OsizeWanted`.
+
+**Free clicks at idle, with 64, 128 and 256 MiB of swap (emulation, A4000 Z3660):**
+
+| RAM | -62, 4 MiB arena | 8 MiB arena |
+|---|---|---|
+| 16 MiB | 568 / 502 / 374 | 1592 / 1527 / 1399 |
+| 32 MiB | 495 / 430 / 302 | 1519 / 1450 / 1322 |
+| 64 MiB | 349 / 278 / 150 | 1373 / 1304 / 1176 |
+| 128 MiB | 55 / refused / refused | 1079 / 1010 / 882 |
+
+**Fix.** Same-size immediates and two absolute symbols, no code added: `mlsetup`'s `mfree` 0x400 to 0x800 clicks; `kvm_init`'s `seg_attach`
+4 to 8 MiB; `sysseginit`'s leaf bound 1023 to 2047; `kseg`/`unkseg`'s `ksegtbl` key `>> 17` to `>> 18`, one key per allocation since `ptmalloc`
+aligns to 256 KiB; `kvsegmap` 0x40840000 and `kvsegu` 0x48840000. All sites old or all new, or the build stops.
+
+**An ordinary user's pipes (emulation, 64 MiB).** A program run as uid 100, 60 processes each filling pipes until refused, held 120 s: on -62 the arena (350 clicks
+idle) went to 0 at once, the network stopped within 7 s and the box never answered again; on the 8 MiB arena it fell from 1374 to 705 and the box answered
+throughout. Three uids at once (179 processes, the process table full) left 536. Not measured: more open files per process, other kmem consumers.
+
+**Cost and limit.** `maxmem` falls by one page at every size. The main store stays capped at 128 MiB: above that `kvm_init`'s segmap window
+reaches `kvsegu` (from the code, not run; the emulator will not give more), and `st_top1` blocks moving `kvsegu`.
+
+---
+
+## ✅ ISSUE-81 (2026-11-05, a stock tuning defect: MEASURED in emulation; the mark chosen from measurement; NOT YET ON HARDWARE): IP's lower read queue holds 8 KiB, so a burst of NFS read fragments overflows it
+
+> **Ledger:** **FIXED (emulation).** The defect, the hardware measurement and the value 0x10000 are from the 040/060 port's
+> upstream (Antti Sokero, `7cf8452`); the value was measured here against 0x4000 before it was taken. `src/patch_ip_lrhiwat.py`,
+> in the default chain since `3caed28` (step 8.10); `IPLRHIWAT=0` builds the stock mark.
+
+**Defect.** The first queue above the A2065 driver with a service procedure is IP's lower (mux) read queue, `iplrinit`, served by
+`ipintr`. `setq` copies its marks at `I_LINK` from `ipm_info[3]`, whose `mi_hiwat` is 0x2000. One 8 KiB NFS reply is six fragments of
+about 1.5 KB, so a second reply arriving before `ipintr` runs fills the queue, the driver's `canput` fails and it drops the frame
+(`Failed putq()` in `aen -s`). A lost fragment loses the whole reply, and the client retransmits after its timeout. Stock 2.1c has the same
+marks, and so do the 3B2, i386 SVR4 and SVR4.2 `ip_main.c`. Upstream measured 156 drops in a 149 MB read on a 68060 with an A2065, and none
+after the live queue's `q_hiwat` was raised.
+
+**Measured (emulation, A2065 to A2065 at MTU 1500, NFSv2/UDP rsize 8192: a 52 MB read, a tree copied from the mount to the mount, and a
+52 MB ftp get; one pair a row):**
+
+| Kernel | `Failed putq()` | RPC retransmissions | 8 KiB `dd` read | ftp get | TCP out-of-order received | retransmitted by the sender |
+|---|---|---|---|---|---|---|
+| -62, 0x2000 | 77 | 77 | 65 s | 161 s | 164 | 0 |
+| 0x2000 | 87 | 87 | 63 s | 162 s | 171 | 0 |
+| 0x4000 | 0, 1 | 0, 1 | 71 s, 63 s | 164 s | 194 | 0 |
+| 0x10000 | 0, 0 | 0, 0 | 66 s, 58 s | 155 s | 78 | 0 |
+
+Every drop came in the copy, where read and write replies interleave; the plain read lost none at any mark. Two replies queued at once need
+about 16.9 KB, just over 0x4000, which is why 0x4000 still lost one.
+
+**Fix.** `ipm_info[3].mi_hiwat` only, 0x2000 to 0x10000: four bytes of `.data`, found through `iplrinit`'s relocation with the entry's stock
+shape checked; the other entries and `mi_lowat` are untouched. TCP's own lower read queue (`tcpm_info[3]`) stays 0x4000; a larger IP mark lets
+one `ipintr` pass hand TCP more than that, and the sender retransmitted nothing at 0x10000.
+
+**Memory.** The higher mark lets IP's queue hold more message blocks while memory is short. On a 16 MiB box paging hard (a memory checker
+beside a 128 MB file, free memory sampled every second), four interleaved pairs against the stock mark gave the lowest free page counts
+10 against 13, 8 against 2, 8 against 11 and 10 against 0 (0x10000 first), and 2 s against 3 s below 10 pages in all; no page went bad and
+nothing faulted or stalled at either mark. The dips are observed and harmless.
+**Not counted, recorded:** `ipintr`'s own `canput` refusals toward UDP and TCP have no counter, so a loss there shows only as a retransmission.
+**To be run on hardware**, with `Failed putq()` and the RPC retransmissions read before and after.
+
+## ✅ ISSUE-82 (2026-11-05, a stock defect: REPRODUCED in emulation on `68060-261103-62`; FIXED by `src/patch_kmemwake.py`, verified in emulation; NOT YET ON HARDWARE): a process waiting for a large kernel allocation can sleep for ever with the memory free
+
+> **Ledger: FIXED (emulation).** The reading is the 040/060 port's upstream's (Antti Sokero); its fix compares bytes with bytes, and this one
+> removes the compare. `KMEMWAKE=0` builds the stock compares.
+
+**Defect.** `kmem_alloc` sleeps on `Km_OsizeWanted`, the smallest size in bytes anyone waits for. `kmem_freepool` wakes it only when the *clicks* it
+returned are at least that many *bytes*, so never. `kmem_free`'s oversize path compares bytes with bytes, but a smaller free can complete a run by
+joining the space next to it, and that wakes nobody either.
+
+**Reproduced.** A process filling kvseg with pipes, a real `shmget` asleep for a large block, then frees step by step:
+
+| Kernel | Result |
+|---|---|
+| -62 | still asleep after every pipe closed: largest run 20, the sleeper wanting 8; WCHAN `Km_OsizeWanted`, pri 25 |
+| upstream's byte compare, small pool | still asleep after every pipe closed: largest run 55, sum 381 |
+| this fix, small pool | woke after step 10 |
+
+**Fix.** The `ble.w` before each compare and the `bcs.w` after it become nops at both sites: every pool retirement and every direct oversize free
+wakes the channel, and the sleeper goes back to its `sptalloc` and sleeps again if the run is not there yet.
+
+**Left open, recorded:** the window between `sptalloc` failing and `sleep` raising the spl; the same channel's sleeps on `availrmem`/`availsmem`, which
+nothing there wakes; frees that do not go through kmem (`bp_mapout`, `unkseg`). All stock, none widened.
+
+---
+
+## ✅ ISSUE-116 (2026-11-05, stock defects and a defect of this port: PANICS AND HANGS REPRODUCED by unprivileged programs in emulation on `68060-261103-62`; FIXED, verified in emulation on the test builds of `68060-261105-63`; NOT YET ON HARDWARE): an access the kernel cannot serve restarts for ever, and on a 68040 a store then overruns the kernel stack
+
+> **Ledger: FIXED (emulation).** `src/segvn_prot040.s`, `src/wb040.s`, `src/runtime040.s`, `src/vtop040.s`, `src/coreseg040.c`, `src/wbkeep040.s`.
+> `LOWUSER=0`, `CORESEG=0` and `WBKEEP=0` are the rollbacks.
+
+**Reproduced on -62, each by an ordinary program, in its own child under an alarm:**
+
+| Case | Plain 68040 | LC060 |
+|---|---|---|
+| read of a PROT_NONE page | spins to the alarm | spins to the alarm |
+| read across a page into PROT_NONE | spins to the alarm | spins to the alarm |
+| store across into PROT_NONE | `PANIC: KERNEL FAULT ... pc=0x0, vector=0x4` | spins to the alarm |
+| store across into PROT_EXEC alone | box down, `u_procp` overwritten | SIGSEGV |
+| store to PROT_EXEC alone | not reached | spins to the alarm |
+| fetch across into PROT_NONE | not reached | spins to the alarm |
+| `write(2)` from a PROT_NONE buffer | not reached | the box stops, silently |
+
+**The panic.** Stock `segvn_fault` tests only a write under F_PROT with `(prot & 3) == 1`, and `segvn_faultpage` tests nothing, so `as_fault` answers 0
+for such a page and maps nothing. A 68040's pending store is replayed by `wb040` after a 0; the replay faults, `as_fault` answers 0 again, and a new
+replay nests, 0xEC bytes a level, with no limit. The stack runs below its base into struct user and overwrites `u_procp` (read as 6 in the dump). On
+the way out `issig` walks low memory as a proc, the call through `p_clfuncs` finds 0, and `jsr 0` meets the 0x4AFC at physical 0. `curproc` is intact
+throughout. It is ISSUE-7's recursion by another route.
+
+**The rule now**, in `segvn_faultpage`, with p the page's or segment's protection:
+
+- S_WRITE needs PROT_WRITE, at every fault type. The 68040's SSW RW and the 68060's FSLW are defined for every access. (The 68030 line refuses only at F_PROT, because
+  a 68030's RW may be undefined for a fetch.)
+- S_READ needs PROT_READ or PROT_EXEC: no caller passes S_EXEC, a fetch arrives as S_READ, and an execute-only page must run.
+- S_READ with PROT_WRITE alone adds read to the stored protection and the body serves it. A resident writable translation never faults on a read, so a
+  refusal would work only until pageout.
+- Another rw passes under F_SOFTLOCK (mlock of a page it will not touch) and otherwise needs some permission.
+
+So /proc gets EIO on a page with no permission, where stock on the 68030 read it: the body loads no valid translation there, and `vtop` would answer
+with low kernel memory.
+
+**Three guards behind it:**
+
+- *Nested replays stop at 4.* A frame taken inside a replay is a supervisor frame with PC in `Lwb_do` and a2 the replay's own frame, so the chain counts
+  itself with no state. Past the limit the store is denied like any other (`wb_nest_n`). With `segvn_faultpage`'s refusal disabled in a test kernel:
+  the same panic without the limit, SIGSEGV with it.
+- *The replay's owner is in registers.* The landing pad's owner and the denied slot were globals across a nested fault that can sleep. Two replays asleep that
+  woke out of order, the later denied: `PANIC: wb040: u_nofault landing pad entered with a FOREIGN stack`. Reproduced by an ordinary program only on a test kernel that
+  forces the sleeps; 20 minutes of 16,000 nested replays under load did not fire it. One boot has 171 nested replays, 84 of them denied.
+- *`hardbus` retries are counted.* A bus error in a page's last 8 bytes with its next page mapped restarted for ever, and from a copyin nothing could kill it. When the next page was
+  already valid the resolve changed nothing, so the same process at the same address 8 times with no tick between is `hardbus_orig`'s hard error (`hbu_again_n`). A real
+  crossing is not counted. Not reproduced: the emulator gives no bus error here. **To be run on hardware.**
+
+**A user page below 1 GiB.** `vtop` now uses the page's frame, and an address nothing maps there stays numeric for kernel buffers; `hardbus` no longer tests the address, and a
+68040 misaligned read whose far page does not resolve gets SIGSEGV naming the far page (`hbu_farsegv_n`). Raw I/O into such a page lands in the page, with the chip RAM of the same
+number untouched, on the Z3660 and the A3091; it did on -62 too, so raw I/O through the shared disk layer gives no failing case for the `vtop` change.
+
+**Core dumps.** Stock `core_seg` ended the dump at the first error, and a denied page now gives one. `src/coreseg040.c` divides each run with `as_getprot`, and a page with no
+permission is not written: a real hole, no blocks spent on a large reservation, and good pages after it reach the file. An I/O error still ends the dump.
+
+**Kept stores** (ISSUE-114). The table was one of 8 records shared by every process, and a record stays until its process exits when the handler leaves by `longjmp` or
+SIGSEGV is ignored: one unprivileged program could fill it, and every other user's kept store was then dropped. `sh` grows its heap from its SIGSEGV handler, so another
+user's shell, root's too, could resume past a store that never happened. Now 32 records, at most 4 per real uid (`wbk_cap_n` counts a uid's drops). A uid at its limit, or
+a full table, takes for a fault with a store to keep a record of the faulting address space's own whose signal has gone out; never another process's, whose handler may
+still be running or whose replay may be asleep with it. A second signal at a kept context drops the record, since the first handler left by longjmp. A replay denied again
+signals with a siginfo. `HGFAULT` stays out with `WBKEEP`: it grew the break behind the program, whose next `brk` took the page back (ISSUE-114).
+
+**Regression run:** `test-tools/vmregress.c`, one line per case: copy on write after fork, private and shared file mappings, stack growth, exec of shared text, mprotect, kernel copies,
+tas and cas, /proc breakpoints, core dumps, then the denied pages. Every case passes in emulation on `68060-261105-63` and `68060-261106-64`: the 68LC060 on the Z3660 at 16 and 64 MiB, and a plain 68040.
+
+**Recorded, not fixed:**
+
+- `tas` and `cas` on a 68040: the emulator reports the locked read so that the path works; what silicon reports needs a run on a real 68040, and the
+  lab has none (`VMR_ONLY=rmw vmregress` is the row). The same row on a 68060 is a pass in emulation (the 68LC060 on the Z3660); a real 68060 has not run it.
+- /proc on a device mapping whose physical address is in the 1-2 GiB band: `prmapin` returns the number and it is used as a kernel VA. Needs root and a debugger on an aperture. After 1.1.
+- A store refused on a read-only shared mapping has already run `VOP_GETPAGE(S_WRITE)`, which can allocate blocks in a sparse file. Stock.
+- `prusrio` decides by the first page of a transfer. Stock.
+- A far-page denial always says SEGV_MAPERR. A 68040 store kept for a signal is lost when a debugger clears the fault. `krnxmemflt` reports a denied user write-back as resolved (real 68040 only). Long-standing.
+- 68060: `cas2`, and FPSP and ISP operands crossing into an unmapped page, spin in user mode. Long-standing.
+- Records nothing frees (SIGSEGV ignored, a handler left by `longjmp`) stay until exit; a uid holds 4 at most, so one user can make only their own stores drop. Five
+  processes of one uid in their handlers at once: the fifth's store is dropped (counted).
+- A fault inside a running handler, with its uid at the limit, can take the outer handler's own record; that store is then lost. One process's own, and narrow.
+- On an unresolved fault, earlier stores' write-backs to valid pages are kept with the record, not completed, and are lost if the handler leaves by `longjmp`
+  or the process dumps core. A child forked inside the handler does not get the parent's record. Long-standing (real 68040).
+- `hardbus` counts a crossing fault whose far page is already valid. A program that write-protects the far page again and repairs it from its handler, at one address
+  more than 8 times a tick, is killed (SIGKILL), or its system call gets EFAULT, where each cycle should succeed. -62 restarted such a fault for ever when the far page stayed protected.
+- The swap guard (ISSUE-111): its resize zeroes the array at IPL 7, at boot only. Its limits apply once an area exists, so `swapconf`'s boot area is never refused:
+  `swapconf` panics on any error. A refusal there was read from the code, not reproduced: on a 4 MiB arena at 128 MiB both before and after boot
+  with a 30 MiB area, and the tail `swap -a` was refused. Its 1 MiB reserve does not depend on the arena, so on `ARENA8M=0` and the dbg and quiet overlays `swap -a`
+  refuses areas over about 157 MiB at 64 MB, where -62 took about 413 MiB. Re-adding an area whose delete is still pending needs no new array but is held to the
+  limits all the same (a false ENOMEM).
+- The debug overlay's I10 fault predictor (`I10=1`) still encodes the old segvn rule, so its cross-check misreports. Debug build only.
+
+## ⚠ ISSUE-118 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63`; RECORDED, in.ftpd's passive path to be fixed in userland): a TCP close without SO_LINGER drops the unsent tail
+
+**Defect.** TCP's unsent data is its own stream write queue (`tcp_state` puts each M_DATA there and counts it in `t_qsize`), and that queue is freed
+when close returns. `tcpclose` keeps the data only under SO_LINGER with a time: `lingerstart`, then a sleep until the tail is acknowledged or the
+timer drops it. Without linger it clears `t_qsize` and the FIN goes out after what TCP had already sent: the peer gets an orderly end and a prefix.
+k46 `tcpclose` .text 0xd2c26 (the clear at 0xd2d30); k30 -89 0xbd54a (0xbd654); the 3b2 source's `tcp_main.c` 280-307. The stream head never drains
+a socket either: libsocket sets its close time to 0 (`I_SETCLTIME`).
+**Seen as** in.ftpd's passive downloads arriving short with 226 (on `68060-261105-63` and -62 alike): its PORT path sets SO_LINGER {1, 60}, its PASV path
+nothing. **Avoided by** SO_LINGER with a time, or shutdown(1) before close.
+**Measured** (a sender of 8 MiB in 8 KiB writes, then close, on `68060-261105-63`): no linger, short 3 of 20 (accept), 1 of 10 (connect), 2 of 10 (O_NDELAY);
+SO_LINGER 60, 0 of 30; shutdown(1), 0 of 10. Every write whole, close took 0 s, FIN after; about 9 KB unsent at close (the last 8 KiB write and
+part of the one before). scp and rsync, which wait for the receiver before closing, 0 of 20 each.
+
+## ✅ ISSUE-119 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63`; FIXED by `fa24df6` in the ufs module, verified in emulation on `68060-261106-64`; NOT YET ON HARDWARE): writing whole pages into an 8 KiB UFS block anywhere but at its start could leave the block's first pages reading old memory contents
+
+**Defect.** Writing whole pages into an 8 KiB UFS block anywhere but at its start could leave the block's first pages reading old memory
+contents while the disk held the right data (stock, both lines; seen with 2 KiB and 4 KiB writes, never with 8 KiB). Amix's ufs rwip passed the
+segmap window's base to segmap_pagecreate instead of base + offset, as SVR4's source does, so the pages created unread were the window's first ones.
+Fixed in the ufs module (4 bytes).
+**Where.** The stock ufs object (`fs/ufs/exp`) `.text 0x8a4c` (rwip + 0x3d6): `movel %fp@(-108),%sp@-` pushes the window base; SVR4's
+`ufs_vnops.c:460` has `segmap_pagecreate(segkmap, base + mapon, n, 0)`, as s5, nfs and specfs do. `as_iolock` grants pagecreate to any
+page-aligned whole-page write, rewrites included, so a 4 KiB write to a block's second half created its first page (when not cached) with no
+read: valid, clean, the frame's old contents; the written page faulted in through uiomove and was right, and the clean page was never written.
+**Fix.** `tools/fsobj-patch.py`'s module-only site `rwip`: `pea %a0@(0,%d3:l)` (`48703800`), a0 segmap_getmap's return, d3 mapon; same length,
+no relocation; its surrounding instructions and relocations are checked, and `UFS_RWIP_FIX=0` builds the module without it.
+**Measured** (one process: append 4 KiB blocks tagged with number and generation, then random 4 KiB rewrites, appends and reads, every byte
+checked; 16384 blocks, 200000 operations): without the fix every run at 64 MiB reads wrong data from operation 30174 on (at 32 MiB from about
+34 MB of file, at 128 MiB from about 127 MB; at 128 MiB a 64 MB file is clean), always an even 4 KiB block; the disk held the right data at every
+bad block; a burst of 47 cached pages of the file held other contents as the file filled the cache. 8 KiB writes, and appends with reads only,
+0 bad. With the fix: 0 bad in three runs at 64 MiB, and no cached page of the file holding another block.
