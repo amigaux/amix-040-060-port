@@ -1,7 +1,8 @@
 #!/bin/bash
-# cut.sh OUT -- cut 68060-261106-66 (the k46 module kernel, kabi k46.1.4) into OUT: -65's recipe with this repository at 67c347c
+# cut.sh OUT -- cut 68060-261106-66 (the k46 module kernel, kabi k46.1.4) into OUT: -65's recipe with this repository at 512a99f
 # (-65's 53e52e4 plus the audio driver answering each volume/period ioctl once, refusing a zero-length one without the
-# NULL pullup, and its refills moving on, src/patch_audio_replies.py after amix-paula's three patchers);
+# NULL pullup, and its refills moving on, src/patch_audio_replies.py after amix-paula's three patchers; 512a99f is 67c347c
+# with relink-040-audio.sh refusing an AUDIO_REPLIES value but 0 or 1, the same bytes built);
 # -65 was -64's recipe with this repository at 53e52e4
 # (-64's fa24df6 plus a raw disk request past its slice end failing with ENXIO, src/patch_ddeof.py; and the ufs module's rwip
 # calling ufs_bmap_hf, which zeroes a new block in a hole and keeps alloc-only rewrites, tools/ufs-holefix.sh after the tail
@@ -19,7 +20,7 @@
 # btrace_on; pstart sets cputype from the k46 loader's AXL1 record) and amix 46c269c, as -59;
 # gcc14's binutils (2.43.1) as m68k-linux-gnu-*, as -59.
 # Inputs, by environment:
-#   PORT_GIT     a clone of this repository that has 67c347c and the patcher revisions below (default: this one)
+#   PORT_GIT     a clone of this repository that has 512a99f and the patcher revisions below (default: this one)
 #   AMIX         an amix clone that has 46ef7d1 (kernel/dlm: the module core and `make kit`; kernel/k30/tools and
 #                contracts: sddevsize and support-probe injectors, emit-family-chains, k0-gates; toolchain/m68k-gnu-bin)
 #   PAULA        amix-paula with 62fdcab (the audio driver's three patchers)
@@ -31,11 +32,11 @@
 #   AMIX_SYSTEM  amigaux/amix-system (kernels/2.1c/unix, the stock kernel the relinks check against)
 #   NETBSD_SYSSRC  NetBSD 10.1's source/sets/syssrc.tgz (the FPSP; tools/netbsd-pin.sh checks its sha256)
 #   CONTROL      optional: the frozen candidate-3 kernel (5aa7d732) emit and k0-gates compare against
-# OUT gets the run root (port/ = git archive 67c347c, the build tree; amix-040-060-port/ = a clone at 67c347c;
+# OUT gets the run root (port/ = git archive 512a99f, the build tree; amix-040-060-port/ = a clone at 512a99f;
 # amix/ = a clone at 46ef7d1, its kernel/dlm the kit; amix-kerntools/ = 46ef7d1's kernel/k30 tools and
 # contracts; gnu-bin/; inputs/) and SHA256SUMS-68060-261106-66, which must equal this directory's.
 set -eu
-REV=67c347c AMIX_REV=46ef7d1 KB=68060-261106-66
+REV=512a99f AMIX_REV=46ef7d1 KB=68060-261106-66
 HERE=$(cd "$(dirname "$0")" && pwd)
 W=${1:?usage: cut.sh OUT}; PORT_GIT=${PORT_GIT:-$(git -C "$HERE" rev-parse --show-toplevel)}
 : "${AMIX:?}" "${PAULA:?}" "${GCA:?}" "${AMIX_SYSTEM:?}" "${NETBSD_SYSSRC:?}"; [ -z "${KT:-}" ] || { echo "cut.sh: KT must be unset"; exit 2; }

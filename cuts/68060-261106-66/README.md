@@ -1,14 +1,17 @@
 # Cut 68060-261106-66
 
-The k46 module kernel, kabi k46.1.4 (abi 18c0a1c9), cut from this repository's `k46-module` at `67c347c` and amix
-`46ef7d1`: the recipe of -65 (`../68060-261106-65`) with the audio driver fixed.
+The k46 module kernel, kabi k46.1.4 (abi 18c0a1c9), cut from this repository's `k46-module` at `512a99f` and amix
+`46ef7d1`: the recipe of -65 (`../68060-261106-65`) with the audio driver fixed.  (`512a99f` is `67c347c`, where the fix was
+made, with the audio pass refusing a bad `AUDIO_REPLIES`; it builds the same bytes.)
 
 - **/dev/audio answers each volume or period request once, refuses a zero-length one, and plays each byte once**
   (`src/patch_audio_replies.py`; ISSUE-122).  The stock driver sent every AUDIO_VOLUME and AUDIO_PERIOD reply twice
   (a refusal arrived as success); a zero-length I_STR request called `pullupmsg` on a missing block, which on this line
   is a kernel panic (a bus error in `xmsgsize`); and a write longer than its free channel buffer replayed one stretch
   of itself for good.  The patcher runs after amix-paula's three in `relink-040-audio.sh`, its input (1f43c5ff) and
-  output (3f434f35) pinned by SHA-256; it is the 030 line's file, byte for byte.  `AUDIO_REPLIES=0` builds without it.
+  output (3f434f35) pinned by SHA-256; it is the 030 line's file, byte for byte.  `AUDIO_REPLIES=0` builds without it
+  (any value but 0 or 1 is refused).  Of the two refill places, the one for a queued message that straddles a buffer's
+  end is fixed by reading only: the proof's writes are single writes, which refill through the other.
 - A TCP close fix (ISSUE-118) was tried for this cut and reverted (`7a4a30c`): see KNOWN-ISSUES.
 
 | File | What |
@@ -33,7 +36,8 @@ the build and passes (8 places; 10 refusals, each pin alone among them).
 
 ## Proof (emulation, A4000 with the 68LC060 on the Z3660)
 
-The kernel and module of this recipe's trial run (the same recipe at `67c347c`; its sums are the record), installed as
+The kernel and module of this recipe's trial run (the same recipe at `67c347c`; its sums are the record, and a run at
+`512a99f` gives the same), installed as
 generation 2 by `kbootset`; sound_output=interrupts, period 200; the 68030 line's test programs `audioctl2` (50 rounds
 of each request form, each call under alarm(10)) and `aurep2` (one write whose 256-byte ramp names its chunks, every
 channel buffer load read through `/dev/kmem` at the live `audio_channel`, `audioinfo` + 0x10):
