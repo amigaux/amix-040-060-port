@@ -410,25 +410,6 @@ if [ "$FREEQ_GUARD" = "1" ]; then
 else
 	echo "[*] FREEQ_GUARD=0 -- building WITHOUT the freeq guard (rollback control)"
 fi
-# tcpclose_lg (2026-11-06, ISSUE-118): a TCP close without SO_LINGER freed the unsent tail with the stream's write
-# queue (in.ftpd's passive downloads cut short).  tcpclose_lg gives such an endpoint SO_LINGER with 60 s, then calls
-# the stock tcpclose, which sends the tail and the FIN before it returns; SO_LINGER with 0 (a reset) and a user's own
-# linger are left alone.  The same file as the 68030 line's.  Only tcpurinit's qi_qclose is retargeted to it after the
-# link (tools/tcpclose-retarget.py, below).  TCPCLOSE_FIX=0 omits the unit and the retarget.
-TCPCLOSE_FIX="${TCPCLOSE_FIX:-1}"
-TCL_OBJ=""
-if [ "$TCPCLOSE_FIX" = "1" ]; then
-	m68k-cbm-sysv4-gcc $(echo "$AMIX_KERNEL_CFLAGS" | sed 's/-m68020/-m68040/') \
-		-c "$HERE/src/tcpclose_lg.c" -o "$HERE/build/tcpclose_lg.o"
-	TCL_IN=$(m68k-linux-gnu-nm "$HERE/build/tcpclose_lg.o" | awk '$1=="U"{print $2}' | LC_ALL=C sort | tr '\n' ' ')
-	TCL_EX=$(m68k-linux-gnu-nm "$HERE/build/tcpclose_lg.o" | awk '$2 ~ /^[TDB]$/{print $3}' | LC_ALL=C sort | tr '\n' ' ')
-	[ "$TCL_IN" = "tcpclose " ] || { echo "[FAIL] tcpclose_lg.o imports '$TCL_IN'"; exit 1; }
-	[ "$TCL_EX" = "tcl_calls tcl_magic tcl_set tcpclose_lg " ] || { echo "[FAIL] tcpclose_lg.o exports '$TCL_EX'"; exit 1; }
-	[ -z "$(m68k-linux-gnu-nm "$HERE/build/tcpclose_lg.o" | awk '$2=="C"')" ] || { echo "[FAIL] tcpclose_lg.o has COMMONs"; exit 1; }
-	TCL_OBJ="$HERE/build/tcpclose_lg.o"
-else
-	echo "[*] TCPCLOSE_FIX=0 -- building WITHOUT the TCP close linger (rollback control)"
-fi
 # swapguard (2026-11-01, ISSUE-111): swapadd allocates its anon array (16 bytes per 4 KiB page of the area) with
 # KM_SLEEP; over 4 KiB that is a run of kvseg, and when none is large enough `swap -a` sleeps on Km_OsizeWanted
 # for ever.  swapadd_guarded allocates the array with KM_NOSLEEP first (ENOMEM when it does not fit) and
@@ -754,7 +735,7 @@ m68k-cbm-sysv4-ld -r -o "$OUT" "$HERE/build/unix-stage1" \
 	"$HERE/build/config040.o" "$HERE/build/cb_icode040.o" "$HERE/build/kdbg040.o" \
 	"$HERE/build/dbgpublish040.o" "$HERE/build/codepub040.o" "$HERE/build/issue39_040.o" \
 	$LSDT_OBJ "$HERE/build/ptdatfree040.o" \
-	"$HERE/build/syncguard.o" "$HERE/build/pageinitzero.o" $SMU_OBJ $KZERO_OBJ $FQG_OBJ $SWG_OBJ $CSG_OBJ $TCL_OBJ \
+	"$HERE/build/syncguard.o" "$HERE/build/pageinitzero.o" $SMU_OBJ $KZERO_OBJ $FQG_OBJ $SWG_OBJ $CSG_OBJ \
 	"$HERE/build/btwalk.o" $DIAG106_OBJ \
 	$HG_OBJ \
 	$I10_OBJ
@@ -1640,18 +1621,6 @@ if [ "$SWAP_GUARD" = "1" ]; then
 	[ "$SWGCALLERS" = "swapconf swapctl swapfunc " ] \
 		|| { echo "[FAIL] swapadd_guarded callers are '$SWGCALLERS', expected swapconf swapctl swapfunc"; exit 1; }
 	echo "[OK] ISSUE-111 swap guard bound: swapadd_guarded from $SWGCALLERS"
-fi
-
-# HARD CHECK (2026-11-06, ISSUE-118): TCP's upper read qinit closes through tcpclose_lg, which calls tcpclose; the
-# other three qinits keep tcpclose.  A lost retarget links and boots and leaves the unsent tail dropped at close.
-if [ "$TCPCLOSE_FIX" = "1" ]; then
-	echo
-	echo "[*] TCP close: tcpurinit's qi_qclose -> tcpclose_lg"
-	run_step 1 python3 "$HERE/tools/tcpclose-retarget.py" "$OUT"
-	run_step 1 python3 "$HERE/tools/tcpclose-retarget.py" --check "$OUT"
-	TCLN=$(m68k-linux-gnu-objdump -r -j .data "$OUT" | awk '$3=="tcpclose"' | wc -l)
-	[ "$TCLN" = 3 ] || { echo "[FAIL] .data names tcpclose $TCLN times, want 3 (the other qinits)"; exit 1; }
-	echo "[OK] ISSUE-118 TCP close bound: tcpurinit -> tcpclose_lg -> tcpclose; 3 qinits keep tcpclose"
 fi
 
 # HARD CHECK (2026-11-06, ISSUE-121): ddread and ddwrite still carry the end-of-slice test in the final image.
