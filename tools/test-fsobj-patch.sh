@@ -62,6 +62,7 @@ else:			# one byte of .text or .data at addr
     b[sec[kind][0] + addr] = val
 open(dst, "wb").write(b)
 EOF
+	[ $? = 0 ] || { fail "setup: mutate $*"; return 1; }
 }
 refuse() {	# label want-text fs base obj [stock]
 	if python3 $HERE/tools/fsobj-patch.py --stock "${6:-$STOCK}" --base "$4" "$5" --triples > /dev/null 2> "$T/err"; then fail "$1: accepted"
@@ -86,11 +87,32 @@ three .text 0xc273 0x0a 0x830c7 0x0a && refuse "a module-only site's old byte (u
 	"the object has 720a, the table expects 720b" ufs "$T/b" "$T/o" "$T/u"
 three reloff 0x38c6 0x388e 0x7a71a 0x7a6e2 && refuse "a module-only site in a relocated field (kmem_alloc's moved there)" \
 	"overlaps the relocated field of kmem_alloc+0 @0x388e" ufs "$T/b" "$T/o" "$T/u"
-# rwip: an object already fixed is not the stock kernel's object; a changed context byte (the stack
-# adjust after segmap_getmap, the same in all three) refuses the site
-$P --base "$FSOBJ_BASE" "$U" -o "$T/ufs.fixed" 2> /dev/null && refuse "an object with rwip already fixed" "matches 0 places" ufs "$FSOBJ_BASE" "$T/ufs.fixed"
-three .text 0x8a3d 0x10 0x7f891 0x10 && refuse "rwip's context changed (addaw #16 after segmap_getmap)" \
+# rwip (object .text 0x8a4c, the stock kernel's 0x7f8a0): each of its checks refuses a changed input, the change made the
+# same in the stock kernel, the base and the object so that the object is still found
+if $P --base "$FSOBJ_BASE" "$U" -o "$T/ufs.fixed" 2> /dev/null; then
+	refuse "the whole patched object fed back" "matches 0 places" ufs "$FSOBJ_BASE" "$T/ufs.fixed"
+else fail "setup: the patched object"; fi
+threes() {	# kind then obj-addr obj-value kernel-addr kernel-value, repeated: several changes in all three
+	k=$1; shift; cp "$STOCK" "$T/u"; cp "$FSOBJ_BASE" "$T/b"; cp "$U" "$T/o"
+	while [ $# -ge 4 ]; do
+		mutate "$T/u" "$T/u2" "$k" "$3" "$4" && mutate "$T/b" "$T/b2" "$k" "$3" "$4" && mutate "$T/o" "$T/o2" "$k" "$1" "$2" || return 1
+		mv "$T/u2" "$T/u"; mv "$T/b2" "$T/b"; mv "$T/o2" "$T/o"; shift 4
+	done
+}
+threes .text 0x8a4c 0x48 0x7f8a0 0x48 0x8a4d 0x70 0x7f8a1 0x70 0x8a4e 0x38 0x7f8a2 0x38 0x8a4f 0x00 0x7f8a3 0x00 && refuse "rwip already fixed (only its site)" \
+	"the object has 48703800, the table expects 2f2eff94" ufs "$T/b" "$T/o" "$T/u"
+three .text 0x8a3d 0x10 0x7f891 0x10 && refuse "rwip's context: addaw #16 after segmap_getmap" \
 	"the object has defc0010 @0x8a3a, not defc000c" ufs "$T/b" "$T/o" "$T/u"
+three .text 0x8a37 0x49 0x7f88b 0x49 && refuse "rwip's context: getmap's return saved from a1" \
+	"the object has 2d49ff94 @0x8a36, not 2d48ff94" ufs "$T/b" "$T/o" "$T/u"
+three .text 0x8792 0x0f 0x7f5e6 0x0f && refuse "rwip's context: mapon masked to 4 KiB" \
+	"the object has 028300000fff @0x878e, not 028300001fff" ufs "$T/b" "$T/o" "$T/u"
+three .text 0x8ade 0x30 0x7f932 0x30 && refuse "rwip's context: uiomove not given base + mapon" \
+	"the object has 48753000 @0x8adc, not 48753800" ufs "$T/b" "$T/o" "$T/u"
+three reloff 0x8a58 0x8a5a 0x7f8ac 0x7f8ae && refuse "rwip's relocation: segmap_pagecreate's moved" \
+	"the relocation @0x8a58 is type 0 None" ufs "$T/b" "$T/o" "$T/u"
+three rela 0x8a58 0x4 0x7f8ac 0x4 && refuse "rwip's relocation: segmap_pagecreate+4" \
+	"the relocation @0x8a58 is type 1 segmap_pagecreate+4" ufs "$T/b" "$T/o" "$T/u"
 # the mountfs guard replaces patch_writeback.py's bound (0x7e67e, 1023 -> 2047) with 4095: refused
 # when the base does not apply that site
 mutate "$FSOBJ_BASE" "$T/b6" .text 0x7e682 0x03 && refuse "the mountfs guard over an unapplied script site" \

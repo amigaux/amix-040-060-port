@@ -309,8 +309,9 @@ def main():
                     if ot[o:o + len(want)] != want:
                         die("%s: the object has %s @0x%x, not %s (%s)" % (where, ot[o:o + len(want)].hex(), o, want.hex(), what))
                 for o, n in RWIP_RELOCS.items():
-                    if orel.get(o, (0, None))[1] != n:
-                        die("%s: the relocation @0x%x names %s, not %s" % (where, o, orel.get(o, (0, None))[1], n))
+                    t, rn, add = orel.get(o, (0, None, 0))
+                    if (t, rn, add) != (1, n, 0):
+                        die("%s: the relocation @0x%x is type %d %s%+d, not R_68K_32 %s+0" % (where, o, t, rn, add, n))
             module.append((lo + off, old, new, "module", func))
     if "--static-only" in a:
         module = []
