@@ -4,7 +4,7 @@
   bmaphf.py OBJ            retarget, in place, in the ufs object linked with ufs_bmap_hf.o (ELF32 big-endian ET_REL);
                            refuses unless rwip and its call are exactly the pinned ones
   bmaphf.py --check OBJ    verify, write nothing; exit 1 unless retargeted
-  bmaphf.py --digest OBJ   print rwip's digest (what RWIP_DIGESTS pins)
+  bmaphf.py --digest OBJ   print rwip's digest (what RWIP_DIGESTS pins); also on the ufs object before the link
   bmaphf.py --selftest     a synthetic object: retargeted, idempotent, --check both ways, every refusal
 
 src/ufs_bmap_hf.c says why.  tools/ufs-holefix.sh runs this after the link.  Only the r_info of rwip's one ufs_bmap
@@ -19,7 +19,7 @@ relocation changes (its symbol index, so 1 to 3 bytes): no byte of .text moves, 
 """
 import hashlib, os, struct, sys
 
-# movel fp@(-28) (alloc_only = pagecreate); pea 2 (S_WRITE); d5 = fp@(-100) (n); a5 = fp@(-116) (on);
+# movel fp@(-28) (alloc_only = pagecreate); pea 2 (S_WRITE); d5 = fp@(-100) (on); a5 = fp@(-116) (n);
 # pea a5@(0,d5:l) (size = on + n); clrl (rabnp); clrl (bnp); a5 = uio; a4 = fs; d5 = uio_offset >> fs_bshift (lbn);
 # movel d5; movel a3 (ip); jsr <ufs_bmap>
 BEFORE = bytes.fromhex('2f2effe4487800022a2eff9c2a6eff8c4875580042a742a7'
@@ -56,8 +56,9 @@ def load(path):
     return b, sh, syms
 
 
-def site(b, sh, syms, known):
-    """(file offset of r_info, ufs_bmap_hf's index, retargeted already, rwip's digest)"""
+def site(b, sh, syms, known, linked=True):
+    """(file offset of r_info, ufs_bmap_hf's index, retargeted already, rwip's digest); linked=False (--digest) accepts
+    an object without ufs_bmap_hf (the ufs object before the link) and returns None for the index"""
     r = [s for s in syms if s[0] == 'rwip' and s[2] not in SPECIAL]
     if len(r) != 1:
         fail('%d definitions of rwip' % len(r))
@@ -67,9 +68,9 @@ def site(b, sh, syms, known):
     text = sh[sec][4]
     for name in ('ufs_bmap_hf', 'ufs_hf_magic'):
         n = sum(1 for s in syms if s[0] == name and s[2] not in SPECIAL)
-        if n != 1:
+        if n != 1 and (linked or n):
             fail('%s is defined %d times in the object (want 1: link src/ufs_bmap_hf.c in first)' % (name, n))
-    hf = [i for i, s in enumerate(syms) if s[0] == 'ufs_bmap_hf' and s[2] not in SPECIAL][0]
+    hf = ([i for i, s in enumerate(syms) if s[0] == 'ufs_bmap_hf' and s[2] not in SPECIAL] or [None])[0]
     rels, calls = [], []
     for s in sh:
         if s[1] != 4 or s[7] != sec:
@@ -118,7 +119,7 @@ def main(args=None, known=RWIP_DIGESTS):
     if len(args) != 1:
         sys.exit(__doc__)
     b, sh, syms = load(args[0])
-    at, hf, done, d = site(b, sh, syms, None if mode == '--digest' else known)
+    at, hf, done, d = site(b, sh, syms, None if mode == '--digest' else known, linked=mode != '--digest')
     if mode == '--digest':
         print(d)
         return
@@ -137,27 +138,33 @@ def main(args=None, known=RWIP_DIGESTS):
 
 
 def synth(path, mutate=None, call=('ufs_bmap', 1, 0), defs=('ufs_bmap_hf', 'ufs_hf_magic'), fix=RWIP_FIX_BYTES[1],
-          at=CALL_RELOC, twice=False):
-    """a minimal ET_REL: rwip (the pinned call at rwip + 0x2bc, the rwip fix's 4 bytes at + 0x3d6), ufs_bmap_hf;
-    at moves the whole call, twice adds a second ufs_bmap relocation in rwip"""
+          at=CALL_RELOC, twice=False, other=(16, 0), dup=False):
+    """a minimal ET_REL: rwip (the pinned call at rwip + 0x2bc, the rwip fix's 4 bytes at + 0x3d6, one more relocation
+    naming ufs_hf_magic at rwip + other[0] with addend other[1]), ufs_bmap_hf; at moves the whole call, twice adds a
+    second ufs_bmap relocation in rwip, dup a second rwip symbol; a function follows rwip, as in the real object, so
+    rwip ends at the same place with or without ufs_bmap_hf"""
     t = bytearray(bytes.fromhex('4e560000') + bytes(at - len(BEFORE) - 4) + BEFORE + bytes(4) + AFTER)
     t += bytes(RWIP_FIX - len(t)) + fix + bytes.fromhex('4e5e4e75')
     if mutate:
         mutate(t)
-    g = bytes.fromhex('4e5e4e75' + '55484621')      # ufs_bmap_hf's body, ufs_hf_magic
-    names = ['rwip', 'ufs_bmap', 'ufs_bmap_hf', 'ufs_hf_magic']
+    g = bytes.fromhex('4e754e71' + '4e5e4e75' + '55484621')      # the next function, ufs_bmap_hf's body, ufs_hf_magic
+    names = ['rwip', 'ufs_bmap', 'ufs_bmap_hf', 'ufs_hf_magic'] + (['rwip'] if dup else []) + ['ufs_next']
     strtab = b'\0' + b''.join(n.encode() + b'\0' for n in names)
     off = [1]
     for n in names[:-1]:
         off.append(off[-1] + len(n) + 1)
     sym = bytes(16) + struct.pack('>IIIBBH', off[0], 0, len(t), 0x12, 0, 1)
     sym += struct.pack('>IIIBBH', off[1], 0, 0, 0x10, 0, 0)
-    sym += struct.pack('>IIIBBH', off[2], len(t), 4, 0x12, 0, 1 if 'ufs_bmap_hf' in defs else 0)
-    sym += struct.pack('>IIIBBH', off[3], len(t) + 4, 4, 0x11, 0, 1 if 'ufs_hf_magic' in defs else 0)
+    sym += struct.pack('>IIIBBH', off[2], len(t) + 4, 4, 0x12, 0, 1 if 'ufs_bmap_hf' in defs else 0)
+    sym += struct.pack('>IIIBBH', off[3], len(t) + 8, 4, 0x11, 0, 1 if 'ufs_hf_magic' in defs else 0)
+    if dup:
+        sym += struct.pack('>IIIBBH', off[4], 0, len(t), 0x02, 0, 1)
+    sym += struct.pack('>IIIBBH', off[-1], len(t), 4, 0x02, 0, 1)
     cs = {'ufs_bmap': 2, 'ufs_bmap_hf': 3}[call[0]]
     rela = struct.pack('>IIi', at + (call[3] if len(call) > 3 else 0), (cs << 8) | call[1], call[2])
     if twice:
         rela += struct.pack('>IIi', 8, (2 << 8) | 1, 0)
+    rela += struct.pack('>IIi', other[0], (4 << 8) | 1, other[1])
     shstr = b'\0.text\0.rela.text\0.symtab\0.strtab\0.shstrtab\0'
     body = [bytes(t) + g, rela, sym, strtab, shstr]
     pos, offs = 52, []
@@ -201,7 +208,8 @@ def selftest():
         info, = struct.unpack_from('>I', b, sh[2][4] + 4)
         assert syms[info >> 8][0] == 'ufs_bmap_hf' and len(diff) == 1, 'the relocation does not name ufs_bmap_hf alone'
         assert run(['--check', p], known) == 0, 'the retargeted object failed --check'
-        assert site(b, sh, syms, None)[3] in known, 'the digest changed with the retarget'
+        b2, sh2, syms2 = load(p)
+        assert site(b2, sh2, syms2, None)[3] in known, 'the digest changed with the retarget'
         assert run([p], known) == 0 and open(p, 'rb').read() == new, 'a second run changed the object'
         synth(p, fix=RWIP_FIX_BYTES[0])
         assert run([p], known) == 0, 'the object without the rwip fix (UFS_RWIP_FIX=0) was refused'
@@ -225,7 +233,8 @@ def selftest():
                   ('no ufs_bmap_hf in the object', dict(defs=('ufs_hf_magic',))),
                   ('no ufs_hf_magic', dict(defs=('ufs_bmap_hf',))),
                   ('the whole call moved by 2', dict(at=CALL_RELOC + 2)),
-                  ('a second ufs_bmap relocation in rwip', dict(twice=True)))
+                  ('a second ufs_bmap relocation in rwip', dict(twice=True)),
+                  ('a second definition of rwip', dict(dup=True)))
         for what, kw in rcases:
             synth(p, **kw)
             before = open(p, 'rb').read()
@@ -234,9 +243,21 @@ def selftest():
         before = open(p, 'rb').read()
         assert run(['--digest', p], known) == 0, 'the frame change alone tripped a context check'
         assert run([p], known) != 0 and open(p, 'rb').read() == before, 'a change only the digest sees was not refused'
+        synth(p, other=(16, 4))
+        before = open(p, 'rb').read()
+        assert run([p], None) == 0 and open(p, 'rb').read() != before, 'another relocation\'s addend tripped a context check'
+        synth(p, other=(16, 4))
+        assert run([p], known) != 0 and open(p, 'rb').read() == before, \
+            'a relocation change with the same bytes (seen only by the digest\'s relocation list) was not refused'
+        synth(p, defs=('ufs_hf_magic',))
+        assert run([p], known) != 0, 'an object without ufs_bmap_hf was retargeted'
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            main(['--digest', p], known)
+        assert out.getvalue().strip() in known, '--digest of the object before the link differs from the linked one'
     print('bmaphf selftest: the pinned call retargeted (one relocation), idempotent, --check both ways, the digest '
-          'unchanged by it, with and without the rwip fix, an unpinned rwip, %d changed contexts, %d bad relocations '
-          'or objects and a change only the digest sees refused' % (len(cases), len(rcases)))
+          'unchanged by it and the same before the link, with and without the rwip fix, an unpinned rwip, %d changed '
+          'contexts, %d bad relocations or objects, a byte change and a relocation change only the digest sees refused'
+          % (len(cases), len(rcases)))
 
 
 if __name__ == '__main__':

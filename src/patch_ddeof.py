@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-# patch_ddeof.py -- ISSUE-121: a raw SCSI disk read or write that starts past the end of its slice
-# sleeps for good instead of failing (2026-11-06).
+# patch_ddeof.py -- ISSUE-121: a raw disk read or write that starts past the end of its slice fails
+# with ENXIO, not EIO or a sleep for good (2026-11-06).
 #
-# Stock amiga/alien/dd.c, ddread and ddwrite (the /dev/rdsk read and write entries of every SCSI
-# disk: z3660, a4091, a3091/a2091):
+# Stock amiga/alien/dd.c, ddread and ddwrite (the /dev/rdsk read and write entries of every disk the
+# sd layer serves: the SCSI disks on the Z3660, A4091 and A3091/A2091, and the A4000's Gayle IDE disk,
+# registered with sd; not the A2090 ST-506 disks of hd.c):
 #
 #     if (uio_offset == sddevsize(dev)*BSIZE) return 0;
 #     if (uio_offset + uio_resid > sddevsize(dev)*BSIZE)
@@ -11,7 +12,8 @@
 #     return uiophysio(breakup, 0, dev, B_READ, uiop);
 #
 # A request that STARTS past the end gets a negative residue; uiophysio takes it as a byte count of
-# about 4 GB and kmem_alloc sleeps on Km_OsizeWanted at PRIBIO for good (kill -9 does not wake it).
+# about 4 GB.  What follows depends on the kernel and the user buffer: EIO, or (on -62) kmem_alloc
+# asleep on Km_OsizeWanted at PZERO for good (kill -9 does not wake it).
 # The 68030 line's dd.c.patch adds `if (uio_offset > sddevsize(dev)*BSIZE) return ENXIO;`; the
 # compiler's compare there is unsigned (the clamp's bccw), and so is this one.
 #
@@ -27,7 +29,12 @@
 # ddwrite is the same at +0x1e with its epilogue 2 bytes nearer (6000 0046 -> 6044).  The path
 # inside the slice reloads everything it uses (uio_offset, sddevsize again), so %d0 and %d1 are free
 # there; the epilogue restores %d2-%d3/%a2-%a3 as before.  At the end (off == end) the result is 0
-# as in stock.  tools/test-ddeof.sh runs both functions' stock and patched bytes on qemu-m68k.
+# as in stock.  tools/test-ddeof.py runs both functions' stock and patched bytes on qemu-m68k.
+#
+# The end is stock's `sddevsize(dev) * 512`, 32 bits, and its limits are inherited (the 030 line's C patch has them
+# too): for s0 (the whole disk) sdpartition sets no length and sddevsize answers 4194303 sectors, so the end is
+# 0x7ffffe00 whatever the disk's size, and past it a raw request now gets ENXIO; for a slice of 8388608 sectors (4 GiB)
+# or more the product wraps, and the end is the size less a multiple of 4 GiB.
 #
 # Asserted before anything is written: ddread and ddwrite are one symbol each at .text 0xbd06 and
 # 0xbd84, their whole bytes (the relocated fields zero), the eight R_68K_32 relocations in them name
@@ -174,7 +181,7 @@ def main(argv):
           % (FUNCS["ddread"][0], FUNCS["ddwrite"][0]))
 
 
-# Guarded: readers load this file for its tables (tools/test-ddeof.sh), and an unguarded main()
+# Guarded: readers load this file for its tables (tools/test-ddeof.py), and an unguarded main()
 # would patch whatever path sits in their argv.
 if __name__ == "__main__":
     main(sys.argv[1:])

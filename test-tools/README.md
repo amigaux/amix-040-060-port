@@ -81,6 +81,8 @@ Model-B / VM correctness (all added 2026-07-25 unless noted):
 | `bmaptest.c` | ISSUE-31 — `ufs_bmap` | direct/fragment-growth/indirect/sync-write, whole-file byte check; the 4097..6144 interval is where the read is now skipped |
 | `exectest.c` | ISSUE-32 — ELF exec mapping | verifies its OWN data+BSS and re-execs itself 20 generations; "the binary runs" would pass on a broken kernel |
 | `devmaptest.c` | ISSUE-33 — device mmap PFN | maps `/dev/mem` at the kernel base: pre-fix 0/4096 non-zero bytes, post-fix 3186/4096 |
+| `sparsehole4k.c` | ISSUE-120 — a whole-page write into a hole reads the disk's old data (2026-11-06) | 16 MiB, `sparsehole4k /tmp 16 24 1`: stock 16/96 direct and 86/96 indirect pages wrong; `ufs_bmap_hf` 0. `0` and `eof` modes too; `eof` is clean on stock as well |
+| `wcost.c` | ISSUE-120 — the hole fix's write cost (2026-11-06) | `wcost /tmp 64 96 20000` at 64 MiB: uncached 4 KiB rewrites equal to stock with `ufs_bmap_hf` (19-30 s with the rule it replaced); the 8 KiB copy 2-3 s slower in pass 1 |
 
 Older, still useful:
 
