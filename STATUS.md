@@ -270,10 +270,12 @@ write-backs (`src/wbkeep040.s`, ISSUE-114) do its job without growing the break 
 proven in the emulator only — §5. The ISSUE-10 audit instruments (`src/i10rev040.s`) stay buildable
 with `I10=1`.
 
-**Known panics from ordinary use.** Two are recorded and not fixed: `pollwakeup` calling through a
-freed `polldat` at X session shutdown (ISSUE-63, 68060 hardware, two sightings), and closing
-`/dev/noise` with sound still queued — a stock driver defect that any `SIGTERM` to a player
-triggers (ISSUE-68, not investigated here, by the owner's request).
+**Known panics from ordinary use.** `pollwakeup` calling through a freed `polldat` at X session
+shutdown (ISSUE-63, 68060 hardware, two sightings) is recorded and not fixed. Closing `/dev/noise`
+with sound still queued, a stock driver defect that any `SIGTERM` to a player triggers (ISSUE-68),
+is fixed on k46 for a stopped or killed player by amix-paula's safe close (since `-61`, in the
+emulator; not yet on hardware); the driver's unterminated client-list unlink (a double close) is
+still open.
 
 ---
 
@@ -353,7 +355,7 @@ survives as history but its conclusion has been replaced.
 | 65 | the 68040 write-back replay split an aligned register write into bytes, and the Zorro III register window refuses the odd one | FIXED | 040 HW | the cause of the Xrtg `kstack` cascade on the 68040 |
 | 66 | `shmat` accepted a 2 KiB-aligned attach address on a 4 KiB kernel | FIXED | 040 HW | `EINVAL` where it panicked; `SHM_RND` rounds down |
 | 67 | every `/dev/kmem` tool reads symbols from a kernel that is not running | RECORDED | — | a tooling trap, not a kernel defect |
-| 68 | closing `/dev/noise` with audio still pending panics the kernel | **OPEN** — stock defect | HW | any `SIGTERM` to a player triggers it; not investigated here, by request. **k46: fixed for a stopped or killed player** by amix-paula's safe close (EMU, since `-61`); a double close untested |
+| 68 | closing `/dev/noise` with audio still pending panics the kernel | k46: FIXED for a stopped or killed player, **not yet exercised on hardware**; a double close **OPEN** — stock defect | HW (defect), EMU (fix) | any `SIGTERM` to a player triggered it. amix-paula's safe close (`port/src/patch_audio_safeclose.py`, in `relink-040-audio.sh` since `-61`) stops the client's channels before it is freed; the unterminated client-list unlink (a double close) is untouched |
 | 69 | stock `setuid(-123456)` panics the kernel, for any user | **OPEN** — stock defect | EMU | a test hook Commodore left in 2.1, before the `MAXUID` and credential checks. Recorded, not fixed, by decision. This port's kernels not tested — predicted identical, since nothing here touches `setuid` |
 | 70 | `xwd -root` over the VA2000 framebuffer wedges the machine seconds later | **OPEN** | 060 HW | Twice out of two, 2026-09-18: the capture completes and the write never reaches disk, so the wedge lands between. Narrowed 2026-09-28 by the driver line — the same read over a Z3660 window does **not** wedge, so it is the VA2000/Zorro III path and not the size of the read. Next test written down: `xwd -id` against `-root` |
 | 71 | `-traditional` erases every `volatile` and `const`, so MMIO may be optimised | RECORDED | build host | The hazard is real and its effect on this tree today is nil: measured, no register access lost or narrowed in any of the three C targets. Half the flag (`-Dvolatile`) now applied in the driver relinks only; the FPE is left alone because restoring `const` there moves 796 bytes into `.rodata` |

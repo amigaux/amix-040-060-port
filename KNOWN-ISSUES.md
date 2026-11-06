@@ -9430,6 +9430,10 @@ processor by construction rather than by good behaviour.
 
 ## ⚠⚠ ISSUE-68 (2026-09-10, RECORDED — a stock defect, not investigated here by request): closing `/dev/noise` with audio still pending panics the kernel
 
+> **k46 state (2026-11-06):** the freed-client use is fixed for a stopped or killed player by amix-paula's safe close
+> (`port/src/patch_audio_safeclose.py`, linked by `relink-040-audio.sh` since `68060-261103-61`; verified in emulation,
+> not yet on hardware). The second hazard below, the unterminated client-list unlink (a double close), is untouched.
+
 Handed over by the parallel tracker/MOD-player line at the owner's request, **to be written down
 and not pursued now**. Reported reproduced twice on `68060-260908-03`; **not reproduced by this
 line**. The full write-up, with reproduction and the historical fix, is theirs:
