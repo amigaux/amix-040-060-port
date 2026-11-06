@@ -9428,10 +9428,10 @@ ISSUE-62 and ISSUE-66 fixes are byte patches with no CPU gate and hold there unc
 access-error frame, which only a 68040 produces, so every `wbn_*` counter reads zero on that
 processor by construction rather than by good behaviour.
 
-## ⚠⚠ ISSUE-68 (2026-09-10, RECORDED — a stock defect, not investigated here by request): closing `/dev/noise` with audio still pending panics the kernel
+## ⚠ ISSUE-68 (2026-09-10, a stock defect: REPORTED on `68060-260908-03`; on k46 FIXED for a stopped or killed player since `68060-261028-61` (emulation), a double close OPEN; NOT YET ON HARDWARE): closing `/dev/noise` with audio still pending panics the kernel
 
 > **k46 state (2026-11-06):** the freed-client use is fixed for a stopped or killed player by amix-paula's safe close
-> (`port/src/patch_audio_safeclose.py`, linked by `relink-040-audio.sh` since `68060-261103-61`; verified in emulation,
+> (`port/src/patch_audio_safeclose.py`, linked by `relink-040-audio.sh` since `68060-261028-61`; verified in emulation there,
 > not yet on hardware). The second hazard below, the unterminated client-list unlink (a double close), is untouched.
 
 Handed over by the parallel tracker/MOD-player line at the owner's request, **to be written down
@@ -11397,7 +11397,7 @@ tas and cas, /proc breakpoints, core dumps, then the denied pages. Every case pa
   limits all the same (a false ENOMEM).
 - The debug overlay's I10 fault predictor (`I10=1`) still encodes the old segvn rule, so its cross-check misreports. Debug build only.
 
-## ⚠ ISSUE-118 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63`; RECORDED, in.ftpd's passive path to be fixed in userland): a TCP close without SO_LINGER drops the unsent tail
+## ⚠ ISSUE-118 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63` and `68060-261106-65`; OPEN, a kernel fix planned after 1.1; a linger fix tried and withdrawn): a TCP close without SO_LINGER drops the unsent tail
 
 **Defect.** TCP's unsent data is its own stream write queue (`tcp_state` puts each M_DATA there and counts it in `t_qsize`), and that queue is freed
 when close returns. `tcpclose` keeps the data only under SO_LINGER with a time: `lingerstart`, then a sleep until the tail is acknowledged or the
@@ -11405,16 +11405,22 @@ timer drops it. Without linger it clears `t_qsize` and the FIN goes out after wh
 k46 `tcpclose` .text 0xd2c26 (the clear at 0xd2d30); k30 -89 0xbd54a (0xbd654); the 3b2 source's `tcp_main.c` 280-307. The stream head never drains
 a socket either: libsocket sets its close time to 0 (`I_SETCLTIME`).
 **Seen as** in.ftpd's passive downloads arriving short with 226 (on `68060-261105-63` and -62 alike): its PORT path sets SO_LINGER {1, 60}, its PASV path
-nothing. **Avoided by** SO_LINGER with a time, or shutdown(1) before close.
+nothing. **A program avoids it** with a half-close: shutdown(fd, 1), then reading until end of file (the peer's own close), then close; the peer
+closes only after it has read everything and the FIN. A shutdown(1) followed straight by close is not enough: the stock close clears `t_qsize`
+whatever state the shutdown left. SO_LINGER with a time is not a safe way round either: the stock close then sleeps on the connection, and
+data that arrives after the close can free the connection under the sleeper (a hang, or a write into freed memory).
 **Measured** (a sender of 8 MiB in 8 KiB writes, then close, on `68060-261105-63`): no linger, short 3 of 20 (accept), 1 of 10 (connect), 2 of 10 (O_NDELAY);
-SO_LINGER 60, 0 of 30; shutdown(1), 0 of 10. Every write whole, close took 0 s, FIN after; about 9 KB unsent at close (the last 8 KiB write and
-part of the one before). scp and rsync, which wait for the receiver before closing, 0 of 20 each.
+SO_LINGER 60, 0 of 30; shutdown(1) then close at once, 0 of 10 (too few runs to tell it from no linger). Every write whole, close took 0 s, FIN
+after; about 9 KB unsent at close (the last 8 KiB write and part of the one before). scp and rsync, which wait for the receiver before closing,
+0 of 20 each.
 **A reliable red** (emulation, A2065, `68060-261106-65`; 8 MiB of random data pulled by the host from in.ftpd over PASV, sums compared): 9 of 20
 pulls short at MSS 1360 (608 to 6848 bytes cut from the tail), 1 of 20 at MSS 1460. A raw sender closing without linger after 8 MiB + 777 bytes,
 4 of 15. With a whole 8 KiB last write it was short only 1 time in 60 (a fast reader) and 2 in 13 (a reader at 256 KiB/s).
 **A fix tried and withdrawn:** giving an endpoint without SO_LINGER a 60 s linger at close (`9b5018b`, reverted by `7a4a30c`) drew the tail
 out, but it sends every such close into a stock path where the tcpcb can be freed under the sleeping closer, holds a process in exit for up
-to 60 s per socket, and blocks non-blocking sockets. Open: to be fixed another way after 1.1.
+to 60 s per socket (an exiting process ignores its signals), and blocks non-blocking sockets. The fix planned after 1.1 keeps the unsent data
+on the connection itself after the close (a send queue of its own that output and acknowledgement use once the stream is gone), so the close
+returns at once and TCP sends the rest and the FIN in the background.
 
 ## ✅ ISSUE-119 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63`; FIXED by `fa24df6` in the ufs module, verified in emulation and on hardware on `68060-261106-64`): a whole-page write that starts past the start of its 8 KiB segmap window could leave the window's first pages reading old memory contents
 
@@ -11537,17 +11543,20 @@ nothing left asleep.
 
 **Defects** (stock `audio.c`, compiled into the kernel by `relink-040-audio.sh` after amix-paula's three patchers):
 - `audioioctl`'s AUDIO_VOLUME and AUDIO_PERIOD I_STR branches call `pullupmsg(mp->b_cont, -1)` before testing `b_cont`. A zero-length I_STR
-  has no data block, and `pullupmsg` (through `xmsgsize`) dereferences it: on this line a kernel panic, `PANIC: KERNEL FAULT ... pc=xmsgsize+0xae
-  (Bus Error)`, from any process that may open /dev/audio for writing (1.1 ships it 0660 root audio, the group empty by default).
+  has no data block, and `pullupmsg` (through `xmsgsize`) dereferences it: on this line a kernel panic, `PANIC: KERNEL FAULT ... pc=xmsgsize+0x94
+  (Bus Error)` (the read through the missing block's `b_datap`), from any process that may open /dev/audio for writing (1.1 ships it 0660 root audio, the group empty by default).
 - Both cases send their M_IOCACK or M_IOCNAK with `putnext` and then `break` into the common tail, which turns the same message into an M_IOCACK
   with error 0 and sends it again. Every such request is answered twice, and a refusal (EINVAL for a wrong length) arrives as success.
 - `audiointr` refills a channel buffer from the client's message; when the message does not fit, it keeps it without advancing `b_rptr`, so
-  the next refill copies the same bytes again. `postaudio` advances after its copy, so a message replays only when what is left after
-  postaudio's first copy is larger than the free 8 KiB buffer: a write of 32 KiB plays one 8 KiB stretch over and over, for good.
+  the next refill copies the same bytes again. This happens at two places. The message already kept (after `postaudio`'s first copy, which
+  does advance) replays for good when what is left is larger than the free 8 KiB buffer: a write of 32 KiB plays one 8 KiB stretch over and
+  over. A message taken from the queue that straddles the end of a buffer replays its head once, whatever its size: a player writing 3000- or
+  5000-byte pieces while earlier ones drain.
 **Fix.** `src/patch_audio_replies.py` (the 68030 line's file, byte for byte; `43522ee`, then `67c347c`), run after amix-paula's patchers:
 `pullupmsg` only when there is a data block (the existing test then refuses EINVAL), the four `break`s become `return`s, the two acks set
 `ioc_rval` and `ioc_error` to 0 themselves (on the transparent path the message is the M_IOCDATA reply, whose pad fields lie there), and both
-refill places advance `b_rptr` by what they copied. Eight places, each found by the SHA-256 of its lines; the whole input (1f43c5ff, the three
+refill places advance `b_rptr` by what they copied (the queued-message place by reading only: every run below is a single write, which
+refills through the kept-message place). Eight places, each found by the SHA-256 of its lines; the whole input (1f43c5ff, the three
 patchers' result) and the output (3f434f35) are pinned and the selftest tests each pin alone; `--selftest` runs in the build. `AUDIO_REPLIES=0`
 builds without it. The client-list scan's store of a partly sent message in the previous client's `mp` (a fourth stock defect in the same
 function, reached only with two streams open) is not fixed here.
