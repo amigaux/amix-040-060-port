@@ -1,7 +1,8 @@
 #!/bin/bash
-# cut.sh OUT -- cut 68060-261106-65 (the k46 module kernel, kabi k46.1.4) into OUT: -64's recipe with this repository at 8629d20
-# (-64's fa24df6 plus a raw SCSI disk request past its slice end failing with ENXIO, src/patch_ddeof.py; and the ufs module's
-# rwip calling ufs_bmap_hf, which zeroes a new block and keeps alloc-only rewrites, tools/ufs-holefix.sh after the tail zeroing);
+# cut.sh OUT -- cut 68060-261106-65 (the k46 module kernel, kabi k46.1.4) into OUT: -64's recipe with this repository at 53e52e4
+# (-64's fa24df6 plus a raw disk request past its slice end failing with ENXIO, src/patch_ddeof.py; and the ufs module's rwip
+# calling ufs_bmap_hf, which zeroes a new block in a hole and keeps alloc-only rewrites, tools/ufs-holefix.sh after the tail
+# zeroing; 53e52e4 is 8629d20 with comments, tools and tests corrected, the same bytes built);
 # -64 was -63's recipe with this repository at fa24df6
 # (-63's 0508945 plus the ufs module's rwip fix: segmap_pagecreate gets base + mapon, tools/fsobj-patch.py);
 # -63 was -62's recipe with this repository at 0508945
@@ -15,7 +16,7 @@
 # btrace_on; pstart sets cputype from the k46 loader's AXL1 record) and amix 46c269c, as -59;
 # gcc14's binutils (2.43.1) as m68k-linux-gnu-*, as -59.
 # Inputs, by environment:
-#   PORT_GIT     a clone of this repository that has 8629d20 and the patcher revisions below (default: this one)
+#   PORT_GIT     a clone of this repository that has 53e52e4 and the patcher revisions below (default: this one)
 #   AMIX         an amix clone that has 46ef7d1 (kernel/dlm: the module core and `make kit`; kernel/k30/tools and
 #                contracts: sddevsize and support-probe injectors, emit-family-chains, k0-gates; toolchain/m68k-gnu-bin)
 #   PAULA        amix-paula with 62fdcab (the audio driver's three patchers)
@@ -27,11 +28,11 @@
 #   AMIX_SYSTEM  amigaux/amix-system (kernels/2.1c/unix, the stock kernel the relinks check against)
 #   NETBSD_SYSSRC  NetBSD 10.1's source/sets/syssrc.tgz (the FPSP; tools/netbsd-pin.sh checks its sha256)
 #   CONTROL      optional: the frozen candidate-3 kernel (5aa7d732) emit and k0-gates compare against
-# OUT gets the run root (port/ = git archive 8629d20, the build tree; amix-040-060-port/ = a clone at 8629d20;
+# OUT gets the run root (port/ = git archive 53e52e4, the build tree; amix-040-060-port/ = a clone at 53e52e4;
 # amix/ = a clone at 46ef7d1, its kernel/dlm the kit; amix-kerntools/ = 46ef7d1's kernel/k30 tools and
 # contracts; gnu-bin/; inputs/) and SHA256SUMS-68060-261106-65, which must equal this directory's.
 set -eu
-REV=8629d20 AMIX_REV=46ef7d1 KB=68060-261106-65
+REV=53e52e4 AMIX_REV=46ef7d1 KB=68060-261106-65
 HERE=$(cd "$(dirname "$0")" && pwd)
 W=${1:?usage: cut.sh OUT}; PORT_GIT=${PORT_GIT:-$(git -C "$HERE" rev-parse --show-toplevel)}
 : "${AMIX:?}" "${PAULA:?}" "${GCA:?}" "${AMIX_SYSTEM:?}" "${NETBSD_SYSSRC:?}"; [ -z "${KT:-}" ] || { echo "cut.sh: KT must be unset"; exit 2; }
