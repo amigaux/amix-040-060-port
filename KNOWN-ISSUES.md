@@ -11409,6 +11409,12 @@ nothing. **Avoided by** SO_LINGER with a time, or shutdown(1) before close.
 **Measured** (a sender of 8 MiB in 8 KiB writes, then close, on `68060-261105-63`): no linger, short 3 of 20 (accept), 1 of 10 (connect), 2 of 10 (O_NDELAY);
 SO_LINGER 60, 0 of 30; shutdown(1), 0 of 10. Every write whole, close took 0 s, FIN after; about 9 KB unsent at close (the last 8 KiB write and
 part of the one before). scp and rsync, which wait for the receiver before closing, 0 of 20 each.
+**A reliable red** (emulation, A2065, `68060-261106-65`; 8 MiB of random data pulled by the host from in.ftpd over PASV, sums compared): 9 of 20
+pulls short at MSS 1360 (608 to 6848 bytes cut from the tail), 1 of 20 at MSS 1460. A raw sender closing without linger after 8 MiB + 777 bytes,
+4 of 15. With a whole 8 KiB last write it was short only 1 time in 60 (a fast reader) and 2 in 13 (a reader at 256 KiB/s).
+**A fix tried and withdrawn:** giving an endpoint without SO_LINGER a 60 s linger at close (`9b5018b`, reverted by `7a4a30c`) drew the tail
+out, but it sends every such close into a stock path where the tcpcb can be freed under the sleeping closer, holds a process in exit for up
+to 60 s per socket, and blocks non-blocking sockets. Open: to be fixed another way after 1.1.
 
 ## ✅ ISSUE-119 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63`; FIXED by `fa24df6` in the ufs module, verified in emulation and on hardware on `68060-261106-64`): a whole-page write that starts past the start of its 8 KiB segmap window could leave the window's first pages reading old memory contents
 
@@ -11526,3 +11532,32 @@ s4 starts past 2 GiB on the disk, but `ddread` compares offsets within the slice
 within a slice is tested only by `tools/test-ddeof.py` (no slice of the 4g layout reaches 2 GiB). Stock's outcome past the end depends on what
 `uiophysio` does with the ~4 GB count: an error that is not the right one, or a sleep that never ends; the fix returns ENXIO before it, with
 nothing left asleep.
+
+## ✅ ISSUE-122 (2026-11-06, stock defects on both lines: MEASURED in emulation on `68060-261106-65`; FIXED by `67c347c` in the audio driver, verified in emulation on `68060-261106-66`'s build; NOT YET ON HARDWARE): /dev/audio panics on a zero-length request, answers each volume or period request twice, and replays the head of a long write
+
+**Defects** (stock `audio.c`, compiled into the kernel by `relink-040-audio.sh` after amix-paula's three patchers):
+- `audioioctl`'s AUDIO_VOLUME and AUDIO_PERIOD I_STR branches call `pullupmsg(mp->b_cont, -1)` before testing `b_cont`. A zero-length I_STR
+  has no data block, and `pullupmsg` (through `xmsgsize`) dereferences it: on this line a kernel panic, `PANIC: KERNEL FAULT ... pc=xmsgsize+0xae
+  (Bus Error)`, from any process that may open /dev/audio for writing (1.1 ships it 0660 root audio, the group empty by default).
+- Both cases send their M_IOCACK or M_IOCNAK with `putnext` and then `break` into the common tail, which turns the same message into an M_IOCACK
+  with error 0 and sends it again. Every such request is answered twice, and a refusal (EINVAL for a wrong length) arrives as success.
+- `audiointr` refills a channel buffer from the client's message; when the message does not fit, it keeps it without advancing `b_rptr`, so
+  the next refill copies the same bytes again. `postaudio` advances after its copy, so a message replays only when what is left after
+  postaudio's first copy is larger than the free 8 KiB buffer: a write of 32 KiB plays one 8 KiB stretch over and over, for good.
+**Fix.** `src/patch_audio_replies.py` (the 68030 line's file, byte for byte; `43522ee`, then `67c347c`), run after amix-paula's patchers:
+`pullupmsg` only when there is a data block (the existing test then refuses EINVAL), the four `break`s become `return`s, the two acks set
+`ioc_rval` and `ioc_error` to 0 themselves (on the transparent path the message is the M_IOCDATA reply, whose pad fields lie there), and both
+refill places advance `b_rptr` by what they copied. Eight places, each found by the SHA-256 of its lines; the whole input (1f43c5ff, the three
+patchers' result) and the output (3f434f35) are pinned and the selftest tests each pin alone; `--selftest` runs in the build. `AUDIO_REPLIES=0`
+builds without it. The client-list scan's store of a partly sent message in the previous client's `mp` (a fourth stock defect in the same
+function, reached only with two streams open) is not fixed here.
+**Measured** (emulation, sound_output=interrupts, period 200; the 68030 line's `audioctl2`: 50 rounds of each request form, each call under
+alarm(10); `aurep2`: one write of N bytes whose 256-byte ramp names its chunks, every channel buffer load read through `/dev/kmem`):
+
+| Kernel | Right length, transparent | Wrong length | Zero length | 32 KiB write |
+|---|---|---|---|---|
+| `68060-261106-65` | rc 0, 100 of 100 each | rc 0, 100 of 100 | PANIC (xmsgsize, bus error) | not drained in 30 s: 87 buffer loads, 86 of a chunk already loaded |
+| the fix (`68060-261106-66`'s build) | rc 0, 100 of 100 each | EINVAL, 100 of 100 | EINVAL, 100 of 100; the box carries on | drained in 1466 ms, 3 loads, none repeated |
+
+4 and 12 KiB writes drained alike on both (133 and 533 ms; the channel is released when its last buffer is queued, before the sound ends).
+
