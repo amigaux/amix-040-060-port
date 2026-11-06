@@ -36,6 +36,10 @@ A site that names a script (a sixth field) instead replaces that script's value 
   7'. its old bytes are that site's new bytes, read in BASE; OBJ and UNIX read the site's old.
 --static-only leaves them out (the object the scripts' sites alone give).
 
+One module-only site is a code fix, not page arithmetic: rwip's call of segmap_pagecreate (RWIP_SITE
+below).  Its surroundings (RWIP_CONTEXT, RWIP_RELOCS) must read in OBJ exactly as listed, or it is
+refused.  UFS_RWIP_FIX=0 leaves the site out.
+
 Output: --triples prints one line per site applied in BASE, `.text <offset> <old> <new>
 <script>:<name>`, the offset relative to OBJ's .text, then one per module-only site, ending
 `module:<function>`.  -o writes OBJ with those bytes changed and nothing else.
@@ -83,6 +87,29 @@ MODULE_ONLY = {"ufs": [
     ("ufs_delmap", 0xc2a2, H("0680000007ff"), H("068000000fff"), "btopr(len): + PAGEOFFSET"),
     ("ufs_delmap", 0xc2a8, H("720b"), H("720c"), "btopr(len): >> PAGESHIFT"),
 ]}
+
+# rwip: Amix's compiled ufs_rwip passes the segmap window's base to segmap_pagecreate; SVR4's
+# ufs_vnops.c:460 passes base + mapon, as s5, nfs and specfs do.  A whole-page write starting at
+# mapon != 0 (as_iolock grants pagecreate to any page-aligned one, rewrites included) then creates
+# the pages at the START of the 8 KiB block without a read: valid, clean, holding the frame's old
+# contents; the pages written fault in through uiomove and are right, and the disk stays right.
+# The push becomes pea %a0@(0,%d3:l): a0 is segmap_getmap's return (saved to fp@(-108) just
+# before and not changed since), d3 is mapon (uio_offset & MAXBOFFSET), the register uiomove's own
+# pea adds.  Same length, no relocation.
+RWIP_SITE = ("rwip", 0x8a4c, H("2f2eff94"), H("48703800"),
+             "segmap_pagecreate(segkmap, base + mapon, n, 0): pea %a0@(0,%d3:l)")
+RWIP_CONTEXT = [(0x878a, H("262d0008"), "movel %a5@(8),%d3: uio_offset"),
+                (0x878e, H("028300001fff"), "andil #8191,%d3: mapon"),
+                (0x8a36, H("2d48ff94"), "movel %a0,%fp@(-108): base, a0 kept"),
+                (0x8a3a, H("defc000c"), "addaw #12,%sp"),
+                (0x8a3e, H("4aaeffe4"), "tstl %fp@(-28): pagecreate"),
+                (0x8a42, H("67000042"), "beqw past the call"),
+                (0x8a46, H("42a7"), "clrl %sp@-: softlock 0"),
+                (0x8a48, H("2f2eff8c"), "movel %fp@(-116),%sp@-: n"),
+                (0x8adc, H("48753800"), "pea %a5@(0,%d3:l): uiomove's base + mapon")]
+RWIP_RELOCS = {0x8a32: "segmap_getmap", 0x8a58: "segmap_pagecreate", 0x8ae2: "uiomove"}
+if os.environ.get("UFS_RWIP_FIX", "1") != "0":
+    MODULE_ONLY["ufs"].append(RWIP_SITE)
 
 
 def die(msg):
@@ -277,6 +304,13 @@ def main():
             for r, (t, n, add) in orel.items():
                 if r < end and off < r + WIDTH.get(t, 4):
                     die("%s overlaps the relocated field of %s+%d @0x%x" % (where, n, add, r))
+            if (func, off) == RWIP_SITE[:2]:
+                for o, want, what in RWIP_CONTEXT:
+                    if ot[o:o + len(want)] != want:
+                        die("%s: the object has %s @0x%x, not %s (%s)" % (where, ot[o:o + len(want)].hex(), o, want.hex(), what))
+                for o, n in RWIP_RELOCS.items():
+                    if orel.get(o, (0, None))[1] != n:
+                        die("%s: the relocation @0x%x names %s, not %s" % (where, o, orel.get(o, (0, None))[1], n))
             module.append((lo + off, old, new, "module", func))
     if "--static-only" in a:
         module = []

@@ -5,7 +5,7 @@
 #
 #     FSOBJ_BASE=<b-new> FSOBJ_FS=<stock usr/sys/fs> sh tools/test-fsobj-patch.sh
 #
-# FSOBJ_BASE is relink-040.sh's base (b-new 284154a3 gives the numbers below); FSOBJ_FS holds the
+# FSOBJ_BASE is relink-040.sh's base (b-new 284154a3 and dcc0c587 give the numbers below); FSOBJ_FS holds the
 # stock ufs/exp and s5/exp (a439e68f, 1c9cb634).  The stock kernel is config.sh's.  Unset: skipped.
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -20,19 +20,25 @@ fail() { echo "FAIL $1"; fails=$((fails + 1)); }
 
 # the measured cut: sites applied, canaries, module-only sites, and the patched objects' sha256
 # (with the module-only sites, and --static-only without them)
-check() {	# fs sites canaries module-sites sha256 static-sha256
+check() {	# fs sites canaries module-sites module-bytes sha256 static-sha256
 	$P --base "$FSOBJ_BASE" "$FSOBJ_FS/$1/exp" --triples > "$T/$1.triples" 2> "$T/$1.err" || { fail "$1: refused"; cat "$T/$1.err"; return; }
 	n=$(grep -vc ' module:' "$T/$1.triples" || :); m=$(grep -c ' module:' "$T/$1.triples" || :)
-	grep -q "$2 sites applied in the base ($2 bytes), 0 listed but not applied, $3 canaries hold; $4 module-only sites ($4 bytes)" "$T/$1.err" \
+	grep -q "$2 sites applied in the base ($2 bytes), 0 listed but not applied, $3 canaries hold; $4 module-only sites ($5 bytes)" "$T/$1.err" \
 		&& [ "$n" = "$2" ] && [ "$m" = "$4" ] && pass "$1: $2 sites, $3 canaries, $4 module-only" || { fail "$1: $(cat "$T/$1.err")"; }
-	for v in "$5:" "$6:--static-only"; do
+	for v in "$6:" "$7:--static-only"; do
 		$P --base "$FSOBJ_BASE" "$FSOBJ_FS/$1/exp" -o "$T/$1.exp" ${v#*:} 2> /dev/null
 		[ "$(sha256sum < "$T/$1.exp" | cut -c1-64)" = "${v%%:*}" ] && pass "$1: patched object $(echo ${v#*:} $(echo $v | cut -c1-8))" \
 			|| fail "$1: patched object ${v#*:} $(sha256sum < "$T/$1.exp" | cut -c1-8), want $(echo $v | cut -c1-8)"
 	done
 }
-check ufs 49 3 13 6636b27edf42b1a6b52856668f789edbfd567040ee45b8831bba35ec7fc910f9 130b2def83eca2984316499913ae8342d76c1b0e908b45c220e797148cc4deaf
-check s5 25 0 0 fc2bfe5a5850e7ea33addc3d906752bf297cdc7bdd5f0fc6327c6da4d8b3959d fc2bfe5a5850e7ea33addc3d906752bf297cdc7bdd5f0fc6327c6da4d8b3959d
+check ufs 49 3 14 17 1a147403ea88eb84c000c2270f8117d8a23ccb18d2945b5731c0df256aff0243 130b2def83eca2984316499913ae8342d76c1b0e908b45c220e797148cc4deaf
+check s5 25 0 0 0 fc2bfe5a5850e7ea33addc3d906752bf297cdc7bdd5f0fc6327c6da4d8b3959d fc2bfe5a5850e7ea33addc3d906752bf297cdc7bdd5f0fc6327c6da4d8b3959d
+# rwip's segmap_pagecreate address: in the triples, and UFS_RWIP_FIX=0 gives the object without it
+grep -q '^\.text 0x08a4c 2f2eff94 48703800 module:rwip$' "$T/ufs.triples" \
+	&& pass "ufs: rwip passes base + mapon to segmap_pagecreate" || fail "ufs: no rwip site in the triples"
+UFS_RWIP_FIX=0 $P --base "$FSOBJ_BASE" "$FSOBJ_FS/ufs/exp" -o "$T/ufs.norwip" 2> /dev/null
+[ "$(sha256sum < "$T/ufs.norwip" | cut -c1-64)" = 6636b27edf42b1a6b52856668f789edbfd567040ee45b8831bba35ec7fc910f9 ] \
+	&& pass "ufs: UFS_RWIP_FIX=0 gives 6636b27e" || fail "ufs: UFS_RWIP_FIX=0 gives $(sha256sum < "$T/ufs.norwip" | cut -c1-8)"
 
 # refusals: a copy of the base (or of the object) with one thing changed
 mutate() {	# in out kind addr value
@@ -80,6 +86,11 @@ three .text 0xc273 0x0a 0x830c7 0x0a && refuse "a module-only site's old byte (u
 	"the object has 720a, the table expects 720b" ufs "$T/b" "$T/o" "$T/u"
 three reloff 0x38c6 0x388e 0x7a71a 0x7a6e2 && refuse "a module-only site in a relocated field (kmem_alloc's moved there)" \
 	"overlaps the relocated field of kmem_alloc+0 @0x388e" ufs "$T/b" "$T/o" "$T/u"
+# rwip: an object already fixed is not the stock kernel's object; a changed context byte (the stack
+# adjust after segmap_getmap, the same in all three) refuses the site
+$P --base "$FSOBJ_BASE" "$U" -o "$T/ufs.fixed" 2> /dev/null && refuse "an object with rwip already fixed" "matches 0 places" ufs "$FSOBJ_BASE" "$T/ufs.fixed"
+three .text 0x8a3d 0x10 0x7f891 0x10 && refuse "rwip's context changed (addaw #16 after segmap_getmap)" \
+	"the object has defc0010 @0x8a3a, not defc000c" ufs "$T/b" "$T/o" "$T/u"
 # the mountfs guard replaces patch_writeback.py's bound (0x7e67e, 1023 -> 2047) with 4095: refused
 # when the base does not apply that site
 mutate "$FSOBJ_BASE" "$T/b6" .text 0x7e682 0x03 && refuse "the mountfs guard over an unapplied script site" \
