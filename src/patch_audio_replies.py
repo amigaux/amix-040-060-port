@@ -17,6 +17,10 @@ Usage: patch_audio_replies.py audio.c          patch it in place
    b_rptr, so the next refill copies the same bytes again: a write longer than the free buffer
    replays stretches of itself.  postaudio advances b_rptr after its copy; ours does the same
    in both refill places.
+3. No data block, no pullup.  An I_STR with ic_len 0 reaches audioioctl with b_cont NULL, and the
+   VOLUME and PERIOD cases called pullupmsg(b_cont) before testing it; pullupmsg does not test
+   for NULL, and low memory is mapped in kernel mode, so it read and wrote there.  Ours calls
+   pullupmsg only when there is a block, and the test after it refuses the request (EINVAL).
 
 Commodore's text is not in this file.  Each place is found as amix-paula's patchers find theirs:
 the SHA-256 of its lines exactly as the file has them, matched the expected number of times.
@@ -31,7 +35,7 @@ import sys
 import tempfile
 
 IN = "1f43c5ff6558bf6583bcc3525b456bf3560e2bcf6100f5c736b0aa0221b260cc"
-OUT = "0fc359bdc07ecee97bf2f7db9918adcf305b3e2ffa6e6b29a779269af2746eec"
+OUT = "3f434f3507e1044ca794706a2de3a05c99ddefbcda6cd8e1b9abc6e60bc24fef"
 
 T = "\t\t    "		# the ioctl branch bodies' and the refill's indent
 REPLY = "/* the one reply is sent (amix) */"
@@ -50,6 +54,10 @@ def keep(b):	# the refill from the kept message: all of it copied, or not
     return b + [T + "else\t/* the copied part is played once (amix) */", "\t\t\tacl->mp->b_rptr += size;"]
 
 
+def guard(b):	# VOLUME and PERIOD: the I_STR data pulled up
+    return ["\t\tif (mp->b_cont)\t/* ic_len 0 sends no block (amix) */", T + b[0].lstrip("\t")]
+
+
 def park(b):	# the refill from the queue: the message does not fit and is kept
     return b[:2] + ["\t\t\t    mp->b_rptr += size;\t/* the copied part is played once (amix) */"] + b[2:]
 
@@ -63,15 +71,18 @@ EDITS = [	# what, lines, sha256 of the lines, times expected, the change
      "659b0b1f3d8987f0ade6dec1d76dfd4f35bd8e78b2684164a1a3c3e73dd5be6e", 1, keep),
     ("audiointr: a queued message that does not fit", 3,
      "a22fadd17ea332d58a417d3fce582e35503a461f4f55a4886f347022d006f019", 1, park),
+    ("audioioctl: the I_STR data pulled up", 1,
+     "539998a30db909d6860cda91c55b89e479298ae19ce87b5a9c39304a0c547920", 2, guard),
 ]
+INMSG, OUTMSG, PLACEMSG = "is not the one amix-paula's three patchers make", "is not the pinned one", "fingerprint found"
 
 
 def split(text):	# at newlines only: the file has form feeds between functions
     return text.split("\n")
 
 
-def patch(text, pin=None):
-    if hashlib.sha256(text.encode("latin-1")).hexdigest() != (pin or IN):
+def patch(text, pin=IN, out=OUT):	# pin or out None: that check is not made (the selftest's own use)
+    if pin is not None and hashlib.sha256(text.encode("latin-1")).hexdigest() != pin:
         raise ValueError("audio.c is not the one amix-paula's three patchers make (sha256 %s), "
                          "or it is patched already" % IN[:16])
     lines = split(text)
@@ -84,10 +95,10 @@ def patch(text, pin=None):
         todo += [(i, n, change) for i in hits]
     for i, n, change in sorted(todo, reverse=True):
         lines[i:i + n] = change(lines[i:i + n])
-    out = "\n".join(lines)
-    if pin is None and hashlib.sha256(out.encode("latin-1")).hexdigest() != OUT:
-        raise ValueError("the result is not the pinned one (sha256 %s)" % OUT[:16])
-    return out, len(todo)
+    res = "\n".join(lines)
+    if out is not None and hashlib.sha256(res.encode("latin-1")).hexdigest() != out:
+        raise ValueError("the result is not the pinned one (sha256 %s)" % out[:16])
+    return res, len(todo)
 
 
 def read(path):
@@ -101,47 +112,48 @@ def write(path, text):
 
 
 def selftest(path):
+    """each check shown to refuse on its own, by its own message"""
     text = read(path)
     out, n = patch(text)
-    bad = 0
+    bad = []
     refused = []
-    for name, t in [("the result again", out),
-                    ("one byte changed", text[:100] + chr(ord(text[100]) ^ 1) + text[101:]),
-                    ("one line more", text.replace("\n", "\n\n", 1)),
-                    ("empty", "")]:
+
+    def refuse(name, msg, t, **kw):
         try:
-            patch(t)
-            print("  [FAIL] patched %s" % name)
-            bad += 1
-        except ValueError:
-            refused.append(name)
-    lines = split(text)	# each place on its own: one of its lines changed, the input pin moved to match
+            patch(t, **kw)
+            bad.append("patched %s" % name)
+        except ValueError as e:
+            if msg in str(e):
+                refused.append(name)
+            else:
+                bad.append("%s: refused for another reason: %s" % (name, e))
+
+    more = text + "\n"	# every place still there, the whole file not the pinned one
+    refuse("the result again", INMSG, out)
+    refuse("one byte changed", INMSG, text[:100] + chr(ord(text[100]) ^ 1) + text[101:])
+    refuse("empty", INMSG, "")
+    refuse("a line more, by the input pin alone", INMSG, more, out=None)
+    refuse("a line more, by the output pin alone", OUTMSG, more, pin=None)
+    lines = split(text)	# each place on its own: one of its lines changed, both pins off
     for what, k, digest, count, change in EDITS:
         i = [i for i in range(len(lines) - k + 1)
              if hashlib.sha256("\n".join(lines[i:i + k]).encode("latin-1")).hexdigest() == digest][0]
-        t = "\n".join(lines[:i] + [lines[i] + " "] + lines[i + 1:])
-        try:
-            patch(t, hashlib.sha256(t.encode("latin-1")).hexdigest())
-            print("  [FAIL] patched with %s changed" % what)
-            bad += 1
-        except ValueError as e:
-            if "fingerprint found %d times" % (count - 1) not in str(e):
-                print("  [FAIL] %s changed: %s" % (what, e))
-                bad += 1
-    refused.append("each place changed (%d)" % len(EDITS))
+        refuse(what + " changed", "%s %d times" % (PLACEMSG, count - 1),
+               "\n".join(lines[:i] + [lines[i] + " "] + lines[i + 1:]), pin=None, out=None)
     d = tempfile.mkdtemp()
     p = os.path.join(d, "audio.c")
     try:
         write(p, text)
         main(["patch_audio_replies.py", p])
         if hashlib.sha256(read(p).encode("latin-1")).hexdigest() != OUT:
-            print("  [FAIL] the file written is not the pinned result")
-            bad += 1
+            bad.append("the file written is not the pinned result")
     finally:
         os.remove(p)
         os.rmdir(d)
-    print("patch_audio_replies selftest: %d places, result %s; refused: %s; %s"
-          % (n, OUT[:16], ", ".join(refused), "FAIL" if bad else "ok"))
+    for b in bad:
+        print("  [FAIL] " + b)
+    print("patch_audio_replies selftest: %d places, result %s; refused (%d): %s; %s"
+          % (n, OUT[:16], len(refused), ", ".join(refused), "FAIL" if bad else "ok"))
     return 1 if bad else 0
 
 
@@ -155,7 +167,7 @@ def main(argv):
     except ValueError as e:
         sys.exit("[FAIL] %s" % e)
     write(argv[1], out)
-    print("      [ok] audio.c: one reply per volume/period ioctl, refills move on (%d places)" % n)
+    print("      [ok] audio.c: one reply per volume/period ioctl, refills move on, no pullup of no block (%d places)" % n)
     return 0
 
 
