@@ -1,7 +1,7 @@
 #!/bin/bash
 # cut.sh OUT -- cut 68060-261106-64 (the k46 module kernel, kabi k46.1.4) into OUT: -63's recipe with this repository at fa24df6
 # (-63's 0508945 plus the ufs module's rwip fix: segmap_pagecreate gets base + mapon, tools/fsobj-patch.py);
-# -63 was -62's recipe with this repository at 9b5fcd8
+# -63 was -62's recipe with this repository at 0508945
 # (-62's 84b0623 plus the 8 MiB kernel arena, the oversize wakeups, IP's lower read queue, a user page below 1 GiB in vtop and
 # hardbus, the swap guard's resize path) and amix 46ef7d1; -62 was -61's recipe at 84b0623 (-61's a483e89 plus the carve keeping a core-tier COMMON in the kernel, src/carve_fs040.py)
 # and amix 46ef7d1 (the kmem readers' five COMMONs in the core tier, the empty inode window, kbootset-min -37).
@@ -13,19 +13,19 @@
 # gcc14's binutils (2.43.1) as m68k-linux-gnu-*, as -59.
 # Inputs, by environment:
 #   PORT_GIT     a clone of this repository that has fa24df6 and the patcher revisions below (default: this one)
-#   AMIX         an amix clone that has fa24df6 (kernel/dlm: the module core and `make kit`; kernel/k30/tools and
+#   AMIX         an amix clone that has 46ef7d1 (kernel/dlm: the module core and `make kit`; kernel/k30/tools and
 #                contracts: sddevsize and support-probe injectors, emit-family-chains, k0-gates; toolchain/m68k-gnu-bin)
 #   PAULA        amix-paula with 62fdcab (the audio driver's three patchers)
 #   GCA          gcc-cross-amix's build/ (env.sh; kernel/dlm/toolchain.pin, gcc 2.7.2.3 33ebadc), inside
-#                a git checkout that has fa24df6 (relink-040-dlm.sh checks the installed wrapper against it)
+#                a git checkout that has 33ebadc (relink-040-dlm.sh checks the installed wrapper against it)
 #   G14          optional: gcc14-cross-amix's build/; given, amix's toolchain/m68k-gnu-bin makes the
 #                m68k-linux-gnu-* links to its m68k-elf-* and puts them first on PATH; not given, PATH must
 #                already carry them.  Either way the assembler and linker must be binutils 2.43.1.
 #   AMIX_SYSTEM  amigaux/amix-system (kernels/2.1c/unix, the stock kernel the relinks check against)
 #   NETBSD_SYSSRC  NetBSD 10.1's source/sets/syssrc.tgz (the FPSP; tools/netbsd-pin.sh checks its sha256)
 #   CONTROL      optional: the frozen candidate-3 kernel (5aa7d732) emit and k0-gates compare against
-# OUT gets the run root (port/ = git archive fa24df6, the build tree; amix-040-060-port/ = a clone at 3caed28;
-# amix/ = a clone at fa24df6, its kernel/dlm the kit; amix-kerntools/ = 46ef7d1's kernel/k30 tools and
+# OUT gets the run root (port/ = git archive fa24df6, the build tree; amix-040-060-port/ = a clone at fa24df6;
+# amix/ = a clone at 46ef7d1, its kernel/dlm the kit; amix-kerntools/ = 46ef7d1's kernel/k30 tools and
 # contracts; gnu-bin/; inputs/) and SHA256SUMS-68060-261106-64, which must equal this directory's.
 set -eu
 REV=fa24df6 AMIX_REV=46ef7d1 KB=68060-261106-64
