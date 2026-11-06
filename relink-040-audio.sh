@@ -96,11 +96,14 @@ chmod u+w "$B"/*
 run_step 1 python3 "$P/patch_audio_safeclose.py" "$B/audio.c"
 run_step 1 python3 "$P/patch_audio_initwait.py" "$B/audio.c"
 run_step 1 python3 "$P/patch_audio_paula.py" "$B/audio.c"
-# ISSUE-122 (2026-11-06): the stock driver answers each AUDIO_VOLUME/AUDIO_PERIOD request twice (a refusal arrives as
-# success) and replays the head of a write longer than its free channel buffer.  src/patch_audio_replies.py, the
-# same file as the 68030 line's, pins its input (the three patchers' result) and its output by SHA-256.
-# AUDIO_REPLIES=0 leaves the driver as amix-paula's patchers make it.
-if [ "${AUDIO_REPLIES:-1}" = 1 ]; then
+# ISSUE-122 (2026-11-06): the stock driver panics on a zero-length AUDIO_VOLUME/AUDIO_PERIOD request (pullupmsg of a
+# missing block), answers each such request twice (a refusal arrives as success) and replays the head of a write
+# longer than its free channel buffer.  src/patch_audio_replies.py, the same file as the 68030 line's, pins its input
+# (the three patchers' result) and its output by SHA-256.  AUDIO_REPLIES=0 leaves the driver as amix-paula's patchers
+# make it; any value but 0 or 1 is refused.
+AUDIO_REPLIES="${AUDIO_REPLIES:-1}"
+case "$AUDIO_REPLIES" in 0|1) ;; *) echo "[FAIL] AUDIO_REPLIES='$AUDIO_REPLIES' (want 0 or 1)"; exit 2;; esac
+if [ "$AUDIO_REPLIES" = 1 ]; then
 	run_step 1 python3 "$HERE/src/patch_audio_replies.py" --selftest "$B/audio.c"
 	run_step 1 python3 "$HERE/src/patch_audio_replies.py" "$B/audio.c"
 else
