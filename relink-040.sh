@@ -1327,6 +1327,18 @@ run_step 2 python3 "$HERE/src/patch_sl_closedq.py" "$OUT"
 echo "[*] ISSUE-76: autocon's manufacturer shift is signed -- asrl -> lsrl"
 run_step 1 python3 "$HERE/src/patch_autocon_lsr.py" "$OUT"
 
+# ISSUE-121 (2026-11-06): stock dd.c's ddread/ddwrite go on with a negative residue when a raw SCSI disk
+# request starts past the end of its slice, and kmem_alloc sleeps for ever on Km_OsizeWanted.  14 bytes in
+# each make such a request fail with ENXIO (the 030 line's dd.c.patch); tools/test-ddeof.py runs both.
+# DD_EOF=0 leaves both functions stock (the rollback control).
+DD_EOF="${DD_EOF:-1}"
+if [ "$DD_EOF" = "1" ]; then
+	echo "[*] ISSUE-121: a raw SCSI disk request starting past its slice end -> ENXIO (ddread, ddwrite)"
+	run_step 1 python3 "$HERE/src/patch_ddeof.py" "$OUT"
+else
+	echo "[*] DD_EOF=0 -- ddread/ddwrite stock, ISSUE-121 left in place (rollback control)"
+fi
+
 if [ "$DIAG106" = 1 ]; then
 echo "[*] ISSUE-106: latch USP/u_ar0/u_comm at the fatal user-fault NOTICE"
 run_step 2 python3 "$HERE/src/patch_usptrap.py" "$OUT"
@@ -1609,6 +1621,11 @@ if [ "$SWAP_GUARD" = "1" ]; then
 	[ "$SWGCALLERS" = "swapconf swapctl swapfunc " ] \
 		|| { echo "[FAIL] swapadd_guarded callers are '$SWGCALLERS', expected swapconf swapctl swapfunc"; exit 1; }
 	echo "[OK] ISSUE-111 swap guard bound: swapadd_guarded from $SWGCALLERS"
+fi
+
+# HARD CHECK (2026-11-06, ISSUE-121): ddread and ddwrite still carry the end-of-slice test in the final image.
+if [ "$DD_EOF" = "1" ]; then
+	run_step 1 python3 "$HERE/src/patch_ddeof.py" --check "$OUT"
 fi
 
 echo
