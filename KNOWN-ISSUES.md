@@ -11406,7 +11406,7 @@ nothing. **Avoided by** SO_LINGER with a time, or shutdown(1) before close.
 SO_LINGER 60, 0 of 30; shutdown(1), 0 of 10. Every write whole, close took 0 s, FIN after; about 9 KB unsent at close (the last 8 KiB write and
 part of the one before). scp and rsync, which wait for the receiver before closing, 0 of 20 each.
 
-## ✅ ISSUE-119 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63`; FIXED by `fa24df6` in the ufs module, verified in emulation on `68060-261106-64`; NOT YET ON HARDWARE): a whole-page write that starts past the start of its 8 KiB segmap window could leave the window's first pages reading old memory contents
+## ✅ ISSUE-119 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63`; FIXED by `fa24df6` in the ufs module, verified in emulation and on hardware on `68060-261106-64`): a whole-page write that starts past the start of its 8 KiB segmap window could leave the window's first pages reading old memory contents
 
 **Defect.** Writing whole pages into an 8 KiB UFS block anywhere but at its start could leave the block's first pages reading old memory
 contents while the disk held the right data (stock, both lines; seen with 2 KiB and 4 KiB writes, never with 8 KiB). Amix's ufs rwip passed the
@@ -11430,8 +11430,11 @@ as the file filled the cache. 8 KiB writes, and appends with reads only, 0 bad; 
 0 bad in three runs at 64 MiB on the -63 kernel, and on `68060-261106-64` at 32, 64 and 128 MiB (a 144 MB file at 128 MiB). Paused checks of every
 cached page of the file found none holding another block; a page of zeros at the append frontier (being written when the emulator paused, gone
 at the next check) showed in 4 of 46 checks.
+**On hardware** (A4000D, Z3660 68060, the 4g image on the card's piscsi unit 6, a 144 MB file, 36864 blocks and 400000 operations on its
+1.4 GB data slice): `68060-261103-62` first read wrong data at operation 62376 at 127 MB, as in emulation at 128 MiB, 10 bad, all even
+blocks; `68060-261106-64` 0 bad (239839 writes, 160161 reads), the same counts as in emulation.
 
-## ⚠ ISSUE-120 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261106-64` and on the 68030 line; OPEN, no fix chosen yet): a whole-page write into a hole in the middle of a file leaves the rest of the new block reading the disk's old contents
+## ✅ ISSUE-120 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261106-64` and on the 68030 line; FIXED by `8629d20` in the ufs module, verified in emulation on `68060-261106-65`'s build; NOT YET ON HARDWARE): a whole-page write into a hole in the middle of a file leaves the rest of the new block reading the disk's old contents
 
 **Defect.** A whole-page write into a hole among a file's 12 direct blocks leaves the rest of the newly allocated block reading the disk's old
 contents: `ufs_bmap` skips zeroing for an allocation-only request whose old size is 0 (SVR4 `ufs_bmap.c:246`). A block mapped through an
@@ -11451,3 +11454,48 @@ page of 0x22 written into blocks 1-11 (direct) and 15-25 (indirect), 24 MB writt
 | the block's first (offset 0) | 96 of 96 (8; the rest the first pass's removed files) | 0 of 96 |
 
 The 68030 line shows the direct case with 2 KiB writes. Not touched by ISSUE-119's fix.
+**Fix.** `src/ufs_bmap_hf.c` (the 030 line's routine, the same code), linked into the ufs module by `tools/ufs-holefix.sh` after the tail
+zeroing; `tools/bmaphf.py` retargets rwip's one `ufs_bmap` relocation (module object `.text 0x8934`, rwip + 0x2be) to it, rwip pinned by its
+digest and the call's bytes. `ufs_bmap_hf` looks the block up first (`ufs_bmap` with `S_READ`, which allocates nothing, under the inode lock rwip
+holds for the real call): a hole or an error turns alloc-only off, so `ufs_bmap` reads the new block before setting it and every page of it is
+zero-filled in the cache; an allocated block keeps alloc-only, which then allocates nothing, so a rewrite runs as stock with no read. `as_iolock`
+and every other caller of `ufs_bmap` are stock. `UFS_HOLE_FIX=0` builds the module without it, byte for byte the object before.
+A simpler rule (pagecreate only for a write that starts at the 8 KiB window and covers it or reaches end of file, Solaris's) also closed the hole
+but made uncached 4 KiB rewrites 2.5-4 times slower; it was not kept.
+**Measured with the fix** (`68060-261106-65`'s build): the same test 0 of 96 wrong in both cases, direct and indirect, and 0 of 16 for a page
+written past the end of file; the file test of ISSUE-119 0 bad at 32, 64 and 128 MiB (a 144 MB file at 128 MiB). Write cost at 64 MiB (64 MB
+written by 4 KiB pages, copied by 8 KiB, 20000 random 4 KiB rewrites in a 96 MB file; seconds, two passes), run beside `68060-261106-64`:
+
+| Kernel | Write | Copy | Rewrites |
+|---|---|---|---|
+| `68060-261106-64` | 12/12, 11/12 | 26/29, 27/29 | 8/8, 7/11 |
+| the fix | 12/13, 11/11 | 29/30, 29/30 | 9/8, 7/8 |
+
+## ✅ ISSUE-121 (2026-11-06, a stock defect on both lines: MEASURED on hardware on `68060-261103-62` and in emulation; FIXED by `eabeadc` in the base kernel, verified in emulation on `68060-261106-65`'s build; NOT YET ON HARDWARE): a raw SCSI disk request that starts past the end of its slice fails wrongly or sleeps for good
+
+**Defect.** A read or write of a raw SCSI disk slice (`/dev/rdsk/c*d*s*`: the Z3660, A4091 and A3091/A2091 disks, all through `dd.c`) that
+starts past the slice's end fails with EIO or never returns (`kill -9` does not end it). Stock `ddread` and `ddwrite` return 0 at the end
+exactly, but past it they clamp the residue to `size * 512 - offset`, which is negative; `uiophysio` takes it as a byte count of about 4 GB, and on
+the A4000D `kmem_alloc` slept on `Km_OsizeWanted` at PRIBIO for ever. No request reaches the disk. The IDE disks (`hd.c`) are not affected. The compare is unsigned, so offsets of
+2^31 and above count as past the end of a smaller slice. A wrap seen with `dd iseek=8388608 bs=512` is dd(1)'s own 32-bit offset (0), not the kernel.
+**Where.** The stock kernel's `ddread` (`.text 0xbd06`) and `ddwrite` (`0xbd84`), the end-of-slice test at + 0x1e (`cmpl`, `bnew`, `clrl`,
+`braw` to the epilogue).
+**Fix.** `src/patch_ddeof.py`, 14 bytes in each function, in place: `subl %a2@(8),%d0` (end - offset; carry when the offset is past the end),
+`bhis` to the stock path, `subxl %d0,%d0` and `andl #6` (ENXIO past the end, 0 at it), `bras` to the stock epilogue; the 68030 line's
+`dd.c.patch` does the same in C. Both functions, their symbols and their eight relocations are checked before writing; `DD_EOF=0` builds them
+stock. `tools/test-ddeof.py` runs a kernel image's own stock and patched bytes on qemu-m68k against stub `sddevsize` and `uiophysio`: inside the
+slice the stock arguments (the residue clamped at the end), at the end 0, past the end ENXIO with no transfer, a slice above 2 GiB served at an
+offset above 2^31, the callee-saved registers kept; stock starts a transfer past the end in all ten past-the-end cases.
+**Measured** on the A4000D (Z3660 68060, `68060-261103-62`, piscsi unit 6): `dd if=/dev/rdsk/c6d0s3 bs=512 iseek=N count=1` for N past the
+64 MiB slice (262143, 1048575, 2916351, 12582912) and `bs=1024k iseek=128` hung, state S, WCHAN `&Km_OsizeWanted`; the disk kept working beside
+them; the Z3660 firmware's request log shows no read for the 1 MiB request (it never left the kernel). A power cycle clears them.
+In emulation (A4000, 68LC060 on the Z3660, piscsi root; c6d0s3 is the 4g layout's 64 MiB boot slice, 131072 sectors), the same requests:
+
+| Kernel | Last sector | At the end | Read 512 B past | Read 1 MiB past | Write 512 B past | Read in s4 (past 2 GiB) |
+|---|---|---|---|---|---|---|
+| `68060-261103-62` | 1+0 | 0+0, rc 0 | EIO | hangs | EIO | 8+0 |
+| `68060-261106-64` (16 and 128 MiB) | 1+0 | 0+0, rc 0 | EIO | EIO | EIO | 8+0 |
+| the fix (`68060-261106-65`'s build) | 1+0 | 0+0, rc 0 | ENXIO | ENXIO | ENXIO | 8+0 |
+
+Stock's outcome past the end depends on what `uiophysio` does with the ~4 GB count (the user buffer's place, the kernel's allocator): an
+error that is not the right one, or a sleep that never ends; the fix returns ENXIO before it, with nothing left asleep.
