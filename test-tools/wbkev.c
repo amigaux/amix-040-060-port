@@ -3,8 +3,10 @@
  *
  *   wbkev fill   four unprivileged users fill what they can and keep it: uids 100 and 102 leave a record at each of 8 stack
  *                depths by leaving their handler with longjmp, uids 101 and 103 the same with SIGSEGV ignored; all then wait.
- *                That is 32 records, the whole table without a per-uid limit.  Then 4 root processes each store into a
- *                PROT_NONE page, sleep in their handler (all 4 at once), repair the page and return: every root store must land.
+ *                That is 32 records, the whole table, on a kernel without a per-uid limit; with the limit (4 records a real
+ *                uid) the fillers keep 16 and the rest are refused (wbk_cap_n), so this mode then tests the limit, not a full
+ *                table, which would need 8 filler uids.  Then 4 root processes each store into a PROT_NONE page, sleep in
+ *                their handler (all 4 at once), repair the page and return: every root store must land.
  *   wbkev live   4 root processes sleep in their handlers with a store kept; meanwhile C reads a PROT_NONE page with no
  *                handler (nothing to keep) and D, also root, stores and repairs (its own store may be dropped: reported).
  *                The 4 stores must land.
@@ -56,7 +58,7 @@ int main(int ac, char **av)
 	if (fill) {
 		for (i = 0; i < NF; i++) if ((f[i] = fork()) == 0) filler(100 + i, i & 1);
 		for (i = 0; i < NF; i++) if (read(pfd[0], &b, 1) != 1 || b != 'f') { printf("filler failed\n"); return 99; }
-		printf("uids 100, 102 (longjmp) and 101, 103 (SIGSEGV ignored) each left %d records and wait\n", NPIN); fflush(stdout);
+		printf("uids 100, 102 (longjmp) and 101, 103 (SIGSEGV ignored) each faulted at %d depths and wait\n", NPIN); fflush(stdout);
 	}
 	for (i = 0; i < NV; i++) if ((v[i] = fork()) == 0) { alarm(60); _exit(storer(SLP)); }
 	for (i = 0; i < NV; i++) if (read(pfd[0], &b, 1) != 1 || b != 'r') { printf("pipe\n"); return 99; }
