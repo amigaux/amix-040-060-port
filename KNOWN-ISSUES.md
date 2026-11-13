@@ -11570,3 +11570,37 @@ alarm(10); `aurep2`: one write of N bytes whose 256-byte ramp names its chunks, 
 
 4 and 12 KiB writes drained alike on both (133 and 533 ms; the channel is released when its last buffer is queued, before the sound ends).
 
+
+## ✅ ISSUE-123 (2026-11-13, a stock defect on both lines, reached since rootfstype is named: REPRODUCED in emulation on 1.1's k46 kernel `68060-261106-66`; FIXED by `461d1d3` in `src/syncguard.s`, verified in emulation; NOT YET ON HARDWARE): a kernel that cannot mount its root panics a second time, in `ufs_update`
+
+**Defect.** `vfs_mountroot` with `rootfstype` named (`ufs`, set at run time from the generation's manifest, as 1.1's kernel does) sets the static
+root vfs's `vfs_op` to that filesystem's ops and calls its mountroot. When that fails (ufs's `mountfs` fails at `VOP_OPEN`,
+ENXIO or EIO, before it sets `vfs_data`) it panics at once: `cannot mount root: errno 6` or `5`. `xpanic` then calls `sync()`,
+`ufs_sync(0)` calls `ufs_update`, and `ufs_update` walks the mount list from `rootvfs` and reads through `vfs_data` for every
+vfs with ufs's ops: `*(0 + 4)` (the long at physical 4), then a field of what that points at. That is a bus error, `DOUBLE
+PANIC: KERNEL FAULT ... vector=0x2`, at `ufs_update`+0x58. Kernels with an empty `rootfstype` tried every switch row and left
+the last row's ops on the root vfs, so `ufs_update` skipped it and the panic stayed single.
+**Fix.** `sync()` (ISSUE-100's override) returns without walking the switch while `rootdir` is 0, and counts it in
+`syncg_skip_root`. `rootdir` is the vfs layer's own record that the root is mounted: its only writer in the image is
+`vfs_mountroot`'s `VFS_ROOT(rootvfs, &rootdir)`, after the mount succeeded (`exit`, `lookuppn` and the rfs code only read it),
+and nothing can be mounted before the root, so with `rootdir` 0 there is nothing to flush. `vfs_data` is not tested: what it
+holds is each filesystem's business. The half-set-up root vfs is left as `vfs_mountroot` leaves it, since the panic follows at
+once and `sync()` was the only thing after it that walked the list. A panic before `vfsinit` now leaves at the same test,
+ahead of ISSUE-100's two null checks. `relink-040.sh` checks that `sync` references `rootdir`. The unit assembles to the same
+bytes for the 68020, 68030 and 68040, so the 68030 line can take it unchanged. Against 1.1's kernel, only `sync` and the
+counter block differ (per symbol); the abi and `ufs.mod` are 1.1's.
+**Measured** (emulation; a vehicle disk whose newest generation is the trial: 1.1's kernel, or the same recipe at `461d1d3`;
+A3000 with the LC060 Z3660, the disk on a Buddha the kernel has no driver for; the counters read through the emulator at the
+panic, then Return typed on the console):
+
+| Kernel | Screen | `syncg_calls`, `skip_ops`, `skip_fn`, `skip_root` | After Return |
+|---|---|---|---|
+| 1.1 (`68060-261106-66`) | `cannot mount root: errno 5`, then `DOUBLE PANIC` in `ufs_update` | 1, 0, 0, (none) | reboots; the loader boots generation 1 |
+| `461d1d3` | `cannot mount root: errno 5`, the backtrace, nothing more | 1, 0, 0, 1 | reboots; the loader boots generation 1 |
+| `461d1d3`, the disk on the Z3660's SCSI (root mounted) | login; generation 2 marked good | 3, 0, 0, 0 (at 180 and 210 s) | — |
+
+**Not changed: a panic waits for Return.** `xpanic`, and `xcmn_err` for a second panic, call `call_demon`, which calls
+`callrom`: `getchar` in a loop until a newline, at IPL 4, before `rtnfirm` reboots. `getchar` reads `congetc`, which is
+`cogetc` (nothing reassigns it): the Amiga keyboard, polled through CIA-A, never the serial line. Nothing on that path times
+out. So a machine nobody is at holds any panic, single or double, until Return, and the loader's fall-back to a good
+generation waits with it. (A test rig that types a login after its boot wait supplies that Return.)
