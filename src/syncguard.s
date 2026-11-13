@@ -59,6 +59,24 @@
 | alias (the arguments come from the u-area and the stack, vfs_sync from the
 | vfsops table), so the order between them is not observable.
 |
+| THE ROOT GUARD (2026-11-13, ISSUE-123).  The two null checks are not enough
+| after a failed root mount.  vfs_mountroot (.text+0x5d72e) with rootfstype named
+| sets rootvfs->vfs_op to that filesystem's ops (`movel %a1@(8),%a0@(4)`) and
+| calls its vfs_mountroot; when that fails it panics at once, leaving the root
+| vfs with ufs's ops and vfs_data 0 (ufs's mountfs fails at VOP_OPEN before it
+| sets vfs_data).  xpanic's sync() then reaches ufs_sync(0) -> ufs_update, which
+| walks the mount list from rootvfs and reads through vfs_data for every vfs with
+| ufs's ops: *(0 + 4), then a field of whatever that points at -- a bus error,
+| `DOUBLE PANIC`.  So sync() first tests `rootdir`: the vfs layer's own record
+| that the root is mounted.  Its only writer in the image is vfs_mountroot's
+| VFS_ROOT(rootvfs, &rootdir), reached only after the mount succeeded (every
+| other reference -- exit, lookuppn, the rfs code -- reads it); and nothing can
+| be mounted before the root, so with rootdir 0 there is nothing to flush.
+| vfs_data is not tested: what it holds is each filesystem's own business, and
+| the root vfs is only the head of the list ufs_update walks.  The failed root
+| vfs is left as vfs_mountroot leaves it: the panic follows at once, and sync()
+| was the only thing after it that walked the list.
+|
 | WHAT IT DOES NOT DO.  It does not fix whatever panicked; it makes the panic
 | survivable enough to say what did.  Skipping a filesystem whose switch row is
 | not initialised is not a loss: that filesystem has nothing to flush, because it
@@ -74,7 +92,8 @@
 |
 | Assemble: m68k-cbm-sysv4-gcc -m68040 -c syncguard.s -o build/syncguard.o
 | Wire:     --weaken-symbol sync (relink-040.sh).  Externals: nfstype, vfssw
-|           (both global D in the stock image) and the absolute symbol u.
+|           (both global D in the stock image), rootdir (a COMMON there) and the
+|           absolute symbol u.
 | ============================================================================
 
 	.text
@@ -83,6 +102,8 @@ sync:
 	linkw	%fp,&0
 	moveml	%d2/%a2,%sp@-
 	addql	&1,syncg_calls
+	tstl	rootdir			| GUARD: no root mounted -- nothing to flush, and a
+	beqw	Lsgnoroot		|   failed root mount leaves rootvfs half set up
 	moveq	&1,%d2			| i = 1: row 0 is the stray-ops row, never synced
 	cmpl	nfstype,%d2
 	bgew	Lsgdone
@@ -113,6 +134,11 @@ Lsgnoops:
 Lsgnofn:
 	addql	&1,syncg_skip_fn
 	movel	%d2,syncg_last_i
+	braw	Lsgnext
+
+Lsgnoroot:
+	addql	&1,syncg_skip_root
+	braw	Lsgdone
 
 Lsgnext:
 	addql	&1,%d2
@@ -138,7 +164,8 @@ syncg_magic:
 syncg_calls:
 	.long	0
 | Iterations skipped because vfssw[i].vsw_vfsops was NULL -- the pre-vfsinit case
-| this unit exists for.  Expected to stay 0 on a healthy multiuser kernel.
+| this unit exists for; since the root guard, such a panic skips the loop before
+| it gets here.  Expected to stay 0 on a healthy multiuser kernel.
 	.globl	syncg_skip_ops
 syncg_skip_ops:
 	.long	0
@@ -150,5 +177,11 @@ syncg_skip_fn:
 | The vfssw index of the most recent skip, so a nonzero count names a row.
 	.globl	syncg_last_i
 syncg_last_i:
+	.long	0
+| sync() calls that skipped every filesystem because rootdir was 0: a panic before
+| the root was mounted, or the failed root mount itself (ISSUE-123).  Stays 0 on a
+| kernel that mounted its root.
+	.globl	syncg_skip_root
+syncg_skip_root:
 	.long	0
 	.balign 4			| pad section to a 4-byte multiple (bss placement: rel.c puts .bss at data_end UNALIGNED)

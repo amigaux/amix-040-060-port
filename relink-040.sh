@@ -763,7 +763,7 @@ for s in pstart sysseginit vatosde vatopte uvatosde hat_pteload hat_unlock hat_u
          ptd_keep0_n ptd_keepn_n ptd_meta_n ptd_badlink_n ptd_wake_n ptd_tblfreed_n \
          nullvect nullvect_orig kvp_magic kvp_on kvp_n kvp_user_n kvp_super_n kvp_over_n \
          kvp_last_vec kvp_last_pc kvp_vec \
-         sync syncg_magic syncg_calls syncg_skip_ops syncg_skip_fn syncg_last_i \
+         sync syncg_magic syncg_calls syncg_skip_ops syncg_skip_fn syncg_last_i syncg_skip_root \
          page_init page_init_orig pgz_magic pgz_calls pgz_npages pgz_dirty_n pgz_held_n \
          smu_panic_latch smu_magic smu_n smu_why smu_scan smu_bucket smu_want smu_pp \
          bt_frame_ok bt_magic bt_walks bt_frames bt_stops bt_laststop bt_prev bt_budget \
@@ -848,7 +848,11 @@ fi
 if [ -z "$(m68k-linux-gnu-nm "$OUT" | awk '$3=="syncg_magic" && $2=="D" {print $1}')" ]; then
 	echo "[FAIL] syncg_magic missing -> syncguard.o's counter block is not in the image"; exit 1
 fi
-echo "[OK] ISSUE-100 panic-path guard bound: sync @0x$SGADDR (stock body was 0x5d21a)."
+# ISSUE-123: sync() must test rootdir before it walks the switch (a failed root mount leaves rootvfs with
+# ufs's ops and no vfs_data, and ufs_update reads through it).  An older syncguard.o links just as well.
+SGROOT=$(m68k-linux-gnu-objdump -dr "$OUT" | awk '/^[0-9a-f]+ <[^>]+>:$/{fn=$2} /R_68K_32[ \t]+rootdir$/ && fn=="<sync>:"{n++} END{print n+0}')
+[ "$SGROOT" = "1" ] || { echo "[FAIL] sync references rootdir $SGROOT times, want 1 (ISSUE-123 root guard)"; exit 1; }
+echo "[OK] ISSUE-100 panic-path guard bound: sync @0x$SGADDR (stock body was 0x5d21a), root guard on rootdir."
 
 # HARD CHECK (2026-10-30, ISSUE-107): kzero must be ours and bzero must stay the stock body.
 # They share .text+0x302 in the stock image, so the failure modes are the quiet ones: a missing
