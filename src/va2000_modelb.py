@@ -20,9 +20,15 @@
 # exactly 1 -- fails hard otherwise so a silent no-op (source drifted
 # upstream) or an over-match is never possible.
 #
+# Two sources are pinned (PINS below).  Upstream's still has the literal and
+# is patched as above.  The va2000-amix fork's `next` takes the shift from
+# the kernel's PNUMSHFT, which the Model-B headers make 12, so its file is
+# copied unchanged: the literal must be absent and the PNUMSHFT shift present
+# exactly once.  Both give the same va2000_040.o bytes.
+#
 # Usage: python3 src/va2000_modelb.py
 #   reads:  $VA2000_SRC
-#   writes: build/va2000_040.c   (copy, patched)
+#   writes: build/va2000_040.c   (copy; patched when the source is upstream's)
 #   also copies va2000.h unmodified alongside it (va2000.c does
 #   #include "va2000.h" and needs it in the same directory to compile).
 
@@ -81,29 +87,39 @@ NEW = ("        /* Model-B (4 KiB page, PNUMSHFT=12) adaptation of the vanilla\n
 # instead of storing the value: Amiga restores passthrough, SVGA replays the stored
 # modeline, anything else is EINVAL.  Agreed with the driver line as the one seam every
 # RTG driver implements its own way (amix-mail, 2026-09-28).
-EXPECT_SHA256 = "b542e9019ae37fba2452e6833e77bbe1364298c1d17921255b6b6836364b424b"
-EXPECT_BRANCH = "wip/zorro3"              # va2000-amix, branched from va2000-8bit-support
-EXPECT_NOTE = ("the 8-bit display mode support wolf3d needs, plus the Zorro III "
-               "address-agnostic work; main is 16-bit only and Zorro II only")
+# Re-pinned 2026-11-15: the va2000-amix fork's `next` (db12baf) computes the mmap page
+# frame with `>> PNUMSHFT` and adds the module form behind its own switches; with none of
+# those switches and -DVA2000_KVA it compiles to the same va2000_040.o as upstream patched.
+# sha256 -> (mode, where it comes from).  "patch" rewrites the literal, "copy" takes the
+# file as it is.
+PINS = {
+    "b542e9019ae37fba2452e6833e77bbe1364298c1d17921255b6b6836364b424b":
+        ("patch", "va2000-amix main 7f82edc (upstream)"),
+    "340aae5eb3bae5b4bcfce7afb5937fdeb8005a2d1f5b5a7d0e883c9b0bce3643":
+        ("copy", "va2000-amix fork next db12baf"),
+}
+EXPECT_NOTE = ("both carry the 8-bit display mode support wolf3d needs and the Zorro III "
+               "address-agnostic work")
 
 
 def check_provenance():
     import hashlib
     got = hashlib.sha256(open(SRC_C, "rb").read()).hexdigest()
-    if got == EXPECT_SHA256:
-        print("va2000_modelb: source provenance OK (%s, %s)" % (EXPECT_BRANCH, got[:12]))
-        return
+    if got in PINS:
+        mode, where = PINS[got]
+        print("va2000_modelb: source provenance OK (%s, %s)" % (where, got[:12]))
+        return mode
     raise SystemExit(
-        "ABORT: %s does not match the pinned source.\n"
-        "       expected sha256 %s  (branch %s)\n"
+        "ABORT: %s does not match a pinned source.\n"
+        "       expected sha256 one of:\n%s"
         "       got      sha256 %s\n"
-        "       %s\n"
-        "       If the va2000-amix checkout moved, restore it:\n"
-        "           cd <your va2000-amix> && git checkout %s\n"
-        "       If the driver genuinely changed, re-check the diff and update EXPECT_SHA256 here\n"
+        "       %s.\n"
+        "       If the va2000-amix checkout moved, restore one of the commits above.\n"
+        "       If the driver genuinely changed, re-check the diff and update PINS here\n"
         "       ON PURPOSE -- silently building a different driver into the kernel is exactly the\n"
         "       failure this pin exists to prevent."
-        % (SRC_C, EXPECT_SHA256, EXPECT_BRANCH, got, EXPECT_NOTE, EXPECT_BRANCH))
+        % (SRC_C, "".join("           %s  (%s)\n" % (h, w) for h, (m, w) in PINS.items()),
+           got, EXPECT_NOTE))
 
 
 def main():
@@ -111,28 +127,38 @@ def main():
         raise SystemExit("ABORT: driver source not found: %s" % SRC_C)
     if not os.path.isfile(SRC_H):
         raise SystemExit("ABORT: driver header not found: %s" % SRC_H)
-    check_provenance()
+    mode = check_provenance()
 
     text = open(SRC_C).read()
     n = text.count(OLD)
-    if n != 1:
-        raise SystemExit(
-            "ABORT: expected exactly ONE occurrence of the vanilla >>11 shift "
-            "in va2000mmap, found %d.  Upstream source (%s) may have changed "
-            "-- update OLD/NEW in this script after re-checking the diff." % (n, SRC_C))
-
-    patched = text.replace(OLD, NEW, 1)
-    if patched.count(">> 12)") != 1 or ">> 11)" in patched:
-        raise SystemExit("ABORT: post-patch sanity check failed (unexpected >>11/>>12 count)")
+    if mode == "copy":
+        # No rewrite: the shift is the kernel's PNUMSHFT, 12 under the Model-B headers.
+        if n or ">> 11)" in text or text.count(">> PNUMSHFT)") != 1:
+            raise SystemExit("ABORT: %s is pinned as PNUMSHFT-only, but it has %d literal "
+                             ">>11 site(s) and %d PNUMSHFT shift(s)"
+                             % (SRC_C, text.count(">> 11)"), text.count(">> PNUMSHFT)")))
+        patched = text
+    else:
+        if n != 1:
+            raise SystemExit(
+                "ABORT: expected exactly ONE occurrence of the vanilla >>11 shift "
+                "in va2000mmap, found %d.  Upstream source (%s) may have changed "
+                "-- update OLD/NEW in this script after re-checking the diff." % (n, SRC_C))
+        patched = text.replace(OLD, NEW, 1)
+        if patched.count(">> 12)") != 1 or ">> 11)" in patched:
+            raise SystemExit("ABORT: post-patch sanity check failed (unexpected >>11/>>12 count)")
 
     os.makedirs(os.path.dirname(OUT_C), exist_ok=True)
     with open(OUT_C, "w") as f:
         f.write(patched)
     shutil.copyfile(SRC_H, OUT_H)
 
-    print("  [ok] va2000mmap phystopfn >>11 -> >>12 (1 site) -> %s" % OUT_C)
+    if mode == "copy":
+        print("  [ok] va2000mmap shifts by PNUMSHFT (1 site), copied unchanged -> %s" % OUT_C)
+    else:
+        print("  [ok] va2000mmap phystopfn >>11 -> >>12 (1 site) -> %s" % OUT_C)
     print("  [ok] va2000.h copied unmodified -> %s" % OUT_H)
-    print("va2000_modelb: %s untouched (read-only); patched copy in build/" % SRC_C)
+    print("va2000_modelb: %s untouched (read-only); copy in build/" % SRC_C)
 
 
 if __name__ == "__main__":

@@ -12,10 +12,12 @@
 # Real hardware validation is the user's job on the A3000.
 #
 # Driver source: $VA2000_SRC (SEPARATE repo, untouched
-# by this script). va2000_modelb.py copies it into build/ and converts the
-# ONE 2 KiB-page phystopfn shift (va2000mmap, >>11) to the 4 KiB Model-B shift
-# (>>12) that this kernel's device-mmap handlers all use (see
-# patch_devmmap_pfn.py / patch_xsvga.py for the same class of fix elsewhere).
+# by this script). va2000_modelb.py checks it against its pins and copies it
+# into build/.  Upstream's source has ONE 2 KiB-page phystopfn shift
+# (va2000mmap, >>11), converted there to the 4 KiB Model-B shift (>>12) that
+# this kernel's device-mmap handlers all use (see patch_devmmap_pfn.py /
+# patch_xsvga.py for the same class of fix elsewhere).  The va2000-amix fork's
+# source shifts by PNUMSHFT and is compiled as it is; same object bytes.
 #
 # io_init[] = { parinit, 0 } has no spare relocation to retarget to
 # va2000init, so va2000init is invoked from a `parinit` WRAPPER instead
@@ -72,11 +74,12 @@ sh "$HERE/src/mk_modelb_sysroot.sh" | sed 's/^/      /'
 AMIX_SYSROOT="$HERE/build/sysroot-modelb"
 export AMIX_SYSROOT
 
-# Still needed even with the headers: va2000.c computes its PFN with a HARDCODED
-# `>> 11`, not with phystopfn, and no header can reach a literal.  This is the
-# division of labour -- headers cover macro users, this patcher covers the
-# literal, and check_page_geometry.sh below covers both in the compiled bytes.
-echo "[*] VA2000: Model-B source copy (>>11 -> >>12, exactly one site)"
+# Still needed even with the headers for upstream's va2000.c: it computes its PFN
+# with a HARDCODED `>> 11`, not with phystopfn, and no header can reach a literal.
+# This is the division of labour -- headers cover macro users, this patcher covers
+# the literal, and check_page_geometry.sh below covers both in the compiled bytes.
+# The fork's va2000.c has no literal (>> PNUMSHFT); the patcher then only pins it.
+echo "[*] VA2000: Model-B source copy (pinned; >>11 -> >>12 where the literal is)"
 python3 "$HERE/src/va2000_modelb.py"
 echo "[*] VA2000: cross-compile build/va2000_040.c"
 # -DVA2000_KVA turns on the address-agnostic path (Zorro III track, 2026-08-19):
