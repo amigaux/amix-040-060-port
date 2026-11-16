@@ -15,7 +15,8 @@
 #                                         (all three = 0 reproduces the r6 image as first cut)
 #   TCP_HIWAT=0 sh relink-040-fpe.sh ...  opt out of DRIVER-LINE-10 (step 8.8): stock TCP queue
 #                                         (with the three above, reproduces the r6 image)
-#   RLIMITS=0 sh relink-040-fpe.sh ...    opt out of step 8.9: the stock 16 MiB soft data and vmem limits
+#   RLIMITS=1 sh relink-040-fpe.sh ...    opt in to step 8.9: unlimited soft data and vmem limits
+#                                         (default: the stock 16 MiB; on in cuts -56 to -67)
 #   ARENA8M=0 sh relink-040-fpe.sh ...    opt out of step 8.10: the 4 MiB kernel arena (ISSUE-80)
 #   KMEMWAKE=0 sh relink-040-fpe.sh ...   opt out of step 8.10: stock oversize wakeups (ISSUE-82)
 #   IPLRHIWAT=0 sh relink-040-fpe.sh ...  opt out of step 8.10: stock IP lower read hiwat (ISSUE-81)
@@ -372,15 +373,18 @@ fi
 
 # ---------------------------------------------------------------- 8.9 per-process limits
 # The stock rlimits[] gives a process 16 MiB of data and 16 MiB of address space (SDATLIM, SVMMLIM soft;
-# the hard limits are already unlimited).  Both soft limits become 0x7fffffff; SSTKLIM stays 16 MiB.  Two
-# .data longwords, so after the link.  Idempotent; RLIMITS=0 is the deliberate opt-out (stock limits).
-if [ "${RLIMITS:-1}" = 0 ]; then
-	echo "[*] rlimits: per-process soft limits SKIPPED (RLIMITS=0, deliberate opt-out)"
-else
-	echo "[*] rlimits: SDATLIM and SVMMLIM 16 MiB -> unlimited"
+# the hard limits are already unlimited), and that is the default: the release keeps the stock limits.
+# RLIMITS=1 opts in to both soft limits at 0x7fffffff (SSTKLIM stays 16 MiB); two .data longwords, so after
+# the link.  Cuts -56 to -67 had it on by default.  Either way the gate reads the table back and fails unless
+# it is the one asked for, so the image cannot drift from the release notes unseen.
+case "${RLIMITS:-0}" in
+0)	echo "[*] rlimits: stock 16 MiB soft data and vmem limits (default; RLIMITS=1 opts in to unlimited)"
+	run_step all python3 "$HERE/src/patch_rlimits.py" --expect stock "$OUT" ;;
+1)	echo "[*] rlimits: SDATLIM and SVMMLIM 16 MiB -> unlimited (RLIMITS=1)"
 	run_step all python3 "$HERE/src/patch_rlimits.py" "$OUT"
-	run_step all python3 "$HERE/src/patch_rlimits.py" --check "$OUT"
-fi
+	run_step all python3 "$HERE/src/patch_rlimits.py" --expect unlimited "$OUT" ;;
+*)	echo "[FAIL] RLIMITS='$RLIMITS': 0 (stock, the default) or 1 (unlimited)"; exit 1 ;;
+esac
 
 # ---------------------------------------------------------------- 8.10 kernel map and queues
 # ISSUE-80: the kernel's virtual arena 4 -> 8 MiB.  ISSUE-82: any return of kernel map wakes an oversize sleeper.

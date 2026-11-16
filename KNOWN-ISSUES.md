@@ -11604,3 +11604,18 @@ panic, then Return typed on the console):
 `cogetc` (nothing reassigns it): the Amiga keyboard, polled through CIA-A, never the serial line. Nothing on that path times
 out. So a machine nobody is at holds any panic, single or double, until Return, and the loader's fall-back to a good
 generation waits with it. (A test rig that types a login after its boot wait supplies that Return.)
+
+---
+
+## ✅ ISSUE-124 (2026-11-16, a defect of this port's build default: READ from the shipped bytes of `68060-261106-66` and `68060-261115-67`; FIXED for the next cut by the default of `relink-040-fpe.sh` step 8.9 and its gate): the k46 kernels raised the soft data and vmem limits that the release notes said were stock
+
+> **Ledger: FIXED for the next cut.** -56 to -67, 1.1's -66 and the 1.1.x cut -67 among them, keep the unlimited limits they were built with.
+
+**Defect.** Step 8.9 (`src/patch_rlimits.py`, since `eb22919`) was on unless `RLIMITS=0` was given, and no cut gave it. `rlimits[]` in -66
+(unix 35188463) and -67 (unix 454d5d65) has SDATLIM and SVMMLIM 0x7fffffff, SSTKLIM 0x01000000: a process gets unlimited data and address
+space by default. 1.1's release notes said a process gets 16 MiB of each unless it raises its soft limit.
+
+**Fix.** The stock table is the default and `RLIMITS=1` opts in to the unlimited one; any other value stops the build. In both cases the
+step reads the table back with `patch_rlimits.py --expect stock|unlimited` and fails unless it is the one asked for. A cut checks its
+shipped image the same way: `python3 src/patch_rlimits.py --expect stock out/c/unix`. On -67's `c-dlm` in the build container: the
+default gives the stock table; `RLIMITS=1` gives -67's fpe stage, differing in the build id only; the two differ in the two words.

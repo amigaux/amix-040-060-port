@@ -3,7 +3,12 @@
 #
 #   patch_rlimits.py KERNEL           write the values; idempotent ([skip] when already done)
 #   patch_rlimits.py --check KERNEL   say whether KERNEL carries the stock or the new values; write nothing
+#   patch_rlimits.py --expect stock|unlimited KERNEL
+#                                     fail unless KERNEL carries that table; write nothing.  The build's gate
+#                                     (relink-040-fpe.sh step 8.9) and a cut's check of its shipped image use it.
 #
+# Since 2026-11-16 relink-040-fpe.sh keeps the stock table by default and RLIMITS=1 opts in to this change; cuts
+# -56 to -67 were built with it on.
 # THE LIMITS.  master.d/kernel compiles the fourteen rlimit tunables into `rlimits[]` (.data, struct rlimit pairs,
 # soft then hard): CPU, FSIZE, DATA, STACK, CORE, NOFILE, VMEM.  The stock kernel carries
 #     SCPULIM 0x7fffffff  HCPULIM 0x7fffffff   SFSZLIM 0x10000000  HFSZLIM 0x7fffffff
@@ -51,11 +56,17 @@ def locate(e):
 def main():
     a = sys.argv[1:]
     check = len(a) == 2 and a[0] == "--check"
-    if not (len(a) == 1 or check):
-        raise SystemExit("usage: patch_rlimits.py [--check] KERNEL")
+    expect = len(a) == 3 and a[0] == "--expect" and a[1] in ("stock", "unlimited")
+    if not (len(a) == 1 or check or expect):
+        raise SystemExit("usage: patch_rlimits.py [--check | --expect stock|unlimited] KERNEL")
     path = a[-1]
     e = Elf(path)
     base, words = locate(e)
+    if expect:
+        got = "unlimited" if words == NEW else "stock"
+        print("  %s rlimits .data 0x%x: SDATLIM 0x%x SVMMLIM 0x%x SSTKLIM 0x%x: %s, want %s"
+              % ("[ok]  " if got == a[1] else "[FAIL]", base, words[4], words[12], words[6], got, a[1]))
+        sys.exit(0 if got == a[1] else 1)
     if check:
         print("  %s rlimits .data 0x%x: SDATLIM 0x%x SVMMLIM 0x%x SSTKLIM 0x%x (%s)"
               % ("[ok]  " if words == NEW else "[stock]", base, words[4], words[12], words[6],
