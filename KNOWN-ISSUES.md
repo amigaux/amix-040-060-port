@@ -11421,6 +11421,11 @@ out, but it sends every such close into a stock path where the tcpcb can be free
 to 60 s per socket (an exiting process ignores its signals), and blocks non-blocking sockets. The fix planned after 1.1 keeps the unsent data
 on the connection itself after the close (a send queue of its own that output and acknowledgement use once the stream is gone), so the close
 returns at once and TCP sends the rest and the FIN in the background.
+**The 68030 stock kernel, a second shape (2026-11-18, observed on that line, not checked on the port):** on loopback, one 8 KB write then close
+comes up 4176 bytes short on every connection (600 of 600). netstat shows most of the missing bytes reached the receiving TCP and sat there
+behind a hole, were never resent after the close, and the connection still ended with a FIN. So part of the loss here may be data already
+sent and stranded behind a lost segment, not only data never sent; a fix that keeps only the unsent queue would not cover that. To tell the
+two apart on the port: read the retransmit and out-of-order counters (`netstat -s`, tcp) on both ends before and after a short close.
 
 ## ✅ ISSUE-119 (2026-11-06, a stock defect on both lines: MEASURED in emulation on `68060-261105-63`; FIXED by `fa24df6` in the ufs module, verified in emulation and on hardware on `68060-261106-64`): a whole-page write that starts past the start of its 8 KiB segmap window could leave the window's first pages reading old memory contents
 
