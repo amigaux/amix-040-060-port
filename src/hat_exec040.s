@@ -1,42 +1,50 @@
-| hat_exec040.s -- 040 no-op override of hat_exec (stock orig 0xb6f20, GLOBAL T).
+| hat_exec040.s -- 040 override of hat_exec (stock orig 0xb6f20, GLOBAL T): drop the old address space's
+| translations of the exec stack image; move nothing.
 |
-| STATUS (2026-07-15, build 260715-20): this is a SAFETY HARDENING, *not* the ISSUE-10 fix.
-| It was built to test Audit #1's hypothesis (hat_exec flag-0 steal -> orphaned 040 PTEs =
-| ISSUE-10 chain II).  The 4-burst issue10-pressure.sh repro reproduced the corruption
-| IDENTICALLY with this no-op in place (same crash page pp=400AA2C0, same 4AFC005F, same
-| \x7fELF disk-read reuse -- test-tools/issue10-noexec-negative-260715.txt), REFUTING that
-| hypothesis.  Kept anyway: it removes an unported-030 stack-PT-move optimization and its
-| NULL->CE_PANIC branch, and boots clean.  Surviving ISSUE-10 suspects + the recommended
-| free-time invariant probe are in docs/ISSUE-10-CHAIN-II-030-MAP.md.
+| THE CALL.  exec builds the new stack image in the CURRENT address space, in the hole execstk_addr finds
+| (the first one at or above 0x80000000), copies the arguments out into it (faulting its pages in through
+| segvn, so the old as gets live leaf PTEs), and as_exec then moves the segment to the new as and calls
+| hat_exec(oas, ostka, stksz, nas, nstka, hatflag).  Stock hat_exec moves the image's page tables to the
+| new as and clears them in the old one (030 code, unported).  The pages belong to the segment's anon
+| map, so the new as rebuilds the same translations by demand fault; only the old ones must go.
 |
-| WHY: stock hat_exec is an exec-time OPTIMIZATION that tries to MOVE the exec'ing
-| process's stack page tables from the old AS to the new AS instead of faulting
-| them back in.  On the 040 its body is UNPORTED (only an 8-byte root-load patch;
-| "all section/segment/page/SDE/PTE/ptdat arithmetic is still 030" -- Codex
-| docs/contracts/HAT-EXEC-AUDIT.md).  Critically it calls `hat_ptalloc` with flag 0 (steal ALLOWED;
-| verified @0xb7232 clrl %sp@-), and under memory pressure the stock allocator falls
-| into its UNPATCHED-030 STEAL path (8-byte SDE math 0xb6b52/72, 21-bit PFN 0xb6bb2,
-| 2 KiB VA step 0xb6c62).  That steal grabs an unlocked page table from ANY address
-| space in active_pts (not just the stack) and 030-unlinks it -- which does NOT clear
-| the LIVE 040 PTEs of the stolen table's mapped pages.  Those pages (e.g. a cp/sh
-| heap table) are then left with live 040 PTEs orphaned from pp->p_mapping -> freed
-| and reused by a concurrent segmap/exec disk-read -> the owner reads freshly disk-read
-| ELF content (ISSUE-10 chain II; needs heavy exec + memory pressure, exactly the repro).
-| Blocking the steal is NOT an option: on hat_ptalloc==NULL hat_exec cmn_err(CE_PANIC)s
-| (0xb7250), so steal is how it dodges the panic under pressure.
+| WHY NOT A NO-OP (ISSUE-125).  From 2026-07-15 this was `return 0`, on the reasoning that relvm tears the
+| old as down right after.  Under vfork it does not: the old as is the parent's and survives, keeping
+| valid PTEs at ostka that point at the child's stack frames.  The next vfork child's exec builds its
+| image at the same ostka; its copyout meets those PTEs, takes no fault and writes its arguments into the
+| earlier child's live stack page (seen as child A's argv turning into child B's strings, then A dying).
+| Stock's move was replaced in the first place because its unported steal path orphans live 040 PTEs
+| under memory pressure (ISSUE-10 chain II, docs/contracts/HAT-EXEC-AUDIT.md); unloading through the
+| ported hat_unload needs no allocation, so that hazard stays gone.
 |
-| FIX (policy recorded in docs/contracts/HAT-EXEC-AUDIT.md): make hat_exec a NO-OP returning 0.  The move
-| is a pure optimization -- as_exec already moves the stack SEG object (data ownership is
-| on the seg, not the PTEs), relvm tears down the old AS, and the moved stack's
-| translations rebuild via 040 faults through the ported hat_pteload.  A no-op never
-| calls hat_ptalloc -> no steal path, no NULL panic.  Strictly safer than today (removes
-| both the corruption vector and the panic).  Cost: a few extra stack faults per exec.
-| Args (ignored): oas, ostka, stksz, nas, nstka, hatflag.  Returns 0.
+| THE UNLOAD.  hat_unload(seg, va, size, flags) reads only seg->s_as (+12) and the as's root (+20), so a
+| zeroed stand-in seg on the stack carries oas.  flags 0 unmaps only: it clears each leaf PTE, carries
+| the R/M bits into the page, unlinks the page's mapping entry and frees the leaf table once empty; it
+| frees no page.  Its flushmmu after each PTE is a pflusha, so no ATC entry for ostka outlives it; the
+| CPU runs on oas here (the exec'ing process's own as, or under vfork the parent's).  A freed root
+| (as+20 = 0) makes hat_unload a no-op.  Returns 0, as before; stock's other arguments go unused.
 | --weaken-symbol hat_exec.
 
 	.text
 	.globl	hat_exec
 hat_exec:
-	clrl	%d0			| return 0 (no error); skip the unsafe 030 stack-PT transfer
+	linkw	%fp,&-24		| fp@(-24): a struct seg stand-in, s_as at +12
+	clrl	%fp@(-24)
+	clrl	%fp@(-20)
+	clrl	%fp@(-16)
+	movel	%fp@(8),%fp@(-12)	| s_as = oas
+	clrl	%fp@(-8)
+	clrl	%fp@(-4)
+	movel	%fp@(16),%d0		| stksz
+	beqs	Lhx_done
+	clrl	%sp@-			| flags 0: unmap only
+	movel	%d0,%sp@-		| size
+	movel	%fp@(12),%sp@-		| ostka
+	pea	%fp@(-24)		| the stand-in seg
+	jsr	hat_unload
+	lea	%sp@(16),%sp
+Lhx_done:
+	clrl	%d0			| return 0
+	unlk	%fp
 	rts
 	.balign	4			| pad section to a 4-byte multiple (bss placement guard)

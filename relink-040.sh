@@ -65,12 +65,13 @@ m68k-cbm-sysv4-gcc -m68040 $KDBG_AS -c "$HERE/src/hat_chgprot040.s" -o "$HERE/bu
 #                    read p_ref==0 and get reclaimed+reused (ISSUE-10).  This flushes the
 #                    ATC unconditionally after the walk.  A genuine fix, belongs in base.
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/hat_pagesync040.s" -o "$HERE/build/hat_pagesync040.o"
-#     hat_exec040  = NO-OP override of the stock exec stack-page-table MOVE optimization.
+#     hat_exec040  = override of the stock exec stack-page-table MOVE: unloads the old as's
+#                    translations of the stack image through hat_unload and moves nothing.
 #                    Stock passes flag 0 to hat_ptalloc (steal allowed) and its unpatched-030
 #                    steal path, hit under memory pressure, orphans live 040 PTEs of a stolen
 #                    table's pages (ISSUE-10 chain II).  as_exec moves the seg + faults rebuild
-#                    the stack via hat_pteload, so the move is a pure (unsafe-on-040) optimization.
-#                    Codex HAT-EXEC-POLICY.md-endorsed.  A genuine fix, belongs in base.
+#                    the stack via hat_pteload.  The unload is needed under vfork, where the old
+#                    as is the parent's and survives (ISSUE-125).  A genuine fix, belongs in base.
 m68k-cbm-sysv4-gcc -m68040 -c "$HERE/src/hat_exec040.s"    -o "$HERE/build/hat_exec040.o"
 #     hat_dup040   = REAL 040 fork/COW port (ISSUE-4, boot-verified 2026-07-04 on branch
 #                    040-hat-dup-port incl. the fork-without-exec COW subshell test) --
