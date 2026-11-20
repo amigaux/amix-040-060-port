@@ -221,7 +221,7 @@ The likely common effect is therefore:
 - leave the live stack mappings in `oas`;
 - move no live mapping to `nas`;
 - flush the old/current URP;
-- let `relvm` tear down the old A/B/C mappings;
+- let `relvm` tear down the old A/B/C mappings (not under vfork, where the old as is the parent's: ISSUE-125);
 - rebuild the new stack mappings on demand from the moved segment.
 
 This interpretation agrees with the reported clean `hatflag = 1` runtime
@@ -303,7 +303,7 @@ intended HAT optimization from a failed legacy metadata operation.
 ### Proven live and useful
 
 - `as_exec` moves the real stack segment object and changes its base/owner.
-- `relvm` destroys old mappings after the segment move.
+- `relvm` destroys old mappings after the segment move, except under vfork (ISSUE-125: hat_exec must unload them).
 - `hat_asload` installs the actual new 040 root.
 - the fast-path 040 URP load and global ATC flush are valid 040 instructions.
 

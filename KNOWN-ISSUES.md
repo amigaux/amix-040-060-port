@@ -11624,3 +11624,25 @@ space by default. 1.1's release notes said a process gets 16 MiB of each unless 
 step reads the table back with `patch_rlimits.py --expect stock|unlimited` and fails unless it is the one asked for. A cut checks its
 shipped image the same way: `python3 src/patch_rlimits.py --expect stock out/c/unix`. On -67's `c-dlm` in the build container: the
 default gives the stock table; `RLIMITS=1` gives -67's fpe stage, differing in the build id only; the two differ in the two words.
+
+## ✅ ISSUE-125 (2026-11-20, a defect of this port, k46 only: REPRODUCED in emulation on `68060-261106-66` and `68060-261115-67`; FIXED by `6608c63` in `src/hat_exec040.s`, verified in emulation on -67's recipe; NOT YET ON HARDWARE): after vfork, a child's exec wrote its new arguments into the stack page of an earlier vfork child of the same parent
+
+**Defect.** exec builds the new stack image in the current address space, in the first hole `execstk_addr` finds at or above 0x80000000
+(past the shared libraries, 0x8005f000 for a small dynamically linked program), copies the arguments out into it, and `as_exec` moves the
+segment to the new as and calls `hat_exec`. Stock `hat_exec` moves the image's page tables out of the old as. This port's had been a no-op
+since 2026-07-15 (ISSUE-10 chain II), on the reasoning that `relvm` destroys the old as right after. Under vfork it does not: the old as is
+the parent's and survives, keeping valid PTEs at the hole that point at the child's stack frames. The next vfork child's exec builds at the
+same hole; its copyout meets those PTEs, takes no fault, and writes into the earlier child's live stack page, while its own moved segment
+holds no pages and it starts with an empty stack. k30 runs stock `hat_exec` and is clean.
+**Seen as** CDE's dtsession, which starts every client with vfork and execvp: its clients dump core. A test program that vforks child A
+(keeps its argv, checks it 4 s later) and then child B with other arguments: A's argv[0] keeps its address c07ffed0 but reads the tail of
+B's argument, argv[1..3] point at B's environment, argv[argc] is 0x42424242, and A dies with a user bus error; B dies at once with an empty
+command line. fork is intact.
+**Fix.** `hat_exec` now calls the ported `hat_unload` on the old as for [ostka, ostka + stksz) with flags 0 (clear the leaf PTEs, carry R/M
+into the pages, unlink their mapping entries, free emptied leaf tables; no page freed, nothing allocated) through a zeroed stand-in seg
+whose s_as is the old as, and moves nothing; the new as faults the pages in from the segment's anon map. Its flushmmu is a pflusha.
+**Measured** (emulation, A4000 LC060/Z3660, the released 1.1 disk with -67 installed by kbootset, one boot each): -67, vfork 3 of 3 changed,
+fork 2 of 2 intact, and after a vfork child's exec the parent can read 0x8005f000 and finds the child's argument string there (not after a
+fork, and gone once the child exits); six user bus errors, all from the two children. -67 with the fix (unix f300a8ce, the rest of the cut
+equal; per symbol only `hat_exec` and the build id differ): vfork 3 of 3 and fork 2 of 2 intact, nothing readable at the hole, 0 bus errors;
+a 200-round shell exec loop, nested shells, `ls -R`, every module, /dev/zz9000 and the kmem check as on -67.

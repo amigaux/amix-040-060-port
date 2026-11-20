@@ -1,5 +1,9 @@
 # hat_exec 040 — RE findings + fix plan (2026-07-07)
 
+> **Superseded (2026-11-20, ISSUE-125).** The no-op that followed this plan was wrong under vfork: there `relvm`
+> does not destroy the old address space (it is the parent's), so its stack-image PTEs stayed live. `src/hat_exec040.s`
+> now unloads them through `hat_unload`.
+
 RE/scoping of the `hat_exec` port (the last major unported HAT function), prompted by
 Codex's `docs/contracts/HAT-EXEC-AUDIT.md`. **This is a plan + finding doc, not implemented.**
 All claims below independently verified against `build/unix-040-dbg` disassembly.
