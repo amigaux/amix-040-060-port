@@ -10518,7 +10518,7 @@ evidence ISSUE-76 lacks:
   record showed 9841 `FROM_DEVICE` transfers, prepared and completed, with 0 mismatches and 0 errors.
 - A full install from that CD completed.
 
-## ⚠ DRIVER-LINE-5 (2026-10-03, RECORDED, AMENDED the same day — stale page constants, correct but narrow; context for DI-1): disk I/O above 4 KiB still goes out in 2 KiB pieces, on the raw path AND the block path
+## ⚠ DRIVER-LINE-5 (2026-10-03, RECORDED, AMENDED the same day — stale page constants, correct but narrow; context for DI-1; 2026-11-22: CHANGED to 4 KiB on `next` by `0aa2bcf`, verified in emulation, NOT YET ON HARDWARE): disk I/O above 4 KiB still goes out in 2 KiB pieces, on the raw path AND the block path
 
 **The fact.** The raw-device path for a SCSI disk is `/dev/rdsk` → `physio` → dd.c's `breakup` →
 `amiga_dma_pageio` (`amix-src` `amiga/alien/physdsk.c`). It bounces each transfer through a
@@ -10606,6 +10606,24 @@ what misplaces a request.
 - One request per `MAXXFER` (64 KiB) chunk, so an 8 KiB block-path write is a single pass through
   this table.
 - `z3660_pagecross_n` counts chunks that run past a page from their one `vtop`'d address.
+
+
+**2026-11-22: the three constants are 4096 on `next`** (`0aa2bcf`, `src/patch_pageio4k.py`, run and checked by
+`relink-040.sh`; `PAGEIO4K=0` builds them stock). On `68060-261120-68` the bytes were still the ones above
+(`amiga_dma_pageio` `.text 0xdbbe` and `0xdd58`, `buf_breakup` `0x3d21e`, each `pea 0x800`), which also settles the
+2026-10 metal count of about 4097 commands per 16 MiB: that cannot have been this raw path.
+- **The staging buffer is one frame.** `ngeteblk(4096)`'s data is `kmem_alloc(4096)` (`getfreeblk`: a free buffer of
+  that exact size, or `kmem_zalloc`), which `kmem_alloc` serves from the big pools; `kmem_allocbpool` takes 4 pages
+  from `sptalloc`, rounds to page boundaries and lists its blocks on the 4096 list at base + k*4096. Every raw piece
+  is staged at the buffer's start. `buf_breakup`'s later pieces start on a page (above), so 4096 ends on one.
+- **Measured** (emulation, A4000 LC060/Z3660, the 1.1.1 k46 disk with the a4091 probe module and a scratch on an
+  A4091 at id 5; two kernels from `next` at `0aa2bcf` on -68's recipe, differing per symbol only in the three bytes):
+  - commands per 16 MiB of raw I/O at bs 8K, 64K and 1M: 8192 of 2048 bytes with `PAGEIO4K=0`, 4096 of 4096
+    bytes with the change; every verify after a write clean (badreqs 0); a ufs file written, read back and verified
+    after a remount, clean; 2 KiB block-path commands in a 32 MiB file write 338-586 -> 2; five reboots each.
+  - throughput does not resolve in the emulator: raw 64K reads 11.7-17.6 MB/s stock against 14.0-18.9 MB/s with the
+    change (four runs each), a single raw 64K write 7.1 -> 10.0 MB/s, file reads and writes the same within the
+    spread. The cost per command on the hardware will decide it.
 
 ## ⚠ DRIVER-LINE-6 (2026-10-05, BUILT — host-proven, EMU-proven on nine cells, HW not run): the kernel roots on its compiled `rootdev`, so every family needed one kernel per target unit
 
