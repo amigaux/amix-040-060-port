@@ -1344,6 +1344,18 @@ else
 	echo "[*] DD_EOF=0 -- ddread/ddwrite stock, ISSUE-121 left in place (rollback control)"
 fi
 
+# DRIVER-LINE-5 (2026-11-22): the raw disk path (amiga_dma_pageio: its ngeteblk staging buffer and its piece) and
+# buf_breakup's later pieces still used the 030's 2048; on this 4 KiB page they become 4096, one page-aligned frame
+# (kmem_allocbpool lists 4096-byte blocks at page boundaries).  Halves the requests per raw byte and per block.
+# PAGEIO4K=0 leaves the three constants stock (the rollback control).
+PAGEIO4K="${PAGEIO4K:-1}"
+case "$PAGEIO4K" in
+1)	echo "[*] DRIVER-LINE-5: raw disk pieces and buf_breakup's pieces 2048 -> 4096 (amiga_dma_pageio, buf_breakup)"
+	run_step 1 python3 "$HERE/src/patch_pageio4k.py" "$OUT" ;;
+0)	echo "[*] PAGEIO4K=0 -- amiga_dma_pageio and buf_breakup keep 2048 (rollback control)" ;;
+*)	echo "[FAIL] PAGEIO4K='$PAGEIO4K': 1 (4096, the default) or 0 (stock 2048)"; exit 1 ;;
+esac
+
 if [ "$DIAG106" = 1 ]; then
 echo "[*] ISSUE-106: latch USP/u_ar0/u_comm at the fatal user-fault NOTICE"
 run_step 2 python3 "$HERE/src/patch_usptrap.py" "$OUT"
@@ -1631,6 +1643,10 @@ fi
 # HARD CHECK (2026-11-06, ISSUE-121): ddread and ddwrite still carry the end-of-slice test in the final image.
 if [ "$DD_EOF" = "1" ]; then
 	run_step 1 python3 "$HERE/src/patch_ddeof.py" --check "$OUT"
+fi
+# HARD CHECK (2026-11-22, DRIVER-LINE-5): the three disk constants are 4096 in the final image.
+if [ "$PAGEIO4K" = "1" ]; then
+	run_step 1 python3 "$HERE/src/patch_pageio4k.py" --check "$OUT"
 fi
 
 echo

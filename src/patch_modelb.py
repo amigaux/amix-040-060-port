@@ -720,9 +720,10 @@ P = [
  (0x5538a, b"\x02\x6e\xf8\x00\xff\xde", b"\x02\x6e\xf0\x00\xff\xde", "shmat:ISSUE-66 SHM_RND round-down -2048->-4096 (1/2)"),
  (0x553a0, b"\x02\x80\x00\x00\x07\xff", b"\x02\x80\x00\x00\x0f\xff", "shmat:ISSUE-66 PAGEOFFSET alignment check 2047->4095 (2/2)"),
 ]
-# pea-800 sites DELIBERATELY NOT flipped (triaged 2026-07-03): 0xdbbe/0xdd58/0x20c60/0x20c9c
+# pea-800 sites DELIBERATELY NOT flipped (triaged 2026-07-03): 0x20c60/0x20c9c
 # (ngeteblk/allocb buffer sizes -- STREAMS/block semantics, not page), 0xee3e/0xee90 (bbmem
-# kmem 2KB buffer), 0x3d21e (buf_breakup chunk min -- disk transfer, audit separately),
+# kmem 2KB buffer),  [0xdbbe/0xdd58 amiga_dma_pageio and 0x3d21e buf_breakup are the disk
+# transfer constants: flipped to 4096 since 2026-11-22 by src/patch_pageio4k.py, DRIVER-LINE-5],
 # 0x48b64 (mlsetup sptmap arena -- known latent, fix with the vm_swap/units pass),
 # 0x52238 (checkpage/pageout -- read before touching, pageout barely runs at 16MB),
 # 0x599be (main as_map 0x800 for icode/u -- works, p0/p1 layout risk), 0x5c1e2 (pathname
