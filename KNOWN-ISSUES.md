@@ -10518,7 +10518,7 @@ evidence ISSUE-76 lacks:
   record showed 9841 `FROM_DEVICE` transfers, prepared and completed, with 0 mismatches and 0 errors.
 - A full install from that CD completed.
 
-## ⚠ DRIVER-LINE-5 (2026-10-03, RECORDED, AMENDED the same day — stale page constants, correct but narrow; context for DI-1; 2026-11-22: CHANGED to 4 KiB on `next` by `0aa2bcf`, verified in emulation, NOT YET ON HARDWARE): disk I/O above 4 KiB still goes out in 2 KiB pieces, on the raw path AND the block path
+## ⚠ DRIVER-LINE-5 (2026-10-03, RECORDED, AMENDED the same day — stale page constants, correct but narrow; context for DI-1; 2026-11-22: CHANGED to 4 KiB on `next` by `0aa2bcf`, verified in emulation; 2026-11-23: verified on the A4000D, raw I/O about 20% faster): disk I/O above 4 KiB still goes out in 2 KiB pieces, on the raw path AND the block path
 
 **The fact.** The raw-device path for a SCSI disk is `/dev/rdsk` → `physio` → dd.c's `breakup` →
 `amiga_dma_pageio` (`amix-src` `amiga/alien/physdsk.c`). It bounces each transfer through a
@@ -10624,6 +10624,14 @@ what misplaces a request.
   - throughput does not resolve in the emulator: raw 64K reads 11.7-17.6 MB/s stock against 14.0-18.9 MB/s with the
     change (four runs each), a single raw 64K write 7.1 -> 10.0 MB/s, file reads and writes the same within the
     spread. The cost per command on the hardware will decide it.
+- **Measured on the hardware (2026-11-23)**: the A4000D (68060 on the Z3660), an A4092 with a ZuluSCSI scratch at id 2,
+  the 1.1 k46 root with the same two kernels and the a4091 probe module; 64 MiB per cell, kB/s stock -> 4 KiB:
+  - commands per 64 MiB of raw I/O at every bs: 32768 of 2048 bytes -> 16384 of 4096; every verify clean (badreqs 0);
+    five reboots each, a raw read after each clean.
+  - raw write 8K 1240 -> 1453, 64K 1343 -> 1586, 1M 1320 -> 1614; raw read 8K 1490 -> 1840, 64K 1725 -> 2093,
+    1M 1742 -> 2134; verify 64K 1100 -> 1249-1281; random 8K reads 1412 -> 1655.
+  - ufs (64K, a 32 MiB file): write 917 -> 948, read 1548 -> 1493, verify 2352 -> 2618, clean after a remount;
+    2 KiB block-path commands in the write 454 -> 2.  The file path moves 4 KiB pieces in both kernels.
 
 ## ⚠ DRIVER-LINE-6 (2026-10-05, BUILT — host-proven, EMU-proven on nine cells, HW not run): the kernel roots on its compiled `rootdev`, so every family needed one kernel per target unit
 
