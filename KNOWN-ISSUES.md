@@ -11642,6 +11642,10 @@ generation waits with it. (A test rig that types a login after its boot wait sup
 
 > **Ledger: FIXED for the next cut.** -56 to -67, 1.1's -66 and the 1.1.x cut -67 among them, keep the unlimited limits they were built with.
 
+**2026-11-23: in cut `68060-261123-69`** (`next`; `cuts/68060-261123-69`). Its `post-c.sh` runs `patch_rlimits.py --expect stock`
+on the shipped image and kernel/k30's `rlimits-check.py` against the package's "New in -69" sentence (`kern46m-new-in.txt`); in
+emulation a login shell on -69 has `ulimit -d` and `ulimit -v` 16384. The 1.1.x cut -68 keeps the unlimited table, as -67.
+
 **Defect.** Step 8.9 (`src/patch_rlimits.py`, since `eb22919`) was on unless `RLIMITS=0` was given, and no cut gave it. `rlimits[]` in -66
 (unix 35188463) and -67 (unix 454d5d65) has SDATLIM and SVMMLIM 0x7fffffff, SSTKLIM 0x01000000: a process gets unlimited data and address
 space by default. 1.1's release notes said a process gets 16 MiB of each unless it raises its soft limit.
