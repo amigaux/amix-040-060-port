@@ -1,0 +1,1 @@
+New in -69: the soft data and vmem limits are 16 MiB again, as in the stock kernel (kernels -56 to -68 raised them to unlimited); the hard limits stay unlimited, so `ulimit -d unlimited` and `ulimit -v unlimited` raise them, and xstart raises its own.
