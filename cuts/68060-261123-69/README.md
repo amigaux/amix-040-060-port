@@ -55,3 +55,8 @@ generation 4), then four boots of generation 4:
 - **A TCP loopback stall, as before.**  kernel-tests' scheck pair with 2048-byte socket buffers on both ends stalls
   (two runs of ten repetitions, each stopped after 900 s); a STREAMS pipe and AF_UNIX pass 10 of 10.  Nothing in this
   cut touches that path.
+
+## Proof (hardware)
+
+On the A4000D (68060, A4092 + Zulu scratch): three boots of -69 by kbootset; a login shell 16384/16384 KB, an xstart
+session on the Z3660 65536/131072 KB; raw and ufs write/verify 64 MiB pass at -68+PAGEIO4K's rates.
